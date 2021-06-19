@@ -387,10 +387,12 @@ static pt_entry_t *pmap_demote_l1(pmap_t pmap, pt_entry_t *l1, vm_offset_t va);
 static pt_entry_t *pmap_demote_l2_locked(pmap_t pmap, pt_entry_t *l2,
     vm_offset_t va, struct rwlock **lockp);
 static pt_entry_t *pmap_demote_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t va);
+static void pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va);
 static vm_page_t pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va,
     vm_page_t m, vm_prot_t prot, vm_page_t mpte, struct rwlock **lockp);
 static int pmap_enter_l2(pmap_t pmap, vm_offset_t va, pd_entry_t new_l2,
     u_int flags, vm_page_t m, struct rwlock **lockp);
+static pt_entry_t pmap_load_l3c(pt_entry_t *l3p);
 static int pmap_remove_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t sva,
     pd_entry_t l1e, struct spglist *free, struct rwlock **lockp);
 static int pmap_remove_l3(pmap_t pmap, pt_entry_t *l3, vm_offset_t sva,
@@ -1168,6 +1170,13 @@ SYSCTL_ULONG(_vm_pmap_l2, OID_AUTO, p_failures, CTLFLAG_RD,
 static u_long pmap_l2_promotions;
 SYSCTL_ULONG(_vm_pmap_l2, OID_AUTO, promotions, CTLFLAG_RD,
     &pmap_l2_promotions, 0, "2MB page promotions");
+
+static SYSCTL_NODE(_vm_pmap, OID_AUTO, l3c, CTLFLAG_RD | CTLFLAG_MPSAFE, 0,
+    "64KB page mapping counters");
+
+static u_long pmap_l3c_demotions;
+SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, demotions, CTLFLAG_RD,
+    &pmap_l3c_demotions, 0, "64KB page demotions");
 
 /*
  * Invalidate a single TLB entry.
@@ -2356,6 +2365,8 @@ reclaim_pv_chunk(pmap_t locked_pmap, struct rwlock **lockp)
 				tpte = pmap_load(pte);
 				if ((tpte & ATTR_SW_WIRED) != 0)
 					continue;
+				if ((tpte & ATTR_CONTIGUOUS) != 0)
+					pmap_demote_l3c(pmap, pte, va);
 				tpte = pmap_load_clear(pte);
 				m = PHYS_TO_VM_PAGE(tpte & ~ATTR_MASK);
 				if (pmap_pte_dirty(pmap, tpte))
@@ -2893,6 +2904,9 @@ pmap_remove_l3(pmap_t pmap, pt_entry_t *l3, vm_offset_t va,
 	vm_page_t m;
 
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
+	old_l3 = pmap_load(l3);
+	if ((old_l3 & ATTR_CONTIGUOUS) != 0)
+		pmap_demote_l3c(pmap, l3, va);
 	old_l3 = pmap_load_clear(l3);
 	pmap_invalidate_page(pmap, va);
 	if (old_l3 & ATTR_SW_WIRED)
@@ -2937,12 +2951,18 @@ pmap_remove_l3_range(pmap_t pmap, pd_entry_t l2e, vm_offset_t sva,
 	    NULL;
 	va = eva;
 	for (l3 = pmap_l2_to_l3(&l2e, sva); sva != eva; l3++, sva += L3_SIZE) {
-		if (!pmap_l3_valid(pmap_load(l3))) {
+		old_l3 = pmap_load(l3);
+		if (!pmap_l3_valid(old_l3)) {
 			if (va != eva) {
 				pmap_invalidate_range(pmap, va, sva);
 				va = eva;
 			}
 			continue;
+		} else if ((old_l3 & ATTR_CONTIGUOUS) != 0) {
+			/*
+			 * XXX Optimize whole page removal.
+			 */
+			pmap_demote_l3c(pmap, l3, sva);
 		}
 		old_l3 = pmap_load_clear(l3);
 		if ((old_l3 & ATTR_SW_WIRED) != 0)
@@ -3177,6 +3197,9 @@ retry:
 		tpde = pmap_load(pde);
 
 		pte = pmap_l2_to_l3(pde, pv->pv_va);
+		tpte = pmap_load(pte);
+		if ((tpte & ATTR_CONTIGUOUS) != 0)
+			pmap_demote_l3c(pmap, pte, pv->pv_va);
 		tpte = pmap_load_clear(pte);
 		if (tpte & ATTR_SW_WIRED)
 			pmap->pm_stats.wired_count--;
@@ -3349,6 +3372,17 @@ retry:
 					va = va_next;
 				}
 				continue;
+			} else if ((l3 & ATTR_CONTIGUOUS) != 0) {
+				/*
+				 * XXX Optimize whole page protection.
+				 */
+				pmap_demote_l3c(pmap, l3p, sva);
+
+				/*
+				 * The L3 entry's accessed bit may have
+				 * changed.
+				 */
+				l3 = pmap_load(l3p);
 			}
 
 			/*
@@ -3865,6 +3899,8 @@ havel3:
 		 * The physical page has changed.  Temporarily invalidate
 		 * the mapping.
 		 */
+		if ((orig_l3 & ATTR_CONTIGUOUS) != 0)
+			pmap_demote_l3c(pmap, l3, va);
 		orig_l3 = pmap_load_clear(l3);
 		KASSERT((orig_l3 & ~ATTR_MASK) == opa,
 		    ("pmap_enter: unexpected pa update for %#lx", va));
@@ -3951,6 +3987,8 @@ validate:
 		KASSERT(opa == pa, ("pmap_enter: invalid update"));
 		if ((orig_l3 & ~ATTR_AF) != (new_l3 & ~ATTR_AF)) {
 			/* same PA, different attributes */
+			if ((orig_l3 & ATTR_CONTIGUOUS) != 0)
+				pmap_demote_l3c(pmap, l3, va);
 			orig_l3 = pmap_load_store(l3, new_l3);
 			pmap_invalidate_page(pmap, va);
 			if ((orig_l3 & ATTR_SW_MANAGED) != 0 &&
@@ -4456,6 +4494,12 @@ pmap_unwire(pmap_t pmap, vm_offset_t sva, vm_offset_t eva)
 		    sva += L3_SIZE) {
 			if (pmap_load(l3) == 0)
 				continue;
+			if ((pmap_load(l3) & ATTR_CONTIGUOUS) != 0) {
+				/*
+				 * XXX Avoid demotion for whole page unwiring.
+				 */
+				pmap_demote_l3c(pmap, l3, sva);
+			}
 			if ((pmap_load(l3) & ATTR_SW_WIRED) == 0)
 				panic("pmap_unwire: l3 %#jx is missing "
 				    "ATTR_SW_WIRED", (uintmax_t)pmap_load(l3));
@@ -4611,10 +4655,14 @@ pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, vm_offset_t dst_addr, vm_size_t len,
 				/*
 				 * Clear the wired, modified, and accessed
 				 * (referenced) bits during the copy.
+				 * XXX Do not change the modified bit for 64KB
+				 * pages because writeable 64KB pages are
+				 * expected to be dirty.
 				 */
 				mask = ATTR_AF | ATTR_SW_WIRED;
 				nbits = 0;
-				if ((ptetemp & ATTR_SW_DBM) != 0)
+				if ((ptetemp & (ATTR_SW_DBM |
+				    ATTR_CONTIGUOUS)) == ATTR_SW_DBM)
 					nbits |= ATTR_S1_AP_RW_BIT;
 				pmap_store(dst_pte, (ptetemp & ~mask) | nbits);
 				pmap_resident_count_inc(dst_pmap, 1);
@@ -4944,6 +4992,8 @@ pmap_remove_pages(pmap_t pmap)
 
 /*
  * We cannot remove wired pages from a process' mapping at this time
+ * XXX For 64KB pages, all of the constituent PTEs should have the wired bit
+ * set, so we don't check for ATTR_CONTIGUOUS here.
  */
 				if (tpte & ATTR_SW_WIRED) {
 					allfree = 0;
@@ -4972,6 +5022,10 @@ pmap_remove_pages(pmap_t pmap)
 
 				/*
 				 * Update the vm_page_t clean/reference bits.
+				 * XXX We don't check for ATTR_CONTIGUOUS here
+				 * because writeable 64KB pages are expected
+				 * to be dirty, i.e., every constituent PTE
+				 * should be dirty.
 				 */
 				if (pmap_pte_dirty(pmap, tpte)) {
 					switch (lvl) {
@@ -5059,7 +5113,7 @@ pmap_page_test_mappings(vm_page_t m, boolean_t accessed, boolean_t modified)
 	struct rwlock *lock;
 	pv_entry_t pv;
 	struct md_page *pvh;
-	pt_entry_t *pte, mask, value;
+	pt_entry_t mask, *pte, tpte, value;
 	pmap_t pmap;
 	int lvl, md_gen, pvh_gen;
 	boolean_t rv;
@@ -5094,7 +5148,10 @@ restart:
 			mask |= ATTR_AF | ATTR_DESCR_MASK;
 			value |= ATTR_AF | L3_PAGE;
 		}
-		rv = (pmap_load(pte) & mask) == value;
+		tpte = pmap_load(pte);
+		if ((tpte & ATTR_CONTIGUOUS) != 0)
+			tpte = pmap_load_l3c(pte);
+		rv = (tpte & mask) == value;
 		PMAP_UNLOCK(pmap);
 		if (rv)
 			goto out;
@@ -5263,6 +5320,15 @@ retry:
 		pte = pmap_pte(pmap, pv->pv_va, &lvl);
 		oldpte = pmap_load(pte);
 		if ((oldpte & ATTR_SW_DBM) != 0) {
+			if ((oldpte & ATTR_CONTIGUOUS) != 0) {
+				pmap_demote_l3c(pmap, pte, pv->pv_va);
+
+				/*
+				 * The PTE's accessed bit may have changed.
+				 * XXX We assume that the dirty bit does not.
+				 */
+				oldpte = pmap_load(pte);
+			}
 			while (!atomic_fcmpset_64(pte, &oldpte,
 			    (oldpte | ATTR_S1_AP_RW_BIT) & ~ATTR_SW_DBM))
 				cpu_spinwait();
@@ -5421,8 +5487,16 @@ small_mappings:
 		tpte = pmap_load(pte);
 		if (pmap_pte_dirty(pmap, tpte))
 			vm_page_dirty(m);
-		if ((tpte & ATTR_AF) != 0) {
+		if ((tpte & ATTR_AF) != 0 || ((tpte & ATTR_CONTIGUOUS) != 0 &&
+		    ((tpte = pmap_load_l3c(pte)) & ATTR_AF) != 0)) {
 			if ((tpte & ATTR_SW_WIRED) == 0) {
+				if ((tpte & ATTR_CONTIGUOUS) != 0) {
+					/*
+					 * XXX Avoid demotion for every page,
+					 * like we do for 2MB pages.
+					 */
+					pmap_demote_l3c(pmap, pte, pv->pv_va);
+				}
 				pmap_clear_bits(pte, ATTR_AF);
 				pmap_invalidate_page(pmap, pv->pv_va);
 				cleared++;
@@ -5554,13 +5628,31 @@ pmap_advise(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, int advice)
 					m = PHYS_TO_VM_PAGE(oldl3 & ~ATTR_MASK);
 					vm_page_dirty(m);
 				}
+				if ((oldl3 & ATTR_CONTIGUOUS) != 0) {
+					/*
+					 * Unconditionally demote the 64KB
+					 * page because we do not allow
+					 * writeable, clean superpages.
+					 * XXX Destroy a 4KB mapping so that
+					 * we have a repromotion trigger?
+					 */
+					pmap_demote_l3c(pmap, l3, sva);
+				}
 				while (!atomic_fcmpset_long(l3, &oldl3,
 				    (oldl3 & ~ATTR_AF) |
 				    ATTR_S1_AP(ATTR_S1_AP_RO)))
 					cpu_spinwait();
-			} else if ((oldl3 & ATTR_AF) != 0)
+			} else if ((oldl3 & ATTR_AF) != 0 ||
+			    ((oldl3 & ATTR_CONTIGUOUS) != 0 &&
+			    ((oldl3 = pmap_load_l3c(l3)) & ATTR_AF) != 0)) {
+				if ((oldl3 & ATTR_CONTIGUOUS) != 0) {
+					/*
+					 * XXX Optimize whole page case?
+					 */
+					pmap_demote_l3c(pmap, l3, sva);
+				}
 				pmap_clear_bits(l3, ATTR_AF);
-			else
+			} else
 				goto maybe_invlrng;
 			if (va == va_next)
 				va = sva;
@@ -5654,7 +5746,13 @@ restart:
 		l2 = pmap_l2(pmap, pv->pv_va);
 		l3 = pmap_l2_to_l3(l2, pv->pv_va);
 		oldl3 = pmap_load(l3);
+		KASSERT((oldl3 & ATTR_CONTIGUOUS) == 0 ||
+		    (oldl3 & (ATTR_SW_DBM | ATTR_S1_AP_RW_BIT)) !=
+		    (ATTR_SW_DBM | ATTR_S1_AP(ATTR_S1_AP_RO)),
+		    ("writeable 64KB page not dirty"));
 		if ((oldl3 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) == ATTR_SW_DBM){
+			if ((oldl3 & ATTR_CONTIGUOUS) != 0)
+				pmap_demote_l3c(pmap, l3, pv->pv_va);
 			pmap_set_bits(l3, ATTR_S1_AP(ATTR_S1_AP_RO));
 			pmap_invalidate_page(pmap, pv->pv_va);
 		}
@@ -5948,6 +6046,10 @@ pmap_change_attr_locked(vm_offset_t va, vm_size_t size, int mode)
 			case 3:
 				/* Update the entry */
 				l3 = pmap_load(pte);
+				if ((l3 & ATTR_CONTIGUOUS) != 0) {
+					pmap_demote_l3c(kernel_pmap, pte,
+					    tmpva);
+				}
 				l3 &= ~ATTR_S1_IDX_MASK;
 				l3 |= ATTR_S1_IDX(mode);
 				if (mode == VM_MEMATTR_DEVICE)
@@ -6225,6 +6327,79 @@ pmap_demote_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t va)
 	if (lock != NULL)
 		rw_wunlock(lock);
 	return (l3);
+}
+
+#define	NCONTIGUOUS	16
+
+/*
+ * Demote a 64KB page mapping to 16 4KB page mappings.
+ * XXX
+ */
+static void
+pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
+{
+	pt_entry_t *end_l3, *l3, mask, nbits, old_l3, *start_l3;
+	register_t intr;
+
+	PMAP_ASSERT_STAGE1(pmap);
+	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
+	start_l3 = (pt_entry_t *)((uintptr_t)l3p & ~((NCONTIGUOUS *
+	    sizeof(pt_entry_t)) - 1));
+	end_l3 = start_l3 + NCONTIGUOUS;
+	mask = 0;
+	nbits = ATTR_DESCR_VALID;
+	intr = intr_disable();
+	/* Break the mappings. */
+	for (l3 = start_l3; l3 < end_l3; l3++) {
+		/*
+		 * Clear the mapping's contiguous and valid bits, but leave
+		 * the rest of the entry unchanged, so that a lockless,
+		 * concurrent pmap_kextract() can still lookup the physical
+		 * address.
+		 */
+		old_l3 = pmap_load(l3);
+		KASSERT((old_l3 & ATTR_CONTIGUOUS) != 0,
+		    ("missing ATTR_CONTIGUOUS"));
+		KASSERT((old_l3 & (ATTR_SW_DBM | ATTR_S1_AP_RW_BIT)) ==
+		    (ATTR_SW_DBM | ATTR_S1_AP(ATTR_S1_AP_RO)),
+		    ("writeable 64KB page not dirty"));
+		while (!atomic_fcmpset_64(l3, &old_l3, old_l3 &
+		    ~(ATTR_CONTIGUOUS | ATTR_DESCR_VALID)))
+			cpu_spinwait();
+
+		/*
+		 * Hardware updates to the accessed and dirty bits only apply
+		 * to a single L3 entry, so ... XXX
+		 */
+		if ((old_l3 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
+		    (ATTR_S1_AP(ATTR_S1_AP_RW) | ATTR_SW_DBM))
+			mask = ATTR_S1_AP_RW_BIT;
+		nbits |= old_l3 & ATTR_AF;
+	}
+	if ((nbits & ATTR_AF) != 0) {
+		pmap_invalidate_range(pmap, va & ~PAGE_MASK_64K, (va +
+		    PAGE_SIZE_64K) & ~PAGE_MASK_64K);
+	}
+	/* Remake the mappings, updating the accessed and dirty bits. */
+	for (l3 = start_l3; l3 < end_l3; l3++) {
+		old_l3 = pmap_load(l3);
+		while (!atomic_fcmpset_64(l3, &old_l3, (old_l3 & ~mask) |
+		    nbits))
+			cpu_spinwait();
+	}
+	dsb(ishst);
+	intr_restore(intr);
+	atomic_add_long(&pmap_l3c_demotions, 1);
+}
+
+/*
+ * XXX
+ */
+static pt_entry_t
+pmap_load_l3c(pt_entry_t *l3p)
+{
+
+	return (pmap_load(l3p));
 }
 
 /*
