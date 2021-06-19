@@ -6433,6 +6433,79 @@ pmap_demote_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t va)
 	return (l3);
 }
 
+#define	NCONTIGUOUS	16
+
+/*
+ * Demote a 64KB page mapping to 16 4KB page mappings.
+ * XXX
+ */
+static void
+pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
+{
+	pt_entry_t *end_l3, *l3, mask, nbits, old_l3, *start_l3;
+	register_t intr;
+
+	PMAP_ASSERT_STAGE1(pmap);
+	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
+	start_l3 = (pt_entry_t *)((uintptr_t)l3p & ~((NCONTIGUOUS *
+	    sizeof(pt_entry_t)) - 1));
+	end_l3 = start_l3 + NCONTIGUOUS;
+	mask = 0;
+	nbits = ATTR_DESCR_VALID;
+	intr = intr_disable();
+	/* Break the mappings. */
+	for (l3 = start_l3; l3 < end_l3; l3++) {
+		/*
+		 * Clear the mapping's contiguous and valid bits, but leave
+		 * the rest of the entry unchanged, so that a lockless,
+		 * concurrent pmap_kextract() can still lookup the physical
+		 * address.
+		 */
+		old_l3 = pmap_load(l3);
+		KASSERT((old_l3 & ATTR_CONTIGUOUS) != 0,
+		    ("missing ATTR_CONTIGUOUS"));
+		KASSERT((old_l3 & (ATTR_SW_DBM | ATTR_S1_AP_RW_BIT)) ==
+		    (ATTR_SW_DBM | ATTR_S1_AP(ATTR_S1_AP_RO)),
+		    ("writeable 64KB page not dirty"));
+		while (!atomic_fcmpset_64(l3, &old_l3, old_l3 &
+		    ~(ATTR_CONTIGUOUS | ATTR_DESCR_VALID)))
+			cpu_spinwait();
+
+		/*
+		 * Hardware updates to the accessed and dirty bits only apply
+		 * to a single L3 entry, so ... XXX
+		 */
+		if ((old_l3 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
+		    (ATTR_S1_AP(ATTR_S1_AP_RW) | ATTR_SW_DBM))
+			mask = ATTR_S1_AP_RW_BIT;
+		nbits |= old_l3 & ATTR_AF;
+	}
+	if ((nbits & ATTR_AF) != 0) {
+		pmap_invalidate_range(pmap, va & ~PAGE_MASK_64K, (va +
+		    PAGE_SIZE_64K) & ~PAGE_MASK_64K);
+	}
+	/* Remake the mappings, updating the accessed and dirty bits. */
+	for (l3 = start_l3; l3 < end_l3; l3++) {
+		old_l3 = pmap_load(l3);
+		while (!atomic_fcmpset_64(l3, &old_l3, (old_l3 & ~mask) |
+		    nbits))
+			cpu_spinwait();
+	}
+	dsb(ishst);
+	intr_restore(intr);
+	atomic_add_long(&pmap_l3c_demotions, 1);
+}
+
+/*
+ * XXX
+ */
+static pt_entry_t
+pmap_load_l3c(pt_entry_t *l3p)
+{
+
+	return (pmap_load(l3p));
+}
+
 /*
  * Demote a 64KB page mapping to 16 4KB page mappings.
  * XXX
