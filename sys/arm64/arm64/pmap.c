@@ -6433,8 +6433,6 @@ pmap_demote_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t va)
 	return (l3);
 }
 
-#define	NCONTIGUOUS	16
-
 /*
  * Demote a 64KB page mapping to 16 4KB page mappings.
  * XXX
@@ -6503,7 +6501,26 @@ static pt_entry_t
 pmap_load_l3c(pt_entry_t *l3p)
 {
 
-	return (pmap_load(l3p));
+	pt_entry_t curr_l3, *end_l3, *l3, mask, nbits, *start_l3;
+
+	start_l3 = (pt_entry_t *)((uintptr_t)l3p & ~((NCONTIGUOUS *
+	    sizeof(pt_entry_t)) - 1));
+	end_l3 = start_l3 + NCONTIGUOUS;
+	mask = 0;
+	nbits = 0;
+
+	/* Iterate over each mapping in the superpage. */
+	for (l3 = start_l3; l3 < end_l3; l3++) {
+		curr_l3 = pmap_load(l3);
+		/* Update mask if the current page has its dirty bit set. */
+		if ((curr_l3 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
+		    (ATTR_S1_AP(ATTR_S1_AP_RW) | ATTR_SW_DBM))
+			mask = ATTR_S1_AP_RW_BIT;
+		/* Update nbits if the accessed bit is set. */
+		nbits |= curr_l3 & ATTR_AF;
+	}
+
+	return ((pmap_load(l3p) & ~mask) | nbits);
 }
 
 /*
