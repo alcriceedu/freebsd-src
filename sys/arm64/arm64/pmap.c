@@ -399,6 +399,9 @@ static int pmap_remove_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t sva,
     pd_entry_t l1e, struct spglist *free, struct rwlock **lockp);
 static int pmap_remove_l3(pmap_t pmap, pt_entry_t *l3, vm_offset_t sva,
     pd_entry_t l2e, struct spglist *free, struct rwlock **lockp);
+static int pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
+    vm_offset_t eva, vm_offset_t *vap, pd_entry_t l2e, struct spglist *free,
+    struct rwlock **lockp);
 static void pmap_reset_asid_set(pmap_t pmap);
 static boolean_t pmap_try_insert_pv_entry(pmap_t pmap, vm_offset_t va,
     vm_page_t m, struct rwlock **lockp);
@@ -2933,6 +2936,87 @@ pmap_remove_l3(pmap_t pmap, pt_entry_t *l3, vm_offset_t va,
 }
 
 /*
+ * pmap_remove_l3c: Do the things to unmap a level 3 contiguous superpage.
+ */
+static int
+pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
+    vm_offset_t eva, vm_offset_t *vap, pd_entry_t l2e, struct spglist *free,
+    struct rwlock **lockp)
+{
+	int unuse_ret;
+	pt_entry_t *current_l3, *end_l3, mask, nbits, old_first_l3, old_l3;
+	vm_page_t m;
+	struct md_page *pvh;
+	struct rwlock *new_lock;
+
+	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
+	KASSERT(((uintptr_t)start_l3 & (NCONTIGUOUS * sizeof(pt_entry_t) - 1))
+	    == 0, ("pmap_remove_l3c: start_l3 is not aligned"));
+
+	end_l3 = start_l3 + NCONTIGUOUS;
+	old_first_l3 = pmap_load(start_l3);
+	nbits = 0;
+
+	for (current_l3 = start_l3; current_l3 < end_l3; current_l3++) {
+		old_l3 = pmap_load_clear(current_l3);
+		/*
+                 * Hardware updates to the accessed and dirty bits only apply
+                 * to a single L3 entry, so ... XXX
+                 */
+                if ((old_l3 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
+                    (ATTR_S1_AP(ATTR_S1_AP_RW) | ATTR_SW_DBM))
+                        mask = ATTR_S1_AP_RW_BIT;
+                nbits |= old_l3 & ATTR_AF;
+	}
+
+	old_first_l3 = (old_first_l3 & ~mask) | nbits;
+	unuse_ret = 0;
+
+	if (old_first_l3 & ATTR_SW_WIRED)
+                pmap->pm_stats.wired_count -= NCONTIGUOUS;
+        pmap_resident_count_dec(pmap, NCONTIGUOUS);
+	if (old_first_l3 & ATTR_SW_MANAGED) {
+		m = PHYS_TO_VM_PAGE(old_first_l3 & ~ATTR_MASK);
+		new_lock = PHYS_TO_PV_LIST_LOCK(VM_PAGE_TO_PHYS(m));
+                if (new_lock != *lockp) {
+                        if (*lockp != NULL) {
+                                /*
+                                 * Pending TLB invalidations must be
+                                 * performed before the PV list lock is
+                                 * released.  Otherwise, a concurrent
+                                 * pmap_remove_all() on a physical page
+                                 * could return while a stale TLB entry
+                                 * still provides access to that page.
+                                 */
+                                if (*vap != eva) {
+                                        pmap_invalidate_range(pmap, *vap, sva);
+                                        *vap = eva;
+                                }
+                                rw_wunlock(*lockp);
+                        }
+                        *lockp = new_lock;
+                        rw_wlock(*lockp);
+                }
+                pvh = pa_to_pvh(old_first_l3 & ~ATTR_MASK);
+                eva = sva + NCONTIGUOUS * L3_SIZE;
+                for (*vap = sva; *vap < eva; *vap += PAGE_SIZE, m++) {
+                        if (pmap_pte_dirty(pmap, old_first_l3))
+                                vm_page_dirty(m);
+                        if (old_first_l3 & ATTR_AF)
+                                vm_page_aflag_set(m, PGA_REFERENCED);
+			pmap_pvh_free(&m->md, pmap, *vap);
+                        if (TAILQ_EMPTY(&m->md.pv_list) &&
+                            TAILQ_EMPTY(&pvh->pv_list))
+                                vm_page_aflag_clear(m, PGA_WRITEABLE);
+			unuse_ret = pmap_unuse_pt(pmap, *vap, l2e, free);
+                }
+        }
+
+        return (unuse_ret);
+
+}
+
+/*
  * Remove the specified range of addresses from the L3 page table that is
  * identified by the given L2 entry.
  */
@@ -2965,9 +3049,10 @@ pmap_remove_l3_range(pmap_t pmap, pd_entry_t l2e, vm_offset_t sva,
 			 * XXX Optimize whole page removal.
 			 */
 			if (((sva & (NCONTIGUOUS * L3_SIZE - 1)) == 0) &&
-			    (sva + NCONTIGUOUS * L3_SIZE < eva)) {
-				/* Remove superpage. */
-				sva += NCONTIGUOUS * L3_SIZE;
+			    (sva + NCONTIGUOUS * L3_SIZE <= eva)) {
+				pmap_remove_l3c(pmap, l3, sva, eva, &va, l2e,
+				    free, lockp);
+				sva += (NCONTIGUOUS - 1) * L3_SIZE;
 			} else {
 				pmap_demote_l3c(pmap, l3, sva);
 			}
