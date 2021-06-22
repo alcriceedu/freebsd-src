@@ -2977,6 +2977,7 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
                 pmap->pm_stats.wired_count -= NCONTIGUOUS;
         pmap_resident_count_dec(pmap, NCONTIGUOUS);
 	if (old_first_l3 & ATTR_SW_MANAGED) {
+		m = PHYS_TO_VM_PAGE(old_first_l3 & ~ATTR_MASK);
 		new_lock = PHYS_TO_PV_LIST_LOCK(old_first_l3 & ~ATTR_MASK);
                 if (new_lock != *lockp) {
                         if (*lockp != NULL) {
