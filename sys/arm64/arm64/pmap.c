@@ -2981,7 +2981,7 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
         pmap_resident_count_dec(pmap, NCONTIGUOUS);
 	if (old_first_l3 & ATTR_SW_MANAGED) {
 		m = PHYS_TO_VM_PAGE(old_first_l3 & ~ATTR_MASK);
-		new_lock = PHYS_TO_PV_LIST_LOCK(VM_PAGE_TO_PHYS(m));
+		new_lock = PHYS_TO_PV_LIST_LOCK(old_first_l3 & ~ATTR_MASK);
                 if (new_lock != *lockp) {
                         if (*lockp != NULL) {
                                 /*
@@ -3054,9 +3054,15 @@ pmap_remove_l3_range(pmap_t pmap, pd_entry_t l2e, vm_offset_t sva,
 			 */
 			if (((sva & (NCONTIGUOUS * L3_SIZE - 1)) == 0) &&
 			    (sva + NCONTIGUOUS * L3_SIZE <= eva)) {
-				pmap_remove_l3c(pmap, l3, sva, eva, &va, l2e,
-				    free, lockp);
-				sva += (NCONTIGUOUS - 1) * L3_SIZE;
+				if (pmap_remove_l3c(pmap, l3, sva, eva, &va,
+				    l2e, free, lockp)) {
+					sva += (NCONTIGUOUS - 1) * L3_SIZE;
+					break; /* L3 table was unmapped. */
+				} else {
+					l3 += NCONTIGUOUS - 1;
+					sva += (NCONTIGUOUS - 1) * L3_SIZE;
+					continue;
+				}
 			} else {
 				pmap_demote_l3c(pmap, l3, sva);
 			}
