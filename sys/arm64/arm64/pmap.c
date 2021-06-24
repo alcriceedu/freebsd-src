@@ -2947,9 +2947,9 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
     vm_offset_t eva, vm_offset_t *vap, pd_entry_t l2e, struct spglist *free,
     struct rwlock **lockp)
 {
-	int unuse_ret;
+	int unwire_ret;
 	pt_entry_t *current_l3, *end_l3, mask, nbits, old_first_l3, old_l3;
-	vm_page_t m;
+	vm_page_t l3pg, m;
 	struct md_page *pvh;
 	struct rwlock *new_lock;
 
@@ -2958,10 +2958,11 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
 	    == 0, ("pmap_remove_l3c: start_l3 is not aligned"));
 
 	end_l3 = start_l3 + NCONTIGUOUS;
-	old_first_l3 = pmap_load(start_l3);
+	old_first_l3 = pmap_load_clear(start_l3);
+	mask = 0;
 	nbits = 0;
 
-	for (current_l3 = start_l3; current_l3 < end_l3; current_l3++) {
+	for (current_l3 = start_l3 + 1; current_l3 < end_l3; current_l3++) {
 		old_l3 = pmap_load_clear(current_l3);
 		/*
                  * Hardware updates to the accessed and dirty bits only apply
@@ -2974,13 +2975,12 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
 	}
 
 	old_first_l3 = (old_first_l3 & ~mask) | nbits;
-	unuse_ret = 0;
+	unwire_ret = 0;
 
 	if (old_first_l3 & ATTR_SW_WIRED)
                 pmap->pm_stats.wired_count -= NCONTIGUOUS;
         pmap_resident_count_dec(pmap, NCONTIGUOUS);
 	if (old_first_l3 & ATTR_SW_MANAGED) {
-		m = PHYS_TO_VM_PAGE(old_first_l3 & ~ATTR_MASK);
 		new_lock = PHYS_TO_PV_LIST_LOCK(old_first_l3 & ~ATTR_MASK);
                 if (new_lock != *lockp) {
                         if (*lockp != NULL) {
@@ -3001,8 +3001,11 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
                         *lockp = new_lock;
                         rw_wlock(*lockp);
                 }
-                pvh = pa_to_pvh(old_first_l3 & ~ATTR_MASK);
+                m = PHYS_TO_VM_PAGE(old_first_l3 & ~ATTR_MASK);
+                pvh = page_to_pvh(m);
                 eva = sva + NCONTIGUOUS * L3_SIZE;
+                l3pg = sva < VM_MAXUSER_ADDRESS ? PHYS_TO_VM_PAGE(l2e &
+                    ~ATTR_MASK) : NULL;
                 for (*vap = sva; *vap < eva; *vap += PAGE_SIZE, m++) {
                         if (pmap_pte_dirty(pmap, old_first_l3))
                                 vm_page_dirty(m);
@@ -3012,11 +3015,13 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
                         if (TAILQ_EMPTY(&m->md.pv_list) &&
                             TAILQ_EMPTY(&pvh->pv_list))
                                 vm_page_aflag_clear(m, PGA_WRITEABLE);
-			unuse_ret = pmap_unuse_pt(pmap, *vap, l2e, free);
+                        if (l3pg != NULL) {
+				unwire_ret = pmap_unwire_l3(pmap, *vap, l3pg, free);
+			}
                 }
         }
 
-        return (unuse_ret);
+        return (unwire_ret);
 
 }
 
@@ -3056,7 +3061,7 @@ pmap_remove_l3_range(pmap_t pmap, pd_entry_t l2e, vm_offset_t sva,
 			    (sva + NCONTIGUOUS * L3_SIZE <= eva)) {
 				if (pmap_remove_l3c(pmap, l3, sva, eva, &va,
 				    l2e, free, lockp)) {
-					sva += (NCONTIGUOUS - 1) * L3_SIZE;
+					sva += NCONTIGUOUS * L3_SIZE;
 					break; /* L3 table was unmapped. */
 				} else {
 					l3 += NCONTIGUOUS - 1;
