@@ -162,8 +162,6 @@ __FBSDID("$FreeBSD$");
 #define	NUL1E		(NUL0E * NL1PG)
 #define	NUL2E		(NUL1E * NL2PG)
 
-#define NCONTIGUOUS     16
-
 #if !defined(DIAGNOSTIC)
 #ifdef __GNUC_GNU_INLINE__
 #define PMAP_INLINE	__attribute__((__gnu_inline__)) inline
@@ -2950,10 +2948,10 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
 	struct rwlock *new_lock;
 
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
-	KASSERT(((uintptr_t)start_l3 & (NCONTIGUOUS * sizeof(pt_entry_t) - 1))
+	KASSERT(((uintptr_t)start_l3 & (L3C_ENTRIES * sizeof(pt_entry_t) - 1))
 	    == 0, ("pmap_remove_l3c: start_l3 is not aligned"));
 
-	end_l3 = start_l3 + NCONTIGUOUS;
+	end_l3 = start_l3 + L3C_ENTRIES;
 	old_first_l3 = pmap_load_clear(start_l3);
 	mask = 0;
 	nbits = 0;
@@ -2974,8 +2972,8 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
 	unwire_ret = 0;
 
 	if (old_first_l3 & ATTR_SW_WIRED)
-                pmap->pm_stats.wired_count -= NCONTIGUOUS;
-        pmap_resident_count_dec(pmap, NCONTIGUOUS);
+		pmap->pm_stats.wired_count -= L3C_ENTRIES;
+	pmap_resident_count_dec(pmap, L3C_ENTRIES);
 	if (old_first_l3 & ATTR_SW_MANAGED) {
 		new_lock = PHYS_TO_PV_LIST_LOCK(old_first_l3 & ~ATTR_MASK);
                 if (new_lock != *lockp) {
@@ -2999,7 +2997,7 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
                 }
                 m = PHYS_TO_VM_PAGE(old_first_l3 & ~ATTR_MASK);
                 pvh = page_to_pvh(m);
-                for (mt = m; mt < &m[NCONTIGUOUS]; mt++, sva += PAGE_SIZE) {
+                for (mt = m; mt < &m[L3C_ENTRIES]; mt++, sva += PAGE_SIZE) {
 			if (pmap_pte_dirty(pmap, old_first_l3))
                                 vm_page_dirty(mt);
                         if (old_first_l3 & ATTR_AF)
@@ -3050,15 +3048,15 @@ pmap_remove_l3_range(pmap_t pmap, pd_entry_t l2e, vm_offset_t sva,
 			/*
 			 * XXX Optimize whole page removal.
 			 */
-			if (((sva & (NCONTIGUOUS * L3_SIZE - 1)) == 0) &&
-			    (sva + NCONTIGUOUS * L3_SIZE <= eva)) {
+			if (((sva & (L3C_ENTRIES * L3_SIZE - 1)) == 0) &&
+			    (sva + L3C_ENTRIES * L3_SIZE <= eva)) {
 				if (pmap_remove_l3c(pmap, l3, sva, eva, &va,
 				    l3pg, free, lockp)) {
-					sva += NCONTIGUOUS * L3_SIZE;
+					sva += L3C_ENTRIES * L3_SIZE;
 					break; /* L3 table was unmapped. */
 				} else {
-					l3 += NCONTIGUOUS - 1;
-					sva += (NCONTIGUOUS - 1) * L3_SIZE;
+					l3 += L3C_ENTRIES - 1;
+					sva += (L3C_ENTRIES - 1) * L3_SIZE;
 					continue;
 				}
 			} else {
@@ -3390,12 +3388,12 @@ pmap_protect_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
 
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
 	PMAP_ASSERT_STAGE1(pmap);
-	KASSERT(((uintptr_t)start_l3 & (NCONTIGUOUS * sizeof(pt_entry_t) - 1))
+	KASSERT(((uintptr_t)start_l3 & (L3C_ENTRIES * sizeof(pt_entry_t) - 1))
 	    == 0, ("pmap_remove_l3c: start_l3 is not aligned"));
 
 	dirty = false;
 
-	for (l3p = start_l3; l3p < start_l3 + NCONTIGUOUS; l3p++, sva +=
+	for (l3p = start_l3; l3p < start_l3 + L3C_ENTRIES; l3p++, sva +=
 	    L3_SIZE) {
 		l3 = pmap_load(l3p);
 retry:
@@ -3432,7 +3430,7 @@ retry:
 	    (nbits & ATTR_S1_AP(ATTR_S1_AP_RO)) != 0 &&
 	    dirty) {
 		m = PHYS_TO_VM_PAGE(pmap_load(start_l3) & ~ATTR_MASK);
-		for (mt = m; mt < m + NCONTIGUOUS; mt++) {
+		for (mt = m; mt < m + L3C_ENTRIES; mt++) {
 			vm_page_dirty(m);
 		}
 	}
@@ -3542,12 +3540,12 @@ retry:
 				/*
 				 * XXX Optimize whole page protection.
 				 */
-				if (((sva & (NCONTIGUOUS * L3_SIZE - 1)) == 0) &&
-				    (sva + NCONTIGUOUS * L3_SIZE <= eva)) {
+				if (((sva & (L3C_ENTRIES * L3_SIZE - 1)) == 0) &&
+				    (sva + L3C_ENTRIES * L3_SIZE <= eva)) {
 					pmap_protect_l3c(pmap, l3p, sva, &va,
 					    va_next, mask, nbits);
-					l3p += NCONTIGUOUS - 1;
-					sva += (NCONTIGUOUS - 1) * L3_SIZE;
+					l3p += L3C_ENTRIES - 1;
+					sva += (L3C_ENTRIES - 1) * L3_SIZE;
 					continue;
 				} else {
 					pmap_demote_l3c(pmap, l3p, sva);
@@ -6519,9 +6517,9 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 
 	PMAP_ASSERT_STAGE1(pmap);
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
-	start_l3 = (pt_entry_t *)((uintptr_t)l3p & ~((NCONTIGUOUS *
+	start_l3 = (pt_entry_t *)((uintptr_t)l3p & ~((L3C_ENTRIES *
 	    sizeof(pt_entry_t)) - 1));
-	end_l3 = start_l3 + NCONTIGUOUS;
+	end_l3 = start_l3 + L3C_ENTRIES;
 	mask = 0;
 	nbits = ATTR_DESCR_VALID;
 	intr = intr_disable();
@@ -6577,9 +6575,9 @@ pmap_load_l3c(pt_entry_t *l3p)
 
 	pt_entry_t curr_l3, *end_l3, *l3, mask, nbits, *start_l3;
 
-	start_l3 = (pt_entry_t *)((uintptr_t)l3p & ~((NCONTIGUOUS *
+	start_l3 = (pt_entry_t *)((uintptr_t)l3p & ~((L3C_ENTRIES *
 	    sizeof(pt_entry_t)) - 1));
-	end_l3 = start_l3 + NCONTIGUOUS;
+	end_l3 = start_l3 + L3C_ENTRIES;
 	mask = 0;
 	nbits = 0;
 
