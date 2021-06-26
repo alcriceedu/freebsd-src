@@ -3388,6 +3388,7 @@ pmap_protect_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
 {
 	bool dirty;
 	pt_entry_t l3, *l3p;
+	vm_page_t m, mt;
 
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
 	PMAP_ASSERT_STAGE1(pmap);
@@ -3432,9 +3433,9 @@ retry:
 	if ((l3 & ATTR_SW_MANAGED) != 0 &&
 	    (nbits & ATTR_S1_AP(ATTR_S1_AP_RO)) != 0 &&
 	    dirty) {
-		for (l3p = start_l3; l3p < start_l3 + NCONTIGUOUS; l3p++) {
-			l3 = pmap_load(l3p);
-			vm_page_dirty(PHYS_TO_VM_PAGE(l3 & ~ATTR_MASK));
+		m = PHYS_TO_VM_PAGE(pmap_load(start_l3) & ~ATTR_MASK);
+		for (mt = m; mt < m + NCONTIGUOUS; mt++) {
+			vm_page_dirty(m);
 		}
 	}
 
