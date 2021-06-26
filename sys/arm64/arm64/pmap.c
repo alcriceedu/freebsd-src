@@ -400,7 +400,7 @@ static int pmap_remove_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t sva,
 static int pmap_remove_l3(pmap_t pmap, pt_entry_t *l3, vm_offset_t sva,
     pd_entry_t l2e, struct spglist *free, struct rwlock **lockp);
 static int pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
-    vm_offset_t eva, vm_offset_t *vap, pd_entry_t l2e, struct spglist *free,
+    vm_offset_t eva, vm_offset_t *vap, vm_page_t l3pg, struct spglist *free,
     struct rwlock **lockp);
 static void pmap_reset_asid_set(pmap_t pmap);
 static boolean_t pmap_try_insert_pv_entry(pmap_t pmap, vm_offset_t va,
@@ -2942,12 +2942,12 @@ pmap_remove_l3(pmap_t pmap, pt_entry_t *l3, vm_offset_t va,
  */
 static int
 pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
-    vm_offset_t eva, vm_offset_t *vap, pd_entry_t l2e, struct spglist *free,
+    vm_offset_t eva, vm_offset_t *vap, vm_page_t l3pg, struct spglist *free,
     struct rwlock **lockp)
 {
 	int unwire_ret;
 	pt_entry_t *current_l3, *end_l3, mask, nbits, old_first_l3, old_l3;
-	vm_page_t l3pg, m;
+	vm_page_t m, mt;
 	struct md_page *pvh;
 	struct rwlock *new_lock;
 
@@ -3001,21 +3001,18 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
                 }
                 m = PHYS_TO_VM_PAGE(old_first_l3 & ~ATTR_MASK);
                 pvh = page_to_pvh(m);
-                eva = sva + NCONTIGUOUS * L3_SIZE;
-                l3pg = sva < VM_MAXUSER_ADDRESS ? PHYS_TO_VM_PAGE(l2e &
-                    ~ATTR_MASK) : NULL;
-                for (*vap = sva; *vap < eva; *vap += PAGE_SIZE, m++) {
-                        if (pmap_pte_dirty(pmap, old_first_l3))
-                                vm_page_dirty(m);
+                for (mt = m; mt < &m[NCONTIGUOUS]; mt++, sva += PAGE_SIZE) {
+			if (pmap_pte_dirty(pmap, old_first_l3))
+                                vm_page_dirty(mt);
                         if (old_first_l3 & ATTR_AF)
-                                vm_page_aflag_set(m, PGA_REFERENCED);
-			pmap_pvh_free(&m->md, pmap, *vap);
-                        if (TAILQ_EMPTY(&m->md.pv_list) &&
+                                vm_page_aflag_set(mt, PGA_REFERENCED);
+                        pmap_pvh_free(&mt->md, pmap, sva);
+                        if (TAILQ_EMPTY(&mt->md.pv_list) &&
                             TAILQ_EMPTY(&pvh->pv_list))
-                                vm_page_aflag_clear(m, PGA_WRITEABLE);
+                                vm_page_aflag_clear(mt, PGA_WRITEABLE);
                         if (l3pg != NULL) {
-				unwire_ret = pmap_unwire_l3(pmap, *vap, l3pg, free);
-			}
+                                unwire_ret = pmap_unwire_l3(pmap, sva, l3pg, free);
+                        }
                 }
         }
 
@@ -3058,7 +3055,7 @@ pmap_remove_l3_range(pmap_t pmap, pd_entry_t l2e, vm_offset_t sva,
 			if (((sva & (NCONTIGUOUS * L3_SIZE - 1)) == 0) &&
 			    (sva + NCONTIGUOUS * L3_SIZE <= eva)) {
 				if (pmap_remove_l3c(pmap, l3, sva, eva, &va,
-				    l2e, free, lockp)) {
+				    l3pg, free, lockp)) {
 					sva += NCONTIGUOUS * L3_SIZE;
 					break; /* L3 table was unmapped. */
 				} else {
@@ -3383,6 +3380,68 @@ retry:
 }
 
 /*
+ * pmap_protect_l3c: do the things to protect a 64KB page in a pmap
+ */
+static void
+pmap_protect_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
+    vm_offset_t *vap, vm_offset_t va_next, pt_entry_t mask, pt_entry_t nbits)
+{
+	bool dirty;
+	pt_entry_t l3, *l3p;
+	vm_page_t m, mt;
+
+	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
+	PMAP_ASSERT_STAGE1(pmap);
+	KASSERT(((uintptr_t)start_l3 & (NCONTIGUOUS * sizeof(pt_entry_t) - 1))
+	    == 0, ("pmap_remove_l3c: start_l3 is not aligned"));
+
+	dirty = false;
+
+	for (l3p = start_l3; l3p < start_l3 + NCONTIGUOUS; l3p++, sva +=
+	    L3_SIZE) {
+		l3 = pmap_load(l3p);
+retry:
+		/*
+		 * Go to the next L3 entry if the current one is
+		 * invalid or already has the desired access
+		 * restrictions in place.  (The latter case occurs
+		 * frequently.  For example, in a "buildworld"
+		 * workload, almost 1 out of 4 L3 entries already
+		 * have the desired restrictions.)
+		 */
+		if (!pmap_l3_valid(l3) || (l3 & mask) == nbits) {
+			if (*vap != va_next) {
+				pmap_invalidate_range(pmap, *vap, sva);
+				*vap = va_next;
+			}
+			continue;
+		}
+
+		if ((l3 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
+		    (ATTR_S1_AP(ATTR_S1_AP_RW) | ATTR_SW_DBM))
+			dirty = true;
+
+		if (!atomic_fcmpset_64(l3p, &l3, (l3 & ~mask) | nbits))
+			goto retry;
+		if (*vap == va_next)
+			*vap = sva;
+	}
+	/*
+	 * When a dirty read/write mapping is write protected,
+	 * update the dirty field of each page in the superpage.
+	 */
+	if ((l3 & ATTR_SW_MANAGED) != 0 &&
+	    (nbits & ATTR_S1_AP(ATTR_S1_AP_RO)) != 0 &&
+	    dirty) {
+		m = PHYS_TO_VM_PAGE(pmap_load(start_l3) & ~ATTR_MASK);
+		for (mt = m; mt < m + NCONTIGUOUS; mt++) {
+			vm_page_dirty(m);
+		}
+	}
+
+}
+
+/*
  *	Set the physical protection on the
  *	specified range of this map as requested.
  */
@@ -3485,13 +3544,22 @@ retry:
 				/*
 				 * XXX Optimize whole page protection.
 				 */
-				pmap_demote_l3c(pmap, l3p, sva);
+				if (((sva & (NCONTIGUOUS * L3_SIZE - 1)) == 0) &&
+				    (sva + NCONTIGUOUS * L3_SIZE <= eva)) {
+					pmap_protect_l3c(pmap, l3p, sva, &va,
+					    va_next, mask, nbits);
+					l3p += NCONTIGUOUS - 1;
+					sva += (NCONTIGUOUS - 1) * L3_SIZE;
+					continue;
+				} else {
+					pmap_demote_l3c(pmap, l3p, sva);
 
-				/*
-				 * The L3 entry's accessed bit may have
-				 * changed.
-				 */
-				l3 = pmap_load(l3p);
+					/*
+					 * The L3 entry's accessed bit may have
+					 * changed.
+					 */
+					l3 = pmap_load(l3p);
+				}
 			}
 
 			/*
