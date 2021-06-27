@@ -1181,6 +1181,10 @@ static u_long pmap_l3c_demotions;
 SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, demotions, CTLFLAG_RD,
     &pmap_l3c_demotions, 0, "64KB page demotions");
 
+static u_long pmap_l3c_mappings;
+SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, mappings, CTLFLAG_RD,
+    &pmap_l3c_mappings, 0, "64KB page mappings");
+
 /*
  * Invalidate a single TLB entry.
  */
@@ -4374,6 +4378,32 @@ pmap_enter_l2(pmap_t pmap, vm_offset_t va, pd_entry_t new_l2, u_int flags,
 }
 
 /*
+ * Returns true if "m" is the start of a 64KB superpage.
+ * XXX Explain why we iterate over the listq instead of vm_page_array.
+ */
+static bool
+pmap_test_xxx(vm_page_t m)
+{
+	vm_paddr_t pa;
+	int i;
+
+	VM_OBJECT_ASSERT_LOCKED(m->object);
+	pa = VM_PAGE_TO_PHYS(m);
+	if ((pa & PAGE_MASK_64K) != 0)
+		return (false);
+	m = TAILQ_NEXT(m, listq);
+	for (i = 1; i < L3C_ENTRIES; i++) {
+		if (m == NULL)
+			return (false);
+		pa += PAGE_SIZE;
+		if (pa != VM_PAGE_TO_PHYS(m))
+			return (false);
+		m = TAILQ_NEXT(m, listq);
+	}
+	return (true);
+}
+
+/*
  * Maps a sequence of resident pages belonging to the same object.
  * The sequence begins with the given page m_start.  This page is
  * mapped at the given virtual address start.  Each subsequent page is
@@ -4407,7 +4437,12 @@ pmap_enter_object(pmap_t pmap, vm_offset_t start, vm_offset_t end,
 		    m->psind == 1 && pmap_ps_enabled(pmap) &&
 		    pmap_enter_2mpage(pmap, va, m, prot, &lock))
 			m = &m[L2_SIZE / PAGE_SIZE - 1];
-		else
+		else if ((va & PAGE_MASK_64K) == 0 && va + PAGE_SIZE_64K <= end &&
+		    pmap_test_xxx(m) && pmap_ps_enabled(pmap)) {
+			mpte = pmap_enter_quick_locked(pmap, va, m, prot, mpte,
+			    &lock);
+			atomic_add_long(&pmap_l3c_mappings, 1);
+		} else
 			mpte = pmap_enter_quick_locked(pmap, va, m, prot, mpte,
 			    &lock);
 		m = TAILQ_NEXT(m, listq);
