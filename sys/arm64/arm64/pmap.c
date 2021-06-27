@@ -397,7 +397,7 @@ static int pmap_remove_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t sva,
     pd_entry_t l1e, struct spglist *free, struct rwlock **lockp);
 static int pmap_remove_l3(pmap_t pmap, pt_entry_t *l3, vm_offset_t sva,
     pd_entry_t l2e, struct spglist *free, struct rwlock **lockp);
-static int pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
+static bool pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
     vm_offset_t eva, vm_offset_t *vap, vm_page_t l3pg, struct spglist *free,
     struct rwlock **lockp);
 static void pmap_reset_asid_set(pmap_t pmap);
@@ -2940,12 +2940,11 @@ pmap_remove_l3(pmap_t pmap, pt_entry_t *l3, vm_offset_t va,
 /*
  * pmap_remove_l3c: Do the things to unmap a level 3 contiguous superpage.
  */
-static int
+static bool
 pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
     vm_offset_t eva, vm_offset_t *vap, vm_page_t l3pg, struct spglist *free,
     struct rwlock **lockp)
 {
-	int unwire_ret;
 	pt_entry_t *current_l3, *end_l3, mask, nbits, old_first_l3, old_l3;
 	vm_page_t m, mt;
 	struct md_page *pvh;
@@ -2973,7 +2972,6 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
 	}
 
 	old_first_l3 = (old_first_l3 & ~mask) | nbits;
-	unwire_ret = 0;
 
 	if (old_first_l3 & ATTR_SW_WIRED)
 		pmap->pm_stats.wired_count -= L3C_ENTRIES;
@@ -3010,13 +3008,17 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
                         if (TAILQ_EMPTY(&mt->md.pv_list) &&
                             TAILQ_EMPTY(&pvh->pv_list))
                                 vm_page_aflag_clear(mt, PGA_WRITEABLE);
-                        if (l3pg != NULL) {
-                                unwire_ret = pmap_unwire_l3(pmap, sva, l3pg, free);
-                        }
+                        if (*vap == eva)
+				*vap = sva;
                 }
+                l3pg->ref_count -= L3C_ENTRIES;
+		if (l3pg->ref_count == 0) {
+			_pmap_unwire_l3(pmap, sva - PAGE_SIZE, l3pg, free);
+			return (true);
+		}
         }
 
-        return (unwire_ret);
+        return (false);
 
 }
 
