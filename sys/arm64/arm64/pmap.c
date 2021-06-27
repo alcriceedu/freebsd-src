@@ -3389,7 +3389,7 @@ pmap_protect_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
 	PMAP_ASSERT_STAGE1(pmap);
 	KASSERT(((uintptr_t)start_l3 & (L3C_ENTRIES * sizeof(pt_entry_t) - 1))
-	    == 0, ("pmap_remove_l3c: start_l3 is not aligned"));
+	    == 0, ("pmap_protect_l3c: start_l3 is not aligned"));
 
 	dirty = false;
 
@@ -4599,6 +4599,7 @@ pmap_object_init_pt(pmap_t pmap, vm_offset_t addr, vm_object_t object,
 void
 pmap_unwire(pmap_t pmap, vm_offset_t sva, vm_offset_t eva)
 {
+	bool partial_l3c;
 	vm_offset_t va_next;
 	pd_entry_t *l0, *l1, *l2;
 	pt_entry_t *l3;
@@ -4663,6 +4664,7 @@ pmap_unwire(pmap_t pmap, vm_offset_t sva, vm_offset_t eva)
 
 		if (va_next > eva)
 			va_next = eva;
+		partial_l3c = true;
 		for (l3 = pmap_l2_to_l3(l2, sva); sva != va_next; l3++,
 		    sva += L3_SIZE) {
 			if (pmap_load(l3) == 0)
@@ -4671,7 +4673,13 @@ pmap_unwire(pmap_t pmap, vm_offset_t sva, vm_offset_t eva)
 				/*
 				 * XXX Avoid demotion for whole page unwiring.
 				 */
-				pmap_demote_l3c(pmap, l3, sva);
+				if ((sva & (L3C_ENTRIES * L3_SIZE - 1)) == 0) {
+					partial_l3c = sva + L3C_ENTRIES *
+					    L3_SIZE > eva;
+				}
+				if (partial_l3c) {
+					pmap_demote_l3c(pmap, l3, sva);
+				}
 			}
 			if ((pmap_load(l3) & ATTR_SW_WIRED) == 0)
 				panic("pmap_unwire: l3 %#jx is missing "
