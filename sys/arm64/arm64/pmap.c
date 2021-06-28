@@ -2947,6 +2947,7 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
 {
 	pt_entry_t *current_l3, *end_l3, mask, nbits, old_first_l3, old_l3;
 	vm_page_t m, mt;
+	vm_offset_t va;
 	struct md_page *pvh;
 	struct rwlock *new_lock;
 
@@ -2999,7 +3000,8 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
                 }
                 m = PHYS_TO_VM_PAGE(old_first_l3 & ~ATTR_MASK);
                 pvh = page_to_pvh(m);
-                for (mt = m; mt < &m[L3C_ENTRIES]; mt++, sva += PAGE_SIZE) {
+                for (mt = m, va = sva; mt < &m[L3C_ENTRIES]; mt++, va +=
+                    PAGE_SIZE) {
 			if (pmap_pte_dirty(pmap, old_first_l3))
                                 vm_page_dirty(mt);
                         if (old_first_l3 & ATTR_AF)
@@ -3008,12 +3010,15 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
                         if (TAILQ_EMPTY(&mt->md.pv_list) &&
                             TAILQ_EMPTY(&pvh->pv_list))
                                 vm_page_aflag_clear(mt, PGA_WRITEABLE);
-                        if (*vap == eva)
-				*vap = sva;
                 }
-                l3pg->ref_count -= L3C_ENTRIES;
+        }
+
+        if (*vap == eva)
+                *vap = sva;
+	if (l3pg != NULL) {
+		l3pg->ref_count -= L3C_ENTRIES;
 		if (l3pg->ref_count == 0) {
-			_pmap_unwire_l3(pmap, sva - PAGE_SIZE, l3pg, free);
+			_pmap_unwire_l3(pmap, sva, l3pg, free);
 			return (true);
 		}
         }
