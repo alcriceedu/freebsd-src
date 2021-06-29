@@ -3061,7 +3061,7 @@ pmap_remove_l3_range(pmap_t pmap, pd_entry_t l2e, vm_offset_t sva,
 			/*
 			 * Is this entire set of contiguous L3 entries being
 			 * removed?  Handle the possibility that "eva" is zero
-			 * because of address wrap around.
+			 * because of address wraparound.
 			 */
 			if ((sva & L3C_OFFSET) == 0 &&
 			    sva + L3C_OFFSET <= eva - 1) {
@@ -3540,10 +3540,12 @@ retry:
 			if ((l3 & ATTR_CONTIGUOUS) != 0) {
 				/*
 				 * Is this entire set of contiguous L3 entries
-				 * being protected?
+				 * being protected?  Handle the possibility
+				 * that "va_next" is zero because of address
+				 * wraparound.
 				 */
-				if ((sva & (L3C_SIZE - 1)) == 0 &&
-				    sva + L3C_SIZE - 1 <= va_next - 1) {
+				if ((sva & L3C_OFFSET) == 0 &&
+				    sva + L3C_OFFSET <= va_next - 1) {
 					pmap_protect_l3c(pmap, l3p, sva, &va,
 					    va_next, mask, nbits);
 					l3p += L3C_ENTRIES - 1;
