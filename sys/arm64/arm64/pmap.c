@@ -2941,6 +2941,9 @@ pmap_remove_l3(pmap_t pmap, pt_entry_t *l3, vm_offset_t va,
 
 /*
  * pmap_remove_l3c: Do the things to unmap a level 3 contiguous superpage.
+ *
+ * The caller is responsible for performing the TLB invalidations for [sva,
+ * eva) based the returned *vap.
  */
 static bool
 pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
@@ -2956,15 +2959,20 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
 	KASSERT(((uintptr_t)start_l3 & ((L3C_ENTRIES * sizeof(pt_entry_t)) -
 	    1)) == 0, ("pmap_remove_l3c: start_l3 is not aligned"));
+	KASSERT((sva & L3C_OFFSET) == 0,
+	    ("pmap_remove_l3c: sva is not aligned"));
+	KASSERT((eva & L3C_OFFSET) == 0,
+	    ("pmap_remove_l3c: eva is not aligned"));
 	end_l3 = start_l3 + L3C_ENTRIES;
+
+	/*
+	 * Hardware accessed and dirty bit maintenance might only update a
+	 * single L3 entry, so we must combine the accessed and dirty bits
+	 * from this entire set of contiguous L3 entries.
+	 */
 	old_first_l3 = pmap_load_clear(start_l3);
 	for (current_l3 = start_l3 + 1; current_l3 < end_l3; current_l3++) {
 		old_l3 = pmap_load_clear(current_l3);
-
-		/*
-		 * Hardware updates to the accessed and dirty bits only apply
-		 * to a single L3 entry, so ... XXX
-		 */
 		if ((old_l3 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
 		    (ATTR_S1_AP(ATTR_S1_AP_RW) | ATTR_SW_DBM))
 			old_first_l3 &= ~ATTR_S1_AP_RW_BIT;
@@ -3052,10 +3060,11 @@ pmap_remove_l3_range(pmap_t pmap, pd_entry_t l2e, vm_offset_t sva,
 		if ((old_l3 & ATTR_CONTIGUOUS) != 0) {
 			/*
 			 * Is this entire set of contiguous L3 entries being
-			 * removed?
+			 * removed?  Handle the possibility that "eva" is zero
+			 * because of address wrap around.
 			 */
-			if ((sva & (L3C_SIZE - 1)) == 0 &&
-			    sva + L3C_SIZE - 1 <= eva - 1) {
+			if ((sva & L3C_OFFSET) == 0 &&
+			    sva + L3C_OFFSET <= eva - 1) {
 				if (pmap_remove_l3c(pmap, l3, sva, eva, &va,
 				    l3pg, free, lockp)) {
 					/* The L3 table was unmapped. */
