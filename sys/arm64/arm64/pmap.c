@@ -2945,7 +2945,7 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
     vm_offset_t eva, vm_offset_t *vap, vm_page_t l3pg, struct spglist *free,
     struct rwlock **lockp)
 {
-	pt_entry_t *current_l3, *end_l3, mask, nbits, old_first_l3, old_l3;
+	pt_entry_t *current_l3, *end_l3, old_first_l3, old_l3;
 	vm_page_t m, mt;
 	vm_offset_t va;
 	struct md_page *pvh;
@@ -2957,8 +2957,6 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
 
 	end_l3 = start_l3 + L3C_ENTRIES;
 	old_first_l3 = pmap_load_clear(start_l3);
-	mask = 0;
-	nbits = 0;
 
 	for (current_l3 = start_l3 + 1; current_l3 < end_l3; current_l3++) {
 		old_l3 = pmap_load_clear(current_l3);
@@ -2968,11 +2966,9 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
                  */
                 if ((old_l3 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
                     (ATTR_S1_AP(ATTR_S1_AP_RW) | ATTR_SW_DBM))
-                        mask = ATTR_S1_AP_RW_BIT;
-                nbits |= old_l3 & ATTR_AF;
+                        old_first_l3 &= ~ATTR_S1_AP_RW_BIT;
+                old_first_l3 |= old_l3 & ATTR_AF;
 	}
-
-	old_first_l3 = (old_first_l3 & ~mask) | nbits;
 
 	if (old_first_l3 & ATTR_SW_WIRED)
 		pmap->pm_stats.wired_count -= L3C_ENTRIES;
@@ -3408,22 +3404,6 @@ pmap_protect_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
 	    L3_SIZE) {
 		l3 = pmap_load(l3p);
 retry:
-		/*
-		 * Go to the next L3 entry if the current one is
-		 * invalid or already has the desired access
-		 * restrictions in place.  (The latter case occurs
-		 * frequently.  For example, in a "buildworld"
-		 * workload, almost 1 out of 4 L3 entries already
-		 * have the desired restrictions.)
-		 */
-		if (!pmap_l3_valid(l3) || (l3 & mask) == nbits) {
-			if (*vap != va_next) {
-				pmap_invalidate_range(pmap, *vap, sva);
-				*vap = va_next;
-			}
-			continue;
-		}
-
 		if ((l3 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
 		    (ATTR_S1_AP(ATTR_S1_AP_RW) | ATTR_SW_DBM))
 			dirty = true;
@@ -3545,6 +3525,10 @@ retry:
 				if (va != va_next) {
 					pmap_invalidate_range(pmap, va, sva);
 					va = va_next;
+				}
+				if ((l3 & ATTR_CONTIGUOUS) != 0) {
+					l3p += L3C_ENTRIES - 1;
+                                        sva += (L3C_ENTRIES - 1) * L3_SIZE;
 				}
 				continue;
 			} else if ((l3 & ATTR_CONTIGUOUS) != 0) {
