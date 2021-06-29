@@ -4392,7 +4392,7 @@ pmap_test_xxx(vm_page_t m)
 
 	VM_OBJECT_ASSERT_LOCKED(m->object);
 	pa = VM_PAGE_TO_PHYS(m);
-	if ((pa & PAGE_MASK_64K) != 0)
+	if ((pa & L3C_OFFSET) != 0)
 		return (false);
 	m = TAILQ_NEXT(m, listq);
 	for (i = 1; i < L3C_ENTRIES; i++) {
@@ -4440,7 +4440,7 @@ pmap_enter_object(pmap_t pmap, vm_offset_t start, vm_offset_t end,
 		    m->psind == 1 && pmap_ps_enabled(pmap) &&
 		    pmap_enter_2mpage(pmap, va, m, prot, &lock))
 			m = &m[L2_SIZE / PAGE_SIZE - 1];
-		else if ((va & PAGE_MASK_64K) == 0 && va + PAGE_SIZE_64K <= end &&
+		else if ((va & L3C_OFFSET) == 0 && va + L3C_SIZE <= end &&
 		    pmap_test_xxx(m) && pmap_ps_enabled(pmap)) {
 			mpte = pmap_enter_quick_locked(pmap, va, m, prot, mpte,
 			    &lock);
@@ -4708,9 +4708,8 @@ pmap_unwire(pmap_t pmap, vm_offset_t sva, vm_offset_t eva)
 				/*
 				 * XXX Avoid demotion for whole page unwiring.
 				 */
-				if ((sva & (L3C_SIZE - 1)) == 0) {
-					partial_l3c = sva + L3C_ENTRIES *
-					    L3_SIZE > eva;
+				if ((sva & L3C_OFFSET) == 0) {
+					partial_l3c = sva + L3C_SIZE > eva;
 				}
 				if (partial_l3c) {
 					pmap_demote_l3c(pmap, l3, sva);
