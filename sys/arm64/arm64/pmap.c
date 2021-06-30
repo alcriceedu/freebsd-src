@@ -4394,14 +4394,14 @@ pmap_test_xxx(vm_page_t m)
 	pa = VM_PAGE_TO_PHYS(m);
 	if ((pa & L3C_OFFSET) != 0)
 		return (false);
-	m = TAILQ_NEXT(m, listq);
+	m = vm_page_next(m);
 	for (i = 1; i < L3C_ENTRIES; i++) {
 		if (m == NULL)
 			return (false);
 		pa += PAGE_SIZE;
 		if (pa != VM_PAGE_TO_PHYS(m))
 			return (false);
-		m = TAILQ_NEXT(m, listq);
+		m = vm_page_next(m);
 	}
 	return (true);
 }
