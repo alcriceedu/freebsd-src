@@ -3398,6 +3398,9 @@ pmap_protect_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
 	KASSERT(((uintptr_t)start_l3 & (L3C_ENTRIES * sizeof(pt_entry_t) - 1))
 	    == 0, ("pmap_protect_l3c: start_l3 is not aligned"));
 
+	if (*vap == va_next)
+		*vap = sva;
+
 	dirty = false;
 
 	for (l3p = start_l3; l3p < start_l3 + L3C_ENTRIES; l3p++, sva +=
@@ -3410,8 +3413,6 @@ retry:
 
 		if (!atomic_fcmpset_64(l3p, &l3, (l3 & ~mask) | nbits))
 			goto retry;
-		if (*vap == va_next)
-			*vap = sva;
 	}
 	/*
 	 * When a dirty read/write mapping is write protected,
