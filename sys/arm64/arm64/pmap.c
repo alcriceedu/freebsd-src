@@ -4854,6 +4854,14 @@ pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, vm_offset_t dst_addr, vm_size_t len,
 			if ((ptetemp & ATTR_SW_MANAGED) == 0)
 				continue;
 
+			/*
+			 * XXX Don't copy ATTR_CONTIGUOUS for now.
+			 * The tricky part to making ATTR_CONTIGUOUS work is
+			 * that PV entry allocation could fail, in which case
+			 * we would have to back out the ATTR_CONTIGUOUS bit.
+			 */
+			ptetemp &= ~ATTR_CONTIGUOUS;
+
 			if (dstmpte != NULL) {
 				KASSERT(dstmpte->pindex == pmap_l2_pindex(addr),
 				    ("dstmpte pindex/addr mismatch"));
