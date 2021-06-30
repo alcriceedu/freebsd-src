@@ -3409,8 +3409,7 @@ pmap_protect_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
 
 	dirty = false;
 
-	for (l3p = start_l3; l3p < start_l3 + L3C_ENTRIES; l3p++, sva +=
-	    L3_SIZE) {
+	for (l3p = start_l3; l3p < start_l3 + L3C_ENTRIES; l3p++) {
 		l3 = pmap_load(l3p);
 retry:
 		if ((l3 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
