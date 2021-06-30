@@ -393,6 +393,8 @@ static vm_page_t pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va,
 static int pmap_enter_l2(pmap_t pmap, vm_offset_t va, pd_entry_t new_l2,
     u_int flags, vm_page_t m, struct rwlock **lockp);
 static pt_entry_t pmap_load_l3c(pt_entry_t *l3p);
+static void pmap_protect_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
+    vm_offset_t *vap, vm_offset_t va_next, pt_entry_t mask, pt_entry_t nbits);
 static int pmap_remove_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t sva,
     pd_entry_t l1e, struct spglist *free, struct rwlock **lockp);
 static int pmap_remove_l3(pmap_t pmap, pt_entry_t *l3, vm_offset_t sva,
@@ -2939,88 +2941,91 @@ pmap_remove_l3(pmap_t pmap, pt_entry_t *l3, vm_offset_t va,
 
 /*
  * pmap_remove_l3c: Do the things to unmap a level 3 contiguous superpage.
+ *
+ * The caller is responsible for performing the TLB invalidations for [sva,
+ * eva) based the returned *vap.
  */
 static bool
 pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
     vm_offset_t eva, vm_offset_t *vap, vm_page_t l3pg, struct spglist *free,
     struct rwlock **lockp)
 {
-	pt_entry_t *current_l3, *end_l3, old_first_l3, old_l3;
-	vm_page_t m, mt;
-	vm_offset_t va;
 	struct md_page *pvh;
 	struct rwlock *new_lock;
+	pt_entry_t *current_l3, *end_l3, old_first_l3, old_l3;
+	vm_offset_t va;
+	vm_page_t m, mt;
 
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
-	KASSERT(((uintptr_t)start_l3 & (L3C_ENTRIES * sizeof(pt_entry_t) - 1))
-	    == 0, ("pmap_remove_l3c: start_l3 is not aligned"));
-
+	KASSERT(((uintptr_t)start_l3 & ((L3C_ENTRIES * sizeof(pt_entry_t)) -
+	    1)) == 0, ("pmap_remove_l3c: start_l3 is not aligned"));
+	KASSERT((sva & L3C_OFFSET) == 0,
+	    ("pmap_remove_l3c: sva is not aligned"));
+	KASSERT((eva & L3C_OFFSET) == 0,
+	    ("pmap_remove_l3c: eva is not aligned"));
 	end_l3 = start_l3 + L3C_ENTRIES;
-	old_first_l3 = pmap_load_clear(start_l3);
 
+	/*
+	 * Hardware accessed and dirty bit maintenance might only update a
+	 * single L3 entry, so we must combine the accessed and dirty bits
+	 * from this entire set of contiguous L3 entries.
+	 */
+	old_first_l3 = pmap_load_clear(start_l3);
 	for (current_l3 = start_l3 + 1; current_l3 < end_l3; current_l3++) {
 		old_l3 = pmap_load_clear(current_l3);
-		/*
-                 * Hardware updates to the accessed and dirty bits only apply
-                 * to a single L3 entry, so ... XXX
-                 */
-                if ((old_l3 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
-                    (ATTR_S1_AP(ATTR_S1_AP_RW) | ATTR_SW_DBM))
-                        old_first_l3 &= ~ATTR_S1_AP_RW_BIT;
-                old_first_l3 |= old_l3 & ATTR_AF;
+		if ((old_l3 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
+		    (ATTR_S1_AP(ATTR_S1_AP_RW) | ATTR_SW_DBM))
+			old_first_l3 &= ~ATTR_S1_AP_RW_BIT;
+		old_first_l3 |= old_l3 & ATTR_AF;
 	}
-
-	if (old_first_l3 & ATTR_SW_WIRED)
+	if ((old_first_l3 & ATTR_SW_WIRED) != 0)
 		pmap->pm_stats.wired_count -= L3C_ENTRIES;
 	pmap_resident_count_dec(pmap, L3C_ENTRIES);
-	if (old_first_l3 & ATTR_SW_MANAGED) {
+	if ((old_first_l3 & ATTR_SW_MANAGED) != 0) {
 		new_lock = PHYS_TO_PV_LIST_LOCK(old_first_l3 & ~ATTR_MASK);
-                if (new_lock != *lockp) {
-                        if (*lockp != NULL) {
-                                /*
-                                 * Pending TLB invalidations must be
-                                 * performed before the PV list lock is
-                                 * released.  Otherwise, a concurrent
-                                 * pmap_remove_all() on a physical page
-                                 * could return while a stale TLB entry
-                                 * still provides access to that page.
-                                 */
-                                if (*vap != eva) {
-                                        pmap_invalidate_range(pmap, *vap, sva);
-                                        *vap = eva;
-                                }
-                                rw_wunlock(*lockp);
-                        }
-                        *lockp = new_lock;
-                        rw_wlock(*lockp);
-                }
-                m = PHYS_TO_VM_PAGE(old_first_l3 & ~ATTR_MASK);
-                pvh = page_to_pvh(m);
-                for (mt = m, va = sva; mt < &m[L3C_ENTRIES]; mt++, va +=
-                    PAGE_SIZE) {
+		if (new_lock != *lockp) {
+			if (*lockp != NULL) {
+				/*
+				 * Pending TLB invalidations must be
+				 * performed before the PV list lock is
+				 * released.  Otherwise, a concurrent
+				 * pmap_remove_all() on a physical page
+				 * could return while a stale TLB entry
+				 * still provides access to that page.
+				 */
+				if (*vap != eva) {
+					pmap_invalidate_range(pmap, *vap, sva);
+					*vap = eva;
+				}
+				rw_wunlock(*lockp);
+			}
+			*lockp = new_lock;
+			rw_wlock(*lockp);
+		}
+		m = PHYS_TO_VM_PAGE(old_first_l3 & ~ATTR_MASK);
+		pvh = page_to_pvh(m);
+		for (mt = m, va = sva; mt < &m[L3C_ENTRIES]; mt++, va +=
+		    PAGE_SIZE) {
 			if (pmap_pte_dirty(pmap, old_first_l3))
-                                vm_page_dirty(mt);
-                        if (old_first_l3 & ATTR_AF)
-                                vm_page_aflag_set(mt, PGA_REFERENCED);
-                        pmap_pvh_free(&mt->md, pmap, sva);
-                        if (TAILQ_EMPTY(&mt->md.pv_list) &&
-                            TAILQ_EMPTY(&pvh->pv_list))
-                                vm_page_aflag_clear(mt, PGA_WRITEABLE);
-                }
-        }
-
-        if (*vap == eva)
-                *vap = sva;
+				vm_page_dirty(mt);
+			if ((old_first_l3 & ATTR_AF) != 0)
+				vm_page_aflag_set(mt, PGA_REFERENCED);
+			pmap_pvh_free(&mt->md, pmap, va);
+			if (TAILQ_EMPTY(&mt->md.pv_list) &&
+			    TAILQ_EMPTY(&pvh->pv_list))
+				vm_page_aflag_clear(mt, PGA_WRITEABLE);
+		}
+	}
+	if (*vap == eva)
+		*vap = sva;
 	if (l3pg != NULL) {
 		l3pg->ref_count -= L3C_ENTRIES;
 		if (l3pg->ref_count == 0) {
 			_pmap_unwire_l3(pmap, sva, l3pg, free);
 			return (true);
 		}
-        }
-
-        return (false);
-
+	}
+	return (false);
 }
 
 /*
@@ -3051,19 +3056,23 @@ pmap_remove_l3_range(pmap_t pmap, pd_entry_t l2e, vm_offset_t sva,
 				va = eva;
 			}
 			continue;
-		} else if ((old_l3 & ATTR_CONTIGUOUS) != 0) {
+		}
+		if ((old_l3 & ATTR_CONTIGUOUS) != 0) {
 			/*
-			 * XXX Optimize whole page removal.
+			 * Is this entire set of contiguous L3 entries being
+			 * removed?  Handle the possibility that "eva" is zero
+			 * because of address wraparound.
 			 */
-			if (((sva & (L3C_ENTRIES * L3_SIZE - 1)) == 0) &&
-			    (sva + L3C_ENTRIES * L3_SIZE <= eva)) {
+			if ((sva & L3C_OFFSET) == 0 &&
+			    sva + L3C_OFFSET <= eva - 1) {
 				if (pmap_remove_l3c(pmap, l3, sva, eva, &va,
 				    l3pg, free, lockp)) {
-					sva += L3C_ENTRIES * L3_SIZE;
-					break; /* L3 table was unmapped. */
+					/* The L3 table was unmapped. */
+					sva += L3C_SIZE;
+					break;
 				} else {
 					l3 += L3C_ENTRIES - 1;
-					sva += (L3C_ENTRIES - 1) * L3_SIZE;
+					sva += L3C_SIZE - L3_SIZE;
 					continue;
 				}
 			} else {
@@ -3256,8 +3265,8 @@ pmap_remove_all(vm_page_t m)
 	SLIST_INIT(&free);
 	lock = VM_PAGE_TO_PV_LIST_LOCK(m);
 	pvh = (m->flags & PG_FICTITIOUS) != 0 ? &pv_dummy : page_to_pvh(m);
-retry:
 	rw_wlock(lock);
+retry:
 	while ((pv = TAILQ_FIRST(&pvh->pv_list)) != NULL) {
 		pmap = PV_PMAP(pv);
 		if (!PMAP_TRYLOCK(pmap)) {
@@ -3266,7 +3275,6 @@ retry:
 			PMAP_LOCK(pmap);
 			rw_wlock(lock);
 			if (pvh_gen != pvh->pv_gen) {
-				rw_wunlock(lock);
 				PMAP_UNLOCK(pmap);
 				goto retry;
 			}
@@ -3277,7 +3285,6 @@ retry:
 		    ("pmap_remove_all: no page table entry found"));
 		KASSERT(lvl == 2,
 		    ("pmap_remove_all: invalid pte level %d", lvl));
-
 		pmap_demote_l2_locked(pmap, pte, va, &lock);
 		PMAP_UNLOCK(pmap);
 	}
@@ -3291,7 +3298,6 @@ retry:
 			PMAP_LOCK(pmap);
 			rw_wlock(lock);
 			if (pvh_gen != pvh->pv_gen || md_gen != m->md.pv_gen) {
-				rw_wunlock(lock);
 				PMAP_UNLOCK(pmap);
 				goto retry;
 			}
@@ -3426,7 +3432,6 @@ retry:
 			vm_page_dirty(m);
 		}
 	}
-
 }
 
 /*
@@ -3529,19 +3534,23 @@ retry:
 				}
 				if ((l3 & ATTR_CONTIGUOUS) != 0) {
 					l3p += L3C_ENTRIES - 1;
-                                        sva += (L3C_ENTRIES - 1) * L3_SIZE;
+					sva += L3C_SIZE - L3_SIZE;
 				}
 				continue;
-			} else if ((l3 & ATTR_CONTIGUOUS) != 0) {
+			}
+			if ((l3 & ATTR_CONTIGUOUS) != 0) {
 				/*
-				 * XXX Optimize whole page protection.
+				 * Is this entire set of contiguous L3 entries
+				 * being protected?  Handle the possibility
+				 * that "va_next" is zero because of address
+				 * wraparound.
 				 */
-				if (((sva & (L3C_ENTRIES * L3_SIZE - 1)) == 0) &&
-				    (sva + L3C_ENTRIES * L3_SIZE <= eva)) {
+				if ((sva & L3C_OFFSET) == 0 &&
+				    sva + L3C_OFFSET <= va_next - 1) {
 					pmap_protect_l3c(pmap, l3p, sva, &va,
 					    va_next, mask, nbits);
 					l3p += L3C_ENTRIES - 1;
-					sva += (L3C_ENTRIES - 1) * L3_SIZE;
+					sva += L3C_SIZE - L3_SIZE;
 					continue;
 				} else {
 					pmap_demote_l3c(pmap, l3p, sva);
@@ -4384,7 +4393,7 @@ pmap_test_xxx(vm_page_t m)
 
 	VM_OBJECT_ASSERT_LOCKED(m->object);
 	pa = VM_PAGE_TO_PHYS(m);
-	if ((pa & PAGE_MASK_64K) != 0)
+	if ((pa & L3C_OFFSET) != 0)
 		return (false);
 	m = TAILQ_NEXT(m, listq);
 	for (i = 1; i < L3C_ENTRIES; i++) {
@@ -4432,7 +4441,7 @@ pmap_enter_object(pmap_t pmap, vm_offset_t start, vm_offset_t end,
 		    m->psind == 1 && pmap_ps_enabled(pmap) &&
 		    pmap_enter_2mpage(pmap, va, m, prot, &lock))
 			m = &m[L2_SIZE / PAGE_SIZE - 1];
-		else if ((va & PAGE_MASK_64K) == 0 && va + PAGE_SIZE_64K <= end &&
+		else if ((va & L3C_OFFSET) == 0 && va + L3C_SIZE <= end &&
 		    pmap_test_xxx(m) && pmap_ps_enabled(pmap)) {
 			mpte = pmap_enter_quick_locked(pmap, va, m, prot, mpte,
 			    &lock);
@@ -4626,10 +4635,10 @@ pmap_object_init_pt(pmap_t pmap, vm_offset_t addr, vm_object_t object,
 void
 pmap_unwire(pmap_t pmap, vm_offset_t sva, vm_offset_t eva)
 {
-	bool partial_l3c;
 	vm_offset_t va_next;
 	pd_entry_t *l0, *l1, *l2;
 	pt_entry_t *l3;
+	bool partial_l3c;
 
 	PMAP_LOCK(pmap);
 	for (; sva < eva; sva = va_next) {
@@ -4700,9 +4709,8 @@ pmap_unwire(pmap_t pmap, vm_offset_t sva, vm_offset_t eva)
 				/*
 				 * XXX Avoid demotion for whole page unwiring.
 				 */
-				if ((sva & (L3C_ENTRIES * L3_SIZE - 1)) == 0) {
-					partial_l3c = sva + L3C_ENTRIES *
-					    L3_SIZE > eva;
+				if ((sva & L3C_OFFSET) == 0) {
+					partial_l3c = sva + L3C_SIZE > eva;
 				}
 				if (partial_l3c) {
 					pmap_demote_l3c(pmap, l3, sva);
@@ -5321,7 +5329,7 @@ pmap_page_test_mappings(vm_page_t m, boolean_t accessed, boolean_t modified)
 	struct rwlock *lock;
 	pv_entry_t pv;
 	struct md_page *pvh;
-	pt_entry_t mask, *pte, tpte, value;
+	pt_entry_t l3e, mask, *pte, value;
 	pmap_t pmap;
 	int lvl, md_gen, pvh_gen;
 	boolean_t rv;
@@ -5356,11 +5364,11 @@ restart:
 			mask |= ATTR_AF | ATTR_DESCR_MASK;
 			value |= ATTR_AF | L3_PAGE;
 		}
-		tpte = pmap_load(pte);
-		if ((tpte & ATTR_CONTIGUOUS) != 0)
-			tpte = pmap_load_l3c(pte);
-		rv = (tpte & mask) == value;
+		l3e = pmap_load(pte);
+		if ((l3e & ATTR_CONTIGUOUS) != 0)
+			l3e = pmap_load_l3c(pte);
 		PMAP_UNLOCK(pmap);
+		rv = (l3e & mask) == value;
 		if (rv)
 			goto out;
 	}
@@ -5486,8 +5494,8 @@ pmap_remove_write(vm_page_t m)
 		return;
 	lock = VM_PAGE_TO_PV_LIST_LOCK(m);
 	pvh = (m->flags & PG_FICTITIOUS) != 0 ? &pv_dummy : page_to_pvh(m);
-retry_pv_loop:
 	rw_wlock(lock);
+retry:
 	TAILQ_FOREACH_SAFE(pv, &pvh->pv_list, pv_next, next_pv) {
 		pmap = PV_PMAP(pv);
 		PMAP_ASSERT_STAGE1(pmap);
@@ -5498,12 +5506,11 @@ retry_pv_loop:
 			rw_wlock(lock);
 			if (pvh_gen != pvh->pv_gen) {
 				PMAP_UNLOCK(pmap);
-				rw_wunlock(lock);
-				goto retry_pv_loop;
+				goto retry;
 			}
 		}
 		va = pv->pv_va;
-		pte = pmap_pte(pmap, pv->pv_va, &lvl);
+		pte = pmap_pte(pmap, va, &lvl);
 		if ((pmap_load(pte) & ATTR_SW_DBM) != 0)
 			(void)pmap_demote_l2_locked(pmap, pte, va, &lock);
 		KASSERT(lock == VM_PAGE_TO_PV_LIST_LOCK(m),
@@ -5523,26 +5530,24 @@ retry_pv_loop:
 			if (pvh_gen != pvh->pv_gen ||
 			    md_gen != m->md.pv_gen) {
 				PMAP_UNLOCK(pmap);
-				rw_wunlock(lock);
-				goto retry_pv_loop;
+				goto retry;
 			}
 		}
 		pte = pmap_pte(pmap, pv->pv_va, &lvl);
 		oldpte = pmap_load(pte);
-retry:
 		if ((oldpte & ATTR_SW_DBM) != 0) {
 			if ((oldpte & ATTR_CONTIGUOUS) != 0) {
 				pmap_demote_l3c(pmap, pte, pv->pv_va);
 
 				/*
-				 * The PTE's accessed bit may have changed.
-				 * XXX We assume that the dirty bit does not.
+				 * The L3 entry's accessed bit may have
+				 * changed.
 				 */
 				oldpte = pmap_load(pte);
 			}
-			if (!atomic_fcmpset_long(pte, &oldpte,
+			while (!atomic_fcmpset_64(pte, &oldpte,
 			    (oldpte | ATTR_S1_AP_RW_BIT) & ~ATTR_SW_DBM))
-				goto retry;
+				cpu_spinwait();
 			if ((oldpte & ATTR_S1_AP_RW_BIT) ==
 			    ATTR_S1_AP(ATTR_S1_AP_RW))
 				vm_page_dirty(m);
@@ -5848,6 +5853,10 @@ pmap_advise(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, int advice)
 					 * we have a repromotion trigger?
 					 */
 					pmap_demote_l3c(pmap, l3, sva);
+					/*
+					 * XXX Is ATTR_AF always set in oldl3,
+					 * so we don't need to pmap_load(l3)?
+					 */
 				}
 				while (!atomic_fcmpset_long(l3, &oldl3,
 				    (oldl3 & ~ATTR_AF) |
@@ -6260,6 +6269,7 @@ pmap_change_attr_locked(vm_offset_t va, vm_size_t size, int mode)
 				if ((l3 & ATTR_CONTIGUOUS) != 0) {
 					pmap_demote_l3c(kernel_pmap, pte,
 					    tmpva);
+					l3 = pmap_load(pte);
 				}
 				l3 &= ~ATTR_S1_IDX_MASK;
 				l3 |= ATTR_S1_IDX(mode);
@@ -6665,8 +6675,12 @@ pmap_mincore(pmap_t pmap, vm_offset_t addr, vm_paddr_t *pap)
 
 		managed = (tpte & ATTR_SW_MANAGED) != 0;
 		val = MINCORE_INCORE;
-		if (lvl != 3)
+		if (lvl != 3) {
+			/*
+			 * XXX 64KB pages?
+			 */
 			val |= MINCORE_PSIND(3 - lvl);
+		}
 		if ((managed && pmap_pte_dirty(pmap, tpte)) || (!managed &&
 		    (tpte & ATTR_S1_AP_RW_BIT) == ATTR_S1_AP(ATTR_S1_AP_RW)))
 			val |= MINCORE_MODIFIED | MINCORE_MODIFIED_OTHER;
