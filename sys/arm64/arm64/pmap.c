@@ -392,6 +392,8 @@ static vm_page_t pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va,
     vm_page_t m, vm_prot_t prot, vm_page_t mpte, struct rwlock **lockp);
 static int pmap_enter_l2(pmap_t pmap, vm_offset_t va, pd_entry_t new_l2,
     u_int flags, vm_page_t m, struct rwlock **lockp);
+static vm_page_t pmap_enter_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m,
+    vm_prot_t prot, vm_page_t mpte, struct rwlock **lockp);
 static pt_entry_t pmap_load_l3c(pt_entry_t *l3p);
 static void pmap_protect_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
     vm_offset_t *vap, vm_offset_t va_next, pt_entry_t mask, pt_entry_t nbits);
@@ -4441,11 +4443,10 @@ pmap_enter_object(pmap_t pmap, vm_offset_t start, vm_offset_t end,
 		    pmap_enter_2mpage(pmap, va, m, prot, &lock))
 			m = &m[L2_SIZE / PAGE_SIZE - 1];
 		else if ((va & L3C_OFFSET) == 0 && va + L3C_SIZE <= end &&
-		    pmap_test_xxx(m) && pmap_ps_enabled(pmap)) {
-			mpte = pmap_enter_quick_locked(pmap, va, m, prot, mpte,
-			    &lock);
-			atomic_add_long(&pmap_l3c_mappings, 1);
-		} else
+		    pmap_test_xxx(m) && pmap_ps_enabled(pmap) && (mpte =
+		    pmap_enter_l3c(pmap, va, m, prot, mpte, &lock)) != NULL)
+			m = &m[L3C_ENTRIES - 1];
+		else
 			mpte = pmap_enter_quick_locked(pmap, va, m, prot, mpte,
 			    &lock);
 		m = TAILQ_NEXT(m, listq);
@@ -4604,6 +4605,157 @@ pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va, vm_page_t m,
 	pmap_store(l3, l3_val);
 	dsb(ishst);
 
+	return (mpte);
+}
+
+/*
+ * XXX
+ */
+static vm_page_t
+pmap_enter_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
+    vm_page_t mpte, struct rwlock **lockp)
+{
+	pd_entry_t *pde;
+	pt_entry_t *l2, *l3, l3_val, *l3p;
+	vm_offset_t tva;
+	vm_paddr_t pa;
+	vm_page_t mt;
+	vm_pindex_t l2pindex;
+	int lvl;
+
+	PMAP_ASSERT_STAGE1(pmap);
+	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
+	KASSERT((va & L3C_OFFSET) == 0,
+	    ("pmap_enter_l3c: va is not aligned"));
+	KASSERT(!VA_IS_CLEANMAP(va) ||
+	    (m->oflags & VPO_UNMANAGED) != 0,
+	    ("pmap_enter_l3c: managed mapping within the clean submap"));
+
+	/*
+	 * In the case that a page table page is not
+	 * resident, we are creating it here.
+	 */
+	if (va < VM_MAXUSER_ADDRESS) {
+		/*
+		 * Calculate pagetable page index
+		 */
+		l2pindex = pmap_l2_pindex(va);
+		if (mpte != NULL && mpte->pindex == l2pindex) {
+			mpte->ref_count += L3C_ENTRIES;
+		} else {
+			/*
+			 * Get the l2 entry
+			 */
+			pde = pmap_pde(pmap, va, &lvl);
+
+			/*
+			 * If the page table page is mapped, we just increment
+			 * the hold count, and activate it.  Otherwise, we
+			 * attempt to allocate a page table page.  If this
+			 * attempt fails, we don't retry.  Instead, we give up.
+			 */
+			if (lvl == 1) {
+				l2 = pmap_l1_to_l2(pde, va);
+				if ((pmap_load(l2) & ATTR_DESCR_MASK) ==
+				    L2_BLOCK)
+					return (NULL);
+			}
+			if (lvl == 2 && pmap_load(pde) != 0) {
+				mpte =
+				    PHYS_TO_VM_PAGE(pmap_load(pde) & ~ATTR_MASK);
+				mpte->ref_count += L3C_ENTRIES;
+			} else {
+				/*
+				 * Pass NULL instead of the PV list lock
+				 * pointer, because we don't intend to sleep.
+				 */
+				mpte = _pmap_alloc_l3(pmap, l2pindex, NULL);
+				if (mpte == NULL)
+					return (mpte);
+				mpte->ref_count += L3C_ENTRIES - 1;
+			}
+		}
+		l3 = (pt_entry_t *)PHYS_TO_DMAP(VM_PAGE_TO_PHYS(mpte));
+		l3 = &l3[pmap_l3_index(va)];
+	} else {
+		mpte = NULL;
+		pde = pmap_pde(kernel_pmap, va, &lvl);
+		KASSERT(pde != NULL,
+		    ("pmap_enter_l3c: Invalid page entry, va: 0x%lx",
+		     va));
+		KASSERT(lvl == 2,
+		    ("pmap_enter_l3c: Invalid level %d", lvl));
+		l3 = pmap_l2_to_l3(pde, va);
+	}
+
+	/*
+	 * Abort if a mapping already exists.
+	 */
+	for (l3p = l3; l3p < &l3[L3C_ENTRIES]; l3p++)
+		if (pmap_load(l3p) != 0) {
+			if (mpte != NULL)
+				mpte->ref_count -= L3C_ENTRIES;
+			return (NULL);
+		}
+
+	/*
+	 * Enter on the PV list if part of our managed memory.
+	 */
+	if ((m->oflags & VPO_UNMANAGED) == 0)
+		for (tva = va, mt = m; tva < va + L3C_SIZE; tva += L3_SIZE,
+		    mt++)
+			if (!pmap_try_insert_pv_entry(pmap, tva, mt, lockp)) {
+				while (tva > va) {
+					tva -= L3_SIZE;
+					mt--;
+					pmap_pvh_free(&mt->md, pmap, tva);
+				}
+				if (mpte != NULL) {
+					mpte->ref_count -= L3C_ENTRIES - 1;
+					pmap_abort_ptp(pmap, va, mpte);
+				}
+				return (NULL);
+			}
+
+	/*
+	 * Increment counters
+	 */
+	pmap_resident_count_inc(pmap, L3C_ENTRIES);
+
+	pa = VM_PAGE_TO_PHYS(m);
+
+	/*
+	 * Sync icache before the mapping is stored to PTE
+	 */
+	if ((prot & VM_PROT_EXECUTE) != 0 && pmap != kernel_pmap &&
+	    m->md.pv_memattr == VM_MEMATTR_WRITE_BACK)
+		cpu_icache_sync_range(PHYS_TO_DMAP(pa), L3C_SIZE);
+
+	/*
+	 * Now validate mapping with RO and/or X protection
+	 */
+	l3_val = pa | ATTR_DEFAULT | ATTR_S1_IDX(m->md.pv_memattr) |
+	    ATTR_S1_AP(ATTR_S1_AP_RO) | L3_PAGE;
+	if ((prot & VM_PROT_EXECUTE) == 0 ||
+	    m->md.pv_memattr == VM_MEMATTR_DEVICE)
+		l3_val |= ATTR_S1_XN;
+	if (va < VM_MAXUSER_ADDRESS)
+		l3_val |= ATTR_S1_AP(ATTR_S1_AP_USER) | ATTR_S1_PXN;
+	else
+		l3_val |= ATTR_S1_UXN;
+	if (pmap != kernel_pmap)
+		l3_val |= ATTR_S1_nG;
+	if ((m->oflags & VPO_UNMANAGED) == 0) {
+		l3_val |= ATTR_SW_MANAGED;
+		l3_val &= ~ATTR_AF;
+	}
+	for (l3p = l3; l3p < &l3[L3C_ENTRIES]; l3p++) {
+		pmap_store(l3p, l3_val);
+		l3_val += L3_SIZE;
+	}
+	dsb(ishst);
+
+	atomic_add_long(&pmap_l3c_mappings, 1);
 	return (mpte);
 }
 
