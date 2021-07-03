@@ -4743,7 +4743,7 @@ pmap_enter_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 	 * Now validate mapping with RO and/or X protection
 	 */
 	l3_val = pa | ATTR_DEFAULT | ATTR_S1_IDX(m->md.pv_memattr) |
-	    ATTR_S1_AP(ATTR_S1_AP_RO) | L3_PAGE;
+	    ATTR_S1_AP(ATTR_S1_AP_RO) | ATTR_CONTIGUOUS | L3_PAGE;
 	if ((prot & VM_PROT_EXECUTE) == 0 ||
 	    m->md.pv_memattr == VM_MEMATTR_DEVICE)
 		l3_val |= ATTR_S1_XN;
