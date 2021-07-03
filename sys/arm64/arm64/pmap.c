@@ -2945,7 +2945,10 @@ pmap_remove_l3(pmap_t pmap, pt_entry_t *l3, vm_offset_t va,
  * pmap_remove_l3c: Do the things to unmap a level 3 contiguous superpage.
  *
  * The caller is responsible for performing the TLB invalidations for [sva,
- * eva) based the returned *vap.
+ * sva + L3C_SIZE) based the returned *vap.
+ *
+ * N.B.: eva is not the end of the superpage, but rather the last L3 entry
+ * in the current L3 table that will eventually be removed.
  */
 static bool
 pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
@@ -2963,8 +2966,6 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
 	    1)) == 0, ("pmap_remove_l3c: start_l3 is not aligned"));
 	KASSERT((sva & L3C_OFFSET) == 0,
 	    ("pmap_remove_l3c: sva is not aligned"));
-	KASSERT((eva & L3C_OFFSET) == 0,
-	    ("pmap_remove_l3c: eva is not aligned"));
 	end_l3 = start_l3 + L3C_ENTRIES;
 
 	/*
