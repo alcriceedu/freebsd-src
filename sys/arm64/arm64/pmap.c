@@ -1189,6 +1189,10 @@ static u_long pmap_l3c_mappings;
 SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, mappings, CTLFLAG_RD,
     &pmap_l3c_mappings, 0, "64KB page mappings");
 
+static u_long pmap_l3c_removes;	// XXX
+SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, removes, CTLFLAG_RD,
+    &pmap_l3c_removes, 0, "64KB page removes XXX");
+
 /*
  * Invalidate a single TLB entry.
  */
@@ -2961,6 +2965,7 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
 	vm_offset_t va;
 	vm_page_t m, mt;
 
+	atomic_add_long(&pmap_l3c_removes, 1);	// XXX
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
 	KASSERT(((uintptr_t)start_l3 & ((L3C_ENTRIES * sizeof(pt_entry_t)) -
 	    1)) == 0, ("pmap_remove_l3c: start_l3 is not aligned"));
