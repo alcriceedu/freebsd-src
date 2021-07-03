@@ -6740,27 +6740,28 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 		 */
 		old_l3 = pmap_load(l3);
 		KASSERT((old_l3 & ATTR_CONTIGUOUS) != 0,
-		    ("missing ATTR_CONTIGUOUS"));
-		KASSERT((old_l3 & (ATTR_SW_DBM | ATTR_S1_AP_RW_BIT)) ==
+		    ("pmap_demote_l3c: missing ATTR_CONTIGUOUS"));
+		KASSERT((old_l3 & (ATTR_SW_DBM | ATTR_S1_AP_RW_BIT)) !=
 		    (ATTR_SW_DBM | ATTR_S1_AP(ATTR_S1_AP_RO)),
-		    ("writeable 64KB page not dirty"));
+		    ("pmap_demote_l3c: XXX"));
 		while (!atomic_fcmpset_64(l3, &old_l3, old_l3 &
 		    ~(ATTR_CONTIGUOUS | ATTR_DESCR_VALID)))
 			cpu_spinwait();
 
 		/*
-		 * Hardware updates to the accessed and dirty bits only apply
-		 * to a single L3 entry, so ... XXX
+		 * Hardware accessed and dirty bit maintenance might only
+		 * update a single L3 entry, so we must combine the accessed
+		 * and dirty bits from this entire set of contiguous L3
+		 * entries.
 		 */
 		if ((old_l3 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
 		    (ATTR_S1_AP(ATTR_S1_AP_RW) | ATTR_SW_DBM))
 			mask = ATTR_S1_AP_RW_BIT;
 		nbits |= old_l3 & ATTR_AF;
 	}
-	if ((nbits & ATTR_AF) != 0) {
-		pmap_invalidate_range(pmap, va & ~PAGE_MASK_64K, (va +
-		    PAGE_SIZE_64K) & ~PAGE_MASK_64K);
-	}
+	/* XXX Optimization: Skip if not ATTR_AF? */
+	pmap_invalidate_range(pmap, va & ~L3C_OFFSET, (va + L3C_SIZE) &
+	    ~L3C_OFFSET);
 	/* Remake the mappings, updating the accessed and dirty bits. */
 	for (l3 = start_l3; l3 < end_l3; l3++) {
 		old_l3 = pmap_load(l3);
