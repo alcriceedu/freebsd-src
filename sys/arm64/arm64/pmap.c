@@ -2976,6 +2976,8 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
 	old_first_l3 = pmap_load_clear(start_l3);
 	for (current_l3 = start_l3 + 1; current_l3 < end_l3; current_l3++) {
 		old_l3 = pmap_load_clear(current_l3);
+		KASSERT((old_l3 & ATTR_CONTIGUOUS) != 0,
+		    ("pmap_remove_l3c: missing ATTR_CONTIGUOUS"));
 		if ((old_l3 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
 		    (ATTR_S1_AP(ATTR_S1_AP_RW) | ATTR_SW_DBM))
 			old_first_l3 &= ~ATTR_S1_AP_RW_BIT;
