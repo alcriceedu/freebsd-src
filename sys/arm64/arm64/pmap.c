@@ -3405,14 +3405,16 @@ static void
 pmap_protect_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
     vm_offset_t *vap, vm_offset_t va_next, pt_entry_t mask, pt_entry_t nbits)
 {
-	bool dirty;
 	pt_entry_t l3, *l3p;
 	vm_page_t m, mt;
+	bool dirty;
 
-	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
 	PMAP_ASSERT_STAGE1(pmap);
+	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
 	KASSERT(((uintptr_t)start_l3 & (L3C_ENTRIES * sizeof(pt_entry_t) - 1))
 	    == 0, ("pmap_protect_l3c: start_l3 is not aligned"));
+	KASSERT((sva & L3C_OFFSET) == 0,
+	    ("pmap_protect_l3c: sva is not aligned"));
 
 	if (*vap == va_next)
 		*vap = sva;
