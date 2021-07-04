@@ -2953,6 +2953,9 @@ pmap_remove_l3(pmap_t pmap, pt_entry_t *l3, vm_offset_t va,
  *
  * N.B.: eva is not the end of the superpage, but rather the last L3 entry
  * in the current L3 table that will eventually be removed.
+ *
+ * Returns true if the L3 table "l3pg" was unmapped and added to the spglist
+ * "free".
  */
 static bool
 pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
