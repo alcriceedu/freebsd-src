@@ -4769,6 +4769,8 @@ pmap_enter_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 	dsb(ishst);
 
 	atomic_add_long(&pmap_l3c_mappings, 1);
+	CTR2(KTR_PMAP, "pmap_enter_l3c: success for va %#lx in pmap %p",
+	    va, pmap);
 	return (mpte);
 }
 
