@@ -3426,13 +3426,13 @@ pmap_protect_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
 
 	for (l3p = start_l3; l3p < start_l3 + L3C_ENTRIES; l3p++) {
 		l3 = pmap_load(l3p);
-retry:
+
+		while (!atomic_fcmpset_64(l3p, &l3, (l3 & ~mask) | nbits))
+			cpu_spinwait();
+
 		if ((l3 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
 		    (ATTR_S1_AP(ATTR_S1_AP_RW) | ATTR_SW_DBM))
 			dirty = true;
-
-		if (!atomic_fcmpset_64(l3p, &l3, (l3 & ~mask) | nbits))
-			goto retry;
 	}
 	/*
 	 * When a dirty read/write mapping is write protected,
