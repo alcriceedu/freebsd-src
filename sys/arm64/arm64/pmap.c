@@ -3374,9 +3374,11 @@ pmap_protect_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t sva, pt_entry_t mask,
 	 * Return if the L2 entry already has the desired access restrictions
 	 * in place.
 	 */
-retry:
 	if ((old_l2 & mask) == nbits)
 		return;
+
+	while (!atomic_fcmpset_64(l2, &old_l2, (old_l2 & ~mask) | nbits))
+		cpu_spinwait();
 
 	/*
 	 * When a dirty read/write superpage mapping is write protected,
@@ -3390,9 +3392,6 @@ retry:
 		for (mt = m; mt < &m[L2_SIZE / PAGE_SIZE]; mt++)
 			vm_page_dirty(mt);
 	}
-
-	if (!atomic_fcmpset_64(l2, &old_l2, (old_l2 & ~mask) | nbits))
-		goto retry;
 
 	/*
 	 * Since a promotion must break the 4KB page mappings before making
@@ -3414,38 +3413,33 @@ pmap_protect_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
 
 	PMAP_ASSERT_STAGE1(pmap);
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
-	KASSERT(((uintptr_t)start_l3 & (L3C_ENTRIES * sizeof(pt_entry_t) - 1))
-	    == 0, ("pmap_protect_l3c: start_l3 is not aligned"));
+	KASSERT(((uintptr_t)start_l3 & ((L3C_ENTRIES * sizeof(pt_entry_t)) -
+	    1)) == 0, ("pmap_protect_l3c: start_l3 is not aligned"));
 	KASSERT((sva & L3C_OFFSET) == 0,
 	    ("pmap_protect_l3c: sva is not aligned"));
-
-	if (*vap == va_next)
-		*vap = sva;
-
 	dirty = false;
-
 	for (l3p = start_l3; l3p < start_l3 + L3C_ENTRIES; l3p++) {
 		l3 = pmap_load(l3p);
-
 		while (!atomic_fcmpset_64(l3p, &l3, (l3 & ~mask) | nbits))
 			cpu_spinwait();
-
 		if ((l3 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
 		    (ATTR_S1_AP(ATTR_S1_AP_RW) | ATTR_SW_DBM))
 			dirty = true;
 	}
+
 	/*
-	 * When a dirty read/write mapping is write protected,
-	 * update the dirty field of each page in the superpage.
+	 * When a dirty read/write mapping is write protected, update the
+	 * dirty field of each page in the superpage.
 	 */
 	if ((l3 & ATTR_SW_MANAGED) != 0 &&
-	    (nbits & ATTR_S1_AP(ATTR_S1_AP_RO)) != 0 &&
-	    dirty) {
+	    (nbits & ATTR_S1_AP(ATTR_S1_AP_RO)) != 0 && dirty) {
 		m = PHYS_TO_VM_PAGE(pmap_load(start_l3) & ~ATTR_MASK);
-		for (mt = m; mt < m + L3C_ENTRIES; mt++) {
+		for (mt = m; mt < m + L3C_ENTRIES; mt++)
 			vm_page_dirty(m);
-		}
 	}
+
+	if (*vap == va_next)
+		*vap = sva;
 }
 
 /*
@@ -3532,7 +3526,7 @@ pmap_protect(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, vm_prot_t prot)
 		for (l3p = pmap_l2_to_l3(l2, sva); sva != va_next; l3p++,
 		    sva += L3_SIZE) {
 			l3 = pmap_load(l3p);
-retry:
+
 			/*
 			 * Go to the next L3 entry if the current one is
 			 * invalid or already has the desired access
@@ -3577,6 +3571,10 @@ retry:
 				}
 			}
 
+			while (!atomic_fcmpset_64(l3p, &l3, (l3 & ~mask) |
+			    nbits))
+				cpu_spinwait();
+
 			/*
 			 * When a dirty read/write mapping is write protected,
 			 * update the page's dirty field.
@@ -3586,8 +3584,6 @@ retry:
 			    pmap_pte_dirty(pmap, l3))
 				vm_page_dirty(PHYS_TO_VM_PAGE(l3 & ~ATTR_MASK));
 
-			if (!atomic_fcmpset_64(l3p, &l3, (l3 & ~mask) | nbits))
-				goto retry;
 			if (va == va_next)
 				va = sva;
 		}
@@ -3727,7 +3723,6 @@ pmap_promote_l2(pmap_t pmap, pd_entry_t *l2, vm_offset_t va,
 	firstl3 = pmap_l2_to_l3(l2, sva);
 	newl2 = pmap_load(firstl3);
 
-setl2:
 	if (((newl2 & (~ATTR_MASK | ATTR_AF)) & L2_OFFSET) != ATTR_AF) {
 		atomic_add_long(&pmap_l2_p_failures, 1);
 		CTR2(KTR_PMAP, "pmap_promote_l2: failure for va %#lx"
@@ -3735,6 +3730,7 @@ setl2:
 		return;
 	}
 
+setl2:
 	if ((newl2 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
 	    (ATTR_S1_AP(ATTR_S1_AP_RO) | ATTR_SW_DBM)) {
 		/*
