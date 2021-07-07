@@ -4898,6 +4898,74 @@ pmap_unwire(pmap_t pmap, vm_offset_t sva, vm_offset_t eva)
 	PMAP_UNLOCK(pmap);
 }
 
+/* XXX m = dst_m, dstmpte = mpte, va = addr, pmap = dst_pmap, lockp = &lock, ptetemp */
+static bool
+pmap_copy_l3c(pmap_t dst_pmap, vm_offset_t addr, vm_page_t dst_m,
+    pt_entry_t ptetemp, vm_page_t dstmpte, struct rwlock **lockp)
+{
+	pt_entry_t *l3, *l3p;
+	vm_offset_t tva;
+	vm_page_t mt;
+
+	PMAP_ASSERT_STAGE1(dst_pmap);
+	PMAP_LOCK_ASSERT(dst_pmap, MA_OWNED);
+	KASSERT((addr & L3C_OFFSET) == 0,
+	    ("pmap_copy_l3c: va is not aligned"));
+	KASSERT(!VA_IS_CLEANMAP(addr) ||
+	    (dst_m->oflags & VPO_UNMANAGED) != 0,
+	    ("pmap_copy_l3c: managed mapping within the clean submap"));
+
+	dstmpte->ref_count += L3C_ENTRIES - 1;
+	l3 = (pt_entry_t *)PHYS_TO_DMAP(VM_PAGE_TO_PHYS(dstmpte));
+	l3 = &l3[pmap_l3_index(addr)];
+
+	/*
+	 * Abort if a mapping already exists.
+	 */
+	for (l3p = l3; l3p < &l3[L3C_ENTRIES]; l3p++)
+		if (pmap_load(l3p) != 0) {
+			if (dstmpte != NULL)
+				dstmpte->ref_count -= L3C_ENTRIES;
+			return (false);
+		}
+
+	/*
+	 * Enter on the PV list if part of our managed memory.
+	 */
+	if ((dst_m->oflags & VPO_UNMANAGED) == 0)
+		for (tva = addr, mt = dst_m; tva < addr + L3C_SIZE;
+		    tva += L3_SIZE, mt++)
+			if (!pmap_try_insert_pv_entry(dst_pmap, tva, mt, lockp)) {
+				while (tva > addr) {
+					tva -= L3_SIZE;
+					mt--;
+					pmap_pvh_free(&mt->md, dst_pmap, tva);
+				}
+				if (dstmpte != NULL) {
+					dstmpte->ref_count -= L3C_ENTRIES - 1;
+					pmap_abort_ptp(dst_pmap, addr, dstmpte);
+				}
+				return (false);
+			}
+
+	/*
+	 * Increment counters
+	 */
+	pmap_resident_count_inc(dst_pmap, L3C_ENTRIES);
+
+	for (l3p = l3; l3p < &l3[L3C_ENTRIES]; l3p++) {
+		pmap_store(l3p, ptetemp);
+		ptetemp += L3_SIZE;
+	}
+	dsb(ishst);
+
+	atomic_add_long(&pmap_l3c_mappings, 1);
+	CTR2(KTR_PMAP, "pmap_copy_l3c: success for va %#lx in pmap %p",
+	    addr, dst_pmap);
+
+	return (true);
+}
+
 /*
  *	Copy the range specified by src_addr/len
  *	from the source map to the range dst_addr/len
@@ -5021,14 +5089,6 @@ pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, vm_offset_t dst_addr, vm_size_t len,
 			if ((ptetemp & ATTR_SW_MANAGED) == 0)
 				continue;
 
-			/*
-			 * XXX Don't copy ATTR_CONTIGUOUS for now.
-			 * The tricky part to making ATTR_CONTIGUOUS work is
-			 * that PV entry allocation could fail, in which case
-			 * we would have to back out the ATTR_CONTIGUOUS bit.
-			 */
-			ptetemp &= ~ATTR_CONTIGUOUS;
-
 			if (dstmpte != NULL) {
 				KASSERT(dstmpte->pindex == pmap_l2_pindex(addr),
 				    ("dstmpte pindex/addr mismatch"));
@@ -5036,6 +5096,17 @@ pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, vm_offset_t dst_addr, vm_size_t len,
 			} else if ((dstmpte = pmap_alloc_l3(dst_pmap, addr,
 			    NULL)) == NULL)
 				goto out;
+			if ((ptetemp & ATTR_CONTIGUOUS) != 0 && (addr &
+			    L3C_OFFSET) == 0 && addr + L3C_OFFSET <=
+			    va_next - 1) {
+				if (!pmap_copy_l3c(dst_pmap, addr, dst_m,
+				    ptetemp, dstmpte, &lock))
+					goto out;
+				addr += L3C_SIZE - PAGE_SIZE;
+				src_pte += L3C_ENTRIES - 1;
+				continue;
+			}
+			ptetemp &= ~ATTR_CONTIGUOUS;
 			dst_pte = (pt_entry_t *)
 			    PHYS_TO_DMAP(VM_PAGE_TO_PHYS(dstmpte));
 			dst_pte = &dst_pte[pmap_l3_index(addr)];
