@@ -1193,6 +1193,10 @@ static u_long pmap_l3c_removes;	// XXX
 SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, removes, CTLFLAG_RD,
     &pmap_l3c_removes, 0, "64KB page removes XXX");
 
+static u_long pmap_l3c_protects;	// XXX
+SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, protects, CTLFLAG_RD,
+    &pmap_l3c_protects, 0, "64KB page protects XXX");
+
 /*
  * Invalidate a single TLB entry.
  */
@@ -3411,6 +3415,7 @@ pmap_protect_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
 	vm_page_t m, mt;
 	bool dirty;
 
+	atomic_add_long(&pmap_l3c_protects, 1);	// XXX
 	PMAP_ASSERT_STAGE1(pmap);
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
 	KASSERT(((uintptr_t)start_l3 & ((L3C_ENTRIES * sizeof(pt_entry_t)) -
