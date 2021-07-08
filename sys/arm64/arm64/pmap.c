@@ -4922,24 +4922,23 @@ pmap_copy_l3c(pmap_t dst_pmap, vm_offset_t addr, pt_entry_t ptetemp, vm_page_t
 		}
 
 	/*
-	 * Enter on the PV list if part of our managed memory.
+	 * Enter on the PV list since we know this is managed memory.
 	 */
 	dst_m = PHYS_TO_VM_PAGE(ptetemp & ~ATTR_MASK);
-	if ((dst_m->oflags & VPO_UNMANAGED) == 0)
-		for (tva = addr, mt = dst_m; tva < addr + L3C_SIZE;
-		    tva += L3_SIZE, mt++)
-			if (!pmap_try_insert_pv_entry(dst_pmap, tva, mt, lockp)) {
-				while (tva > addr) {
-					tva -= L3_SIZE;
-					mt--;
-					pmap_pvh_free(&mt->md, dst_pmap, tva);
-				}
-				if (dstmpte != NULL) {
-					dstmpte->ref_count -= L3C_ENTRIES - 1;
-					pmap_abort_ptp(dst_pmap, addr, dstmpte);
-				}
-				return (false);
+	for (tva = addr, mt = dst_m; tva < addr + L3C_SIZE; tva += L3_SIZE,
+	    mt++)
+		if (!pmap_try_insert_pv_entry(dst_pmap, tva, mt, lockp)) {
+			while (tva > addr) {
+				tva -= L3_SIZE;
+				mt--;
+				pmap_pvh_free(&mt->md, dst_pmap, tva);
 			}
+			if (dstmpte != NULL) {
+				dstmpte->ref_count -= L3C_ENTRIES - 1;
+				pmap_abort_ptp(dst_pmap, addr, dstmpte);
+			}
+			return (false);
+		}
 
 	/*
 	 * Increment counters
