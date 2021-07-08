@@ -1197,6 +1197,10 @@ static u_long pmap_l3c_protects;	// XXX
 SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, protects, CTLFLAG_RD,
     &pmap_l3c_protects, 0, "64KB page protects XXX");
 
+static u_long pmap_l3c_copies;	// XXX
+SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, copies, CTLFLAG_RD,
+    &pmap_l3c_copies, 0, "64KB page copies XXX");
+
 /*
  * Invalidate a single TLB entry.
  */
@@ -4956,6 +4960,7 @@ pmap_copy_l3c(pmap_t dst_pmap, vm_offset_t addr, pt_entry_t ptetemp, vm_page_t
 		ptetemp += L3_SIZE;
 	}
 
+	atomic_add_long(&pmap_l3c_copies, 1);	// XXX
 	atomic_add_long(&pmap_l3c_mappings, 1);
 	CTR2(KTR_PMAP, "pmap_copy_l3c: success for va %#lx in pmap %p",
 	    addr, dst_pmap);
