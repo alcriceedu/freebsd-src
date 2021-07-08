@@ -4894,22 +4894,18 @@ pmap_unwire(pmap_t pmap, vm_offset_t sva, vm_offset_t eva)
 	PMAP_UNLOCK(pmap);
 }
 
-/* XXX m = dst_m, dstmpte = mpte, va = addr, pmap = dst_pmap, lockp = &lock, ptetemp */
 static bool
-pmap_copy_l3c(pmap_t dst_pmap, vm_offset_t addr, vm_page_t dst_m,
-    pt_entry_t ptetemp, vm_page_t dstmpte, struct rwlock **lockp)
+pmap_copy_l3c(pmap_t dst_pmap, vm_offset_t addr, pt_entry_t ptetemp, vm_page_t
+    dstmpte, struct rwlock **lockp)
 {
 	pt_entry_t *l3, *l3p;
 	vm_offset_t tva;
-	vm_page_t mt;
+	vm_page_t dst_m, mt;
 
 	PMAP_ASSERT_STAGE1(dst_pmap);
 	PMAP_LOCK_ASSERT(dst_pmap, MA_OWNED);
 	KASSERT((addr & L3C_OFFSET) == 0,
 	    ("pmap_copy_l3c: va is not aligned"));
-	KASSERT(!VA_IS_CLEANMAP(addr) ||
-	    (dst_m->oflags & VPO_UNMANAGED) != 0,
-	    ("pmap_copy_l3c: managed mapping within the clean submap"));
 
 	dstmpte->ref_count += L3C_ENTRIES - 1;
 	l3 = (pt_entry_t *)PHYS_TO_DMAP(VM_PAGE_TO_PHYS(dstmpte));
@@ -4928,6 +4924,7 @@ pmap_copy_l3c(pmap_t dst_pmap, vm_offset_t addr, vm_page_t dst_m,
 	/*
 	 * Enter on the PV list if part of our managed memory.
 	 */
+	dst_m = PHYS_TO_VM_PAGE(ptetemp & ~ATTR_MASK);
 	if ((dst_m->oflags & VPO_UNMANAGED) == 0)
 		for (tva = addr, mt = dst_m; tva < addr + L3C_SIZE;
 		    tva += L3_SIZE, mt++)
@@ -4953,7 +4950,6 @@ pmap_copy_l3c(pmap_t dst_pmap, vm_offset_t addr, vm_page_t dst_m,
 		pmap_store(l3p, ptetemp);
 		ptetemp += L3_SIZE;
 	}
-	dsb(ishst);
 
 	atomic_add_long(&pmap_l3c_mappings, 1);
 	CTR2(KTR_PMAP, "pmap_copy_l3c: success for va %#lx in pmap %p",
@@ -5095,8 +5091,8 @@ pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, vm_offset_t dst_addr, vm_size_t len,
 			if ((ptetemp & ATTR_CONTIGUOUS) != 0 && (addr &
 			    L3C_OFFSET) == 0 && addr + L3C_OFFSET <=
 			    va_next - 1) {
-				if (!pmap_copy_l3c(dst_pmap, addr, dst_m,
-				    ptetemp, dstmpte, &lock))
+				if (!pmap_copy_l3c(dst_pmap, addr, ptetemp,
+				    dstmpte, &lock))
 					goto out;
 				addr += L3C_SIZE - PAGE_SIZE;
 				src_pte += L3C_ENTRIES - 1;
@@ -5112,14 +5108,10 @@ pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, vm_offset_t dst_addr, vm_size_t len,
 				/*
 				 * Clear the wired, modified, and accessed
 				 * (referenced) bits during the copy.
-				 * XXX Do not change the modified bit for 64KB
-				 * pages because writeable 64KB pages are
-				 * expected to be dirty.
 				 */
 				mask = ATTR_AF | ATTR_SW_WIRED;
 				nbits = 0;
-				if ((ptetemp & (ATTR_SW_DBM |
-				    ATTR_CONTIGUOUS)) == ATTR_SW_DBM)
+				if ((ptetemp & ATTR_SW_DBM) != 0)
 					nbits |= ATTR_S1_AP_RW_BIT;
 				pmap_store(dst_pte, (ptetemp & ~mask) | nbits);
 				pmap_resident_count_inc(dst_pmap, 1);
