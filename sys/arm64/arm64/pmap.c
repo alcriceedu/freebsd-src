@@ -4914,7 +4914,9 @@ pmap_copy_l3c(pmap_t dst_pmap, vm_offset_t addr, pt_entry_t ptetemp, vm_page_t
 	PMAP_ASSERT_STAGE1(dst_pmap);
 	PMAP_LOCK_ASSERT(dst_pmap, MA_OWNED);
 	KASSERT((addr & L3C_OFFSET) == 0,
-	    ("pmap_copy_l3c: va is not aligned"));
+	    ("pmap_copy_l3c: addr is not aligned"));
+	KASSERT((ptetemp & ATTR_SW_MANAGED) != 0,
+	    ("pmap_copy_l3c: ptetemp is not managed"));
 
 	dstmpte->ref_count += L3C_ENTRIES - 1;
 	l3 = (pt_entry_t *)PHYS_TO_DMAP(VM_PAGE_TO_PHYS(dstmpte));
