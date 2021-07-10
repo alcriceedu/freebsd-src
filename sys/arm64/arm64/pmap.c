@@ -383,8 +383,8 @@ static void pmap_abort_ptp(pmap_t pmap, vm_offset_t va, vm_page_t mpte);
 static bool pmap_activate_int(pmap_t pmap);
 static void pmap_alloc_asid(pmap_t pmap);
 static int pmap_change_attr_locked(vm_offset_t va, vm_size_t size, int mode);
-static bool pmap_copy_l3c(pmap_t dst_pmap, vm_offset_t addr, pt_entry_t ptetemp,
-    vm_page_t dstmpte, struct rwlock **lockp);
+static bool pmap_copy_l3c(pmap_t pmap, vm_offset_t va, pt_entry_t l3e,
+    vm_page_t ml3, struct rwlock **lockp);
 static pt_entry_t *pmap_demote_l1(pmap_t pmap, pt_entry_t *l1, vm_offset_t va);
 static pt_entry_t *pmap_demote_l2_locked(pmap_t pmap, pt_entry_t *l2,
     vm_offset_t va, struct rwlock **lockp);
@@ -406,7 +406,7 @@ static int pmap_remove_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t sva,
 static int pmap_remove_l3(pmap_t pmap, pt_entry_t *l3, vm_offset_t sva,
     pd_entry_t l2e, struct spglist *free, struct rwlock **lockp);
 static bool pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
-    vm_offset_t eva, vm_offset_t *vap, vm_page_t l3pg, struct spglist *free,
+    vm_offset_t *vap, vm_offset_t va_next, vm_page_t ml3, struct spglist *free,
     struct rwlock **lockp);
 static void pmap_reset_asid_set(pmap_t pmap);
 static boolean_t pmap_try_insert_pv_entry(pmap_t pmap, vm_offset_t va,
@@ -3002,16 +3002,13 @@ pmap_remove_l3(pmap_t pmap, pt_entry_t *l3, vm_offset_t va,
  * The caller is responsible for performing the TLB invalidations for [sva,
  * sva + L3C_SIZE) based the returned *vap.
  *
- * N.B.: eva is not the end of the superpage, but rather the last L3 entry
- * in the current L3 table that will eventually be removed.
- *
- * Returns true if the L3 table "l3pg" was unmapped and added to the spglist
+ * Returns true if the L3 table "ml3" was unmapped and added to the spglist
  * "free".
  */
 static bool
 pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
-    vm_offset_t eva, vm_offset_t *vap, vm_page_t l3pg, struct spglist *free,
-    struct rwlock **lockp)
+    vm_offset_t *vap, vm_offset_t va_next, vm_page_t ml3,
+    struct spglist *free, struct rwlock **lockp)
 {
 	struct md_page *pvh;
 	struct rwlock *new_lock;
@@ -3057,9 +3054,9 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
 				 * could return while a stale TLB entry
 				 * still provides access to that page.
 				 */
-				if (*vap != eva) {
+				if (*vap != va_next) {
 					pmap_invalidate_range(pmap, *vap, sva);
-					*vap = eva;
+					*vap = va_next;
 				}
 				rw_wunlock(*lockp);
 			}
@@ -3080,12 +3077,12 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
 				vm_page_aflag_clear(mt, PGA_WRITEABLE);
 		}
 	}
-	if (*vap == eva)
+	if (*vap == va_next)
 		*vap = sva;
-	if (l3pg != NULL) {
-		l3pg->ref_count -= L3C_ENTRIES;
-		if (l3pg->ref_count == 0) {
-			_pmap_unwire_l3(pmap, sva, l3pg, free);
+	if (ml3 != NULL) {
+		ml3->ref_count -= L3C_ENTRIES;
+		if (ml3->ref_count == 0) {
+			_pmap_unwire_l3(pmap, sva, ml3, free);
 			return (true);
 		}
 	}
@@ -3129,7 +3126,7 @@ pmap_remove_l3_range(pmap_t pmap, pd_entry_t l2e, vm_offset_t sva,
 			 */
 			if ((sva & L3C_OFFSET) == 0 &&
 			    sva + L3C_OFFSET <= eva - 1) {
-				if (pmap_remove_l3c(pmap, l3, sva, eva, &va,
+				if (pmap_remove_l3c(pmap, l3, sva, &va, eva,
 				    l3pg, free, lockp)) {
 					/* The L3 table was unmapped. */
 					sva += L3C_SIZE;
