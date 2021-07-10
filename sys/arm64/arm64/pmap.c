@@ -3455,7 +3455,7 @@ static void
 pmap_protect_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
     vm_offset_t *vap, vm_offset_t va_next, pt_entry_t mask, pt_entry_t nbits)
 {
-	pt_entry_t l3, *l3p;
+	pt_entry_t l3e, *l3p;
 	vm_page_t m, mt;
 	bool dirty;
 
@@ -3468,10 +3468,10 @@ pmap_protect_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
 	    ("pmap_protect_l3c: sva is not aligned"));
 	dirty = false;
 	for (l3p = start_l3; l3p < start_l3 + L3C_ENTRIES; l3p++) {
-		l3 = pmap_load(l3p);
-		while (!atomic_fcmpset_64(l3p, &l3, (l3 & ~mask) | nbits))
+		l3e = pmap_load(l3p);
+		while (!atomic_fcmpset_64(l3p, &l3e, (l3e & ~mask) | nbits))
 			cpu_spinwait();
-		if ((l3 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
+		if ((l3e & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
 		    (ATTR_S1_AP(ATTR_S1_AP_RW) | ATTR_SW_DBM))
 			dirty = true;
 	}
@@ -3480,7 +3480,7 @@ pmap_protect_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
 	 * When a dirty read/write mapping is write protected, update the
 	 * dirty field of each page in the superpage.
 	 */
-	if ((l3 & ATTR_SW_MANAGED) != 0 &&
+	if ((l3e & ATTR_SW_MANAGED) != 0 &&
 	    (nbits & ATTR_S1_AP(ATTR_S1_AP_RO)) != 0 && dirty) {
 		m = PHYS_TO_VM_PAGE(pmap_load(start_l3) & ~ATTR_MASK);
 		for (mt = m; mt < &m[L3C_ENTRIES]; mt++)
