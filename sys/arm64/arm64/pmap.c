@@ -5130,8 +5130,14 @@ pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, vm_offset_t dst_addr, vm_size_t len,
 			if ((ptetemp & ATTR_CONTIGUOUS) != 0 && (addr &
 			    L3C_OFFSET) == 0 && addr + L3C_OFFSET <=
 			    va_next - 1) {
-				if (!pmap_copy_l3c(dst_pmap, addr, ptetemp,
-				    dstmpte, &lock))
+				/*
+				 * Clear the wired bit during the copy.
+				 * XXX It's not obvious what the state
+				 * of the accessed bit will be.  Clear
+				 * it?
+				 */
+				if (!pmap_copy_l3c(dst_pmap, addr, ptetemp &
+				    ~ATTR_SW_WIRED, dstmpte, &lock))
 					goto out;
 				addr += L3C_SIZE - PAGE_SIZE;
 				src_pte += L3C_ENTRIES - 1;
