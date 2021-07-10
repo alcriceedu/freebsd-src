@@ -397,6 +397,8 @@ static vm_page_t pmap_enter_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m,
 static pt_entry_t pmap_load_l3c(pt_entry_t *l3p);
 static void pmap_protect_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
     vm_offset_t *vap, vm_offset_t va_next, pt_entry_t mask, pt_entry_t nbits);
+static bool pmap_pv_try_insert_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m,
+    struct rwlock **lockp);
 static int pmap_remove_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t sva,
     pd_entry_t l1e, struct spglist *free, struct rwlock **lockp);
 static int pmap_remove_l3(pmap_t pmap, pt_entry_t *l3, vm_offset_t sva,
@@ -2823,6 +2825,45 @@ pmap_pv_insert_l2(pmap_t pmap, vm_offset_t va, pd_entry_t l2e, u_int flags,
 	return (true);
 }
 
+/*
+ * Conditionally create the PV entries for a 64KB page mapping if the required
+ * memory can be allocated without resorting to reclamation.
+ */
+static bool
+pmap_pv_try_insert_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m,
+    struct rwlock **lockp)
+{
+	pv_entry_t pv;
+	vm_offset_t eva, tva;
+	vm_paddr_t pa;
+	vm_page_t mt;
+
+	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
+	KASSERT((va & L3C_OFFSET) == 0,
+	    ("pmap_pv_try_insert_l3c: va is not aligned"));
+	pa = VM_PAGE_TO_PHYS(m);
+	KASSERT((pa & L3C_OFFSET) == 0,
+	    ("pmap_pv_try_insert_l3c: pa is not aligned"));
+	CHANGE_PV_LIST_LOCK_TO_PHYS(lockp, pa);
+	eva = va + L3C_SIZE;
+	for (tva = va, mt = m; tva < eva; tva += L3_SIZE, mt++) {
+		/* Pass NULL instead of lockp to disable reclamation. */
+		pv = get_pv_entry(pmap, NULL);
+		if (__predict_false(pv == NULL)) {
+			while (tva > va) {
+				tva -= L3_SIZE;
+				mt--;
+				pmap_pvh_free(&mt->md, pmap, tva);
+			}
+			return (false);
+		}
+		pv->pv_va = tva;
+		TAILQ_INSERT_TAIL(&mt->md.pv_list, pv, pv_next);
+		mt->md.pv_gen++;
+	}
+	return (true);
+}
+
 static void
 pmap_remove_kernel_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t va)
 {
@@ -4635,9 +4676,7 @@ pmap_enter_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 {
 	pd_entry_t *pde;
 	pt_entry_t *l2, *l3, l3_val, *l3p;
-	vm_offset_t tva;
 	vm_paddr_t pa;
-	vm_page_t mt;
 	vm_pindex_t l2pindex;
 	int lvl;
 
@@ -4719,21 +4758,14 @@ pmap_enter_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 	/*
 	 * Enter on the PV list if part of our managed memory.
 	 */
-	if ((m->oflags & VPO_UNMANAGED) == 0)
-		for (tva = va, mt = m; tva < va + L3C_SIZE; tva += L3_SIZE,
-		    mt++)
-			if (!pmap_try_insert_pv_entry(pmap, tva, mt, lockp)) {
-				while (tva > va) {
-					tva -= L3_SIZE;
-					mt--;
-					pmap_pvh_free(&mt->md, pmap, tva);
-				}
-				if (mpte != NULL) {
-					mpte->ref_count -= L3C_ENTRIES - 1;
-					pmap_abort_ptp(pmap, va, mpte);
-				}
-				return (NULL);
-			}
+	if ((m->oflags & VPO_UNMANAGED) == 0 &&
+	    !pmap_pv_try_insert_l3c(pmap, va, m, lockp)) {
+		if (mpte != NULL) {
+			mpte->ref_count -= L3C_ENTRIES - 1;
+			pmap_abort_ptp(pmap, va, mpte);
+		}
+		return (NULL);
+	}
 
 	/*
 	 * Increment counters
@@ -4908,8 +4940,6 @@ pmap_copy_l3c(pmap_t dst_pmap, vm_offset_t addr, pt_entry_t ptetemp, vm_page_t
     dstmpte, struct rwlock **lockp)
 {
 	pt_entry_t *l3, *l3p;
-	vm_offset_t tva;
-	vm_page_t dst_m, mt;
 
 	PMAP_ASSERT_STAGE1(dst_pmap);
 	PMAP_LOCK_ASSERT(dst_pmap, MA_OWNED);
@@ -4935,21 +4965,14 @@ pmap_copy_l3c(pmap_t dst_pmap, vm_offset_t addr, pt_entry_t ptetemp, vm_page_t
 	/*
 	 * Enter on the PV list since we know this is managed memory.
 	 */
-	dst_m = PHYS_TO_VM_PAGE(ptetemp & ~ATTR_MASK);
-	for (tva = addr, mt = dst_m; tva < addr + L3C_SIZE; tva += L3_SIZE,
-	    mt++)
-		if (!pmap_try_insert_pv_entry(dst_pmap, tva, mt, lockp)) {
-			while (tva > addr) {
-				tva -= L3_SIZE;
-				mt--;
-				pmap_pvh_free(&mt->md, dst_pmap, tva);
-			}
-			if (dstmpte != NULL) {
-				dstmpte->ref_count -= L3C_ENTRIES - 1;
-				pmap_abort_ptp(dst_pmap, addr, dstmpte);
-			}
-			return (false);
+	if (!pmap_pv_try_insert_l3c(dst_pmap, addr, PHYS_TO_VM_PAGE(ptetemp &
+	    ~ATTR_MASK), lockp)) {
+		if (dstmpte != NULL) {
+			dstmpte->ref_count -= L3C_ENTRIES - 1;
+			pmap_abort_ptp(dst_pmap, addr, dstmpte);
 		}
+		return (false);
+	}
 
 	/*
 	 * Increment counters
