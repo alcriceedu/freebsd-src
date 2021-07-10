@@ -395,7 +395,7 @@ static vm_page_t pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va,
 static int pmap_enter_l2(pmap_t pmap, vm_offset_t va, pd_entry_t new_l2,
     u_int flags, vm_page_t m, struct rwlock **lockp);
 static vm_page_t pmap_enter_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m,
-    vm_prot_t prot, vm_page_t mpte, struct rwlock **lockp);
+    vm_prot_t prot, vm_page_t ml3, struct rwlock **lockp);
 static pt_entry_t pmap_load_l3c(pt_entry_t *l3p);
 static void pmap_protect_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
     vm_offset_t *vap, vm_offset_t va_next, pt_entry_t mask, pt_entry_t nbits);
@@ -3483,7 +3483,7 @@ pmap_protect_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
 	if ((l3 & ATTR_SW_MANAGED) != 0 &&
 	    (nbits & ATTR_S1_AP(ATTR_S1_AP_RO)) != 0 && dirty) {
 		m = PHYS_TO_VM_PAGE(pmap_load(start_l3) & ~ATTR_MASK);
-		for (mt = m; mt < m + L3C_ENTRIES; mt++)
+		for (mt = m; mt < &m[L3C_ENTRIES]; mt++)
 			vm_page_dirty(m);
 	}
 
