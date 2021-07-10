@@ -2836,7 +2836,7 @@ pmap_pv_try_insert_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m,
     struct rwlock **lockp)
 {
 	pv_entry_t pv;
-	vm_offset_t eva, tva;
+	vm_offset_t sva;
 	vm_paddr_t pa;
 	vm_page_t mt;
 
@@ -2847,19 +2847,19 @@ pmap_pv_try_insert_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m,
 	KASSERT((pa & L3C_OFFSET) == 0,
 	    ("pmap_pv_try_insert_l3c: pa is not aligned"));
 	CHANGE_PV_LIST_LOCK_TO_PHYS(lockp, pa);
-	eva = va + L3C_SIZE;
-	for (tva = va, mt = m; tva < eva; tva += L3_SIZE, mt++) {
+	sva = va;
+	for (mt = m; mt < &m[L3C_ENTRIES]; mt++, va += L3_SIZE) {
 		/* Pass NULL instead of lockp to disable reclamation. */
 		pv = get_pv_entry(pmap, NULL);
 		if (__predict_false(pv == NULL)) {
-			while (tva > va) {
-				tva -= L3_SIZE;
+			while (va > sva) {
+				va -= L3_SIZE;
 				mt--;
-				pmap_pvh_free(&mt->md, pmap, tva);
+				pmap_pvh_free(&mt->md, pmap, va);
 			}
 			return (false);
 		}
-		pv->pv_va = tva;
+		pv->pv_va = va;
 		TAILQ_INSERT_TAIL(&mt->md.pv_list, pv, pv_next);
 		mt->md.pv_gen++;
 	}
@@ -3069,7 +3069,7 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
 		m = PHYS_TO_VM_PAGE(old_first_l3 & ~ATTR_MASK);
 		pvh = page_to_pvh(m);
 		for (mt = m, va = sva; mt < &m[L3C_ENTRIES]; mt++, va +=
-		    PAGE_SIZE) {
+		    L3_SIZE) {
 			if (pmap_pte_dirty(pmap, old_first_l3))
 				vm_page_dirty(mt);
 			if ((old_first_l3 & ATTR_AF) != 0)
