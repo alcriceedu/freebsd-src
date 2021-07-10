@@ -383,6 +383,8 @@ static void pmap_abort_ptp(pmap_t pmap, vm_offset_t va, vm_page_t mpte);
 static bool pmap_activate_int(pmap_t pmap);
 static void pmap_alloc_asid(pmap_t pmap);
 static int pmap_change_attr_locked(vm_offset_t va, vm_size_t size, int mode);
+static bool pmap_copy_l3c(pmap_t dst_pmap, vm_offset_t addr, pt_entry_t ptetemp,
+    vm_page_t dstmpte, struct rwlock **lockp);
 static pt_entry_t *pmap_demote_l1(pmap_t pmap, pt_entry_t *l1, vm_offset_t va);
 static pt_entry_t *pmap_demote_l2_locked(pmap_t pmap, pt_entry_t *l2,
     vm_offset_t va, struct rwlock **lockp);
@@ -4935,9 +4937,12 @@ pmap_unwire(pmap_t pmap, vm_offset_t sva, vm_offset_t eva)
 	PMAP_UNLOCK(pmap);
 }
 
+/*
+ * XXX
+ */
 static bool
-pmap_copy_l3c(pmap_t dst_pmap, vm_offset_t addr, pt_entry_t ptetemp, vm_page_t
-    dstmpte, struct rwlock **lockp)
+pmap_copy_l3c(pmap_t dst_pmap, vm_offset_t addr, pt_entry_t ptetemp,
+    vm_page_t dstmpte, struct rwlock **lockp)
 {
 	pt_entry_t *l3, *l3p;
 
