@@ -4671,7 +4671,7 @@ pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va, vm_page_t m,
  */
 static vm_page_t
 pmap_enter_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
-    vm_page_t mpte, struct rwlock **lockp)
+    vm_page_t ml3, struct rwlock **lockp)
 {
 	pd_entry_t *pde;
 	pt_entry_t *l2, *l3, l3_val, *l3p;
@@ -4696,8 +4696,8 @@ pmap_enter_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 		 * Calculate pagetable page index
 		 */
 		l2pindex = pmap_l2_pindex(va);
-		if (mpte != NULL && mpte->pindex == l2pindex) {
-			mpte->ref_count += L3C_ENTRIES;
+		if (ml3 != NULL && ml3->pindex == l2pindex) {
+			ml3->ref_count += L3C_ENTRIES;
 		} else {
 			/*
 			 * Get the l2 entry
@@ -4717,24 +4717,24 @@ pmap_enter_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 					return (NULL);
 			}
 			if (lvl == 2 && pmap_load(pde) != 0) {
-				mpte =
+				ml3 =
 				    PHYS_TO_VM_PAGE(pmap_load(pde) & ~ATTR_MASK);
-				mpte->ref_count += L3C_ENTRIES;
+				ml3->ref_count += L3C_ENTRIES;
 			} else {
 				/*
 				 * Pass NULL instead of the PV list lock
 				 * pointer, because we don't intend to sleep.
 				 */
-				mpte = _pmap_alloc_l3(pmap, l2pindex, NULL);
-				if (mpte == NULL)
-					return (mpte);
-				mpte->ref_count += L3C_ENTRIES - 1;
+				ml3 = _pmap_alloc_l3(pmap, l2pindex, NULL);
+				if (ml3 == NULL)
+					return (ml3);
+				ml3->ref_count += L3C_ENTRIES - 1;
 			}
 		}
-		l3 = (pt_entry_t *)PHYS_TO_DMAP(VM_PAGE_TO_PHYS(mpte));
+		l3 = (pt_entry_t *)PHYS_TO_DMAP(VM_PAGE_TO_PHYS(ml3));
 		l3 = &l3[pmap_l3_index(va)];
 	} else {
-		mpte = NULL;
+		ml3 = NULL;
 		pde = pmap_pde(kernel_pmap, va, &lvl);
 		KASSERT(pde != NULL,
 		    ("pmap_enter_l3c: Invalid page entry, va: 0x%lx",
@@ -4749,8 +4749,8 @@ pmap_enter_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 	 */
 	for (l3p = l3; l3p < &l3[L3C_ENTRIES]; l3p++)
 		if (pmap_load(l3p) != 0) {
-			if (mpte != NULL)
-				mpte->ref_count -= L3C_ENTRIES;
+			if (ml3 != NULL)
+				ml3->ref_count -= L3C_ENTRIES;
 			return (NULL);
 		}
 
@@ -4759,9 +4759,9 @@ pmap_enter_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 	 */
 	if ((m->oflags & VPO_UNMANAGED) == 0 &&
 	    !pmap_pv_try_insert_l3c(pmap, va, m, lockp)) {
-		if (mpte != NULL) {
-			mpte->ref_count -= L3C_ENTRIES - 1;
-			pmap_abort_ptp(pmap, va, mpte);
+		if (ml3 != NULL) {
+			ml3->ref_count -= L3C_ENTRIES - 1;
+			pmap_abort_ptp(pmap, va, ml3);
 		}
 		return (NULL);
 	}
@@ -4807,7 +4807,7 @@ pmap_enter_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 	atomic_add_long(&pmap_l3c_mappings, 1);
 	CTR2(KTR_PMAP, "pmap_enter_l3c: success for va %#lx in pmap %p",
 	    va, pmap);
-	return (mpte);
+	return (ml3);
 }
 
 /*
@@ -4939,7 +4939,7 @@ pmap_unwire(pmap_t pmap, vm_offset_t sva, vm_offset_t eva)
  */
 static bool
 pmap_copy_l3c(pmap_t dst_pmap, vm_offset_t addr, pt_entry_t ptetemp,
-    vm_page_t dstmpte, struct rwlock **lockp)
+    vm_page_t ml3, struct rwlock **lockp)
 {
 	pt_entry_t *l3, *l3p;
 
@@ -4950,8 +4950,8 @@ pmap_copy_l3c(pmap_t dst_pmap, vm_offset_t addr, pt_entry_t ptetemp,
 	KASSERT((ptetemp & ATTR_SW_MANAGED) != 0,
 	    ("pmap_copy_l3c: ptetemp is not managed"));
 
-	dstmpte->ref_count += L3C_ENTRIES - 1;
-	l3 = (pt_entry_t *)PHYS_TO_DMAP(VM_PAGE_TO_PHYS(dstmpte));
+	ml3->ref_count += L3C_ENTRIES - 1;
+	l3 = (pt_entry_t *)PHYS_TO_DMAP(VM_PAGE_TO_PHYS(ml3));
 	l3 = &l3[pmap_l3_index(addr)];
 
 	/*
@@ -4959,8 +4959,8 @@ pmap_copy_l3c(pmap_t dst_pmap, vm_offset_t addr, pt_entry_t ptetemp,
 	 */
 	for (l3p = l3; l3p < &l3[L3C_ENTRIES]; l3p++)
 		if (pmap_load(l3p) != 0) {
-			if (dstmpte != NULL)
-				dstmpte->ref_count -= L3C_ENTRIES;
+			if (ml3 != NULL)
+				ml3->ref_count -= L3C_ENTRIES;
 			return (false);
 		}
 
@@ -4969,9 +4969,9 @@ pmap_copy_l3c(pmap_t dst_pmap, vm_offset_t addr, pt_entry_t ptetemp,
 	 */
 	if (!pmap_pv_try_insert_l3c(dst_pmap, addr, PHYS_TO_VM_PAGE(ptetemp &
 	    ~ATTR_MASK), lockp)) {
-		if (dstmpte != NULL) {
-			dstmpte->ref_count -= L3C_ENTRIES - 1;
-			pmap_abort_ptp(dst_pmap, addr, dstmpte);
+		if (ml3 != NULL) {
+			ml3->ref_count -= L3C_ENTRIES - 1;
+			pmap_abort_ptp(dst_pmap, addr, ml3);
 		}
 		return (false);
 	}
