@@ -397,7 +397,7 @@ static int pmap_enter_l2(pmap_t pmap, vm_offset_t va, pd_entry_t new_l2,
 static vm_page_t pmap_enter_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m,
     vm_prot_t prot, vm_page_t ml3, struct rwlock **lockp);
 static pt_entry_t pmap_load_l3c(pt_entry_t *l3p);
-static void pmap_protect_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
+static void pmap_protect_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va,
     vm_offset_t *vap, vm_offset_t va_next, pt_entry_t mask, pt_entry_t nbits);
 static bool pmap_pv_try_insert_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m,
     struct rwlock **lockp);
@@ -405,7 +405,7 @@ static int pmap_remove_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t sva,
     pd_entry_t l1e, struct spglist *free, struct rwlock **lockp);
 static int pmap_remove_l3(pmap_t pmap, pt_entry_t *l3, vm_offset_t sva,
     pd_entry_t l2e, struct spglist *free, struct rwlock **lockp);
-static bool pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
+static bool pmap_remove_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va,
     vm_offset_t *vap, vm_offset_t va_next, vm_page_t ml3, struct spglist *free,
     struct rwlock **lockp);
 static void pmap_reset_asid_set(pmap_t pmap);
@@ -2836,7 +2836,7 @@ pmap_pv_try_insert_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m,
     struct rwlock **lockp)
 {
 	pv_entry_t pv;
-	vm_offset_t sva;
+	vm_offset_t tva;
 	vm_paddr_t pa;
 	vm_page_t mt;
 
@@ -2847,19 +2847,18 @@ pmap_pv_try_insert_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m,
 	KASSERT((pa & L3C_OFFSET) == 0,
 	    ("pmap_pv_try_insert_l3c: pa is not aligned"));
 	CHANGE_PV_LIST_LOCK_TO_PHYS(lockp, pa);
-	sva = va;
-	for (mt = m; mt < &m[L3C_ENTRIES]; mt++, va += L3_SIZE) {
+	for (mt = m, tva = va; mt < &m[L3C_ENTRIES]; mt++, tva += L3_SIZE) {
 		/* Pass NULL instead of lockp to disable reclamation. */
 		pv = get_pv_entry(pmap, NULL);
 		if (__predict_false(pv == NULL)) {
-			while (va > sva) {
-				va -= L3_SIZE;
+			while (tva > va) {
 				mt--;
-				pmap_pvh_free(&mt->md, pmap, va);
+				tva -= L3_SIZE;
+				pmap_pvh_free(&mt->md, pmap, tva);
 			}
 			return (false);
 		}
-		pv->pv_va = va;
+		pv->pv_va = tva;
 		TAILQ_INSERT_TAIL(&mt->md.pv_list, pv, pv_next);
 		mt->md.pv_gen++;
 	}
@@ -2999,45 +2998,44 @@ pmap_remove_l3(pmap_t pmap, pt_entry_t *l3, vm_offset_t va,
 /*
  * pmap_remove_l3c: Do the things to unmap a level 3 contiguous superpage.
  *
- * The caller is responsible for performing the TLB invalidations for [sva,
- * sva + L3C_SIZE) based the returned *vap.
+ * Returns true if the level 3 table "ml3" was unmapped and added to the
+ * spglist "free".  Otherwise, returns false.
  *
- * Returns true if the L3 table "ml3" was unmapped and added to the spglist
- * "free".
+ * The caller is responsible for performing the TLB invalidations for [va,
+ * va + L3C_SIZE) based the returned *vap. XXX
  */
 static bool
-pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
-    vm_offset_t *vap, vm_offset_t va_next, vm_page_t ml3,
-    struct spglist *free, struct rwlock **lockp)
+pmap_remove_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va, vm_offset_t *vap,
+    vm_offset_t va_next, vm_page_t ml3, struct spglist *free,
+    struct rwlock **lockp)
 {
 	struct md_page *pvh;
 	struct rwlock *new_lock;
-	pt_entry_t *current_l3, *end_l3, old_first_l3, old_l3;
-	vm_offset_t va;
+	pt_entry_t l3e, old_first_l3, *tl3p;
+	vm_offset_t tva;
 	vm_page_t m, mt;
 
 	atomic_add_long(&pmap_l3c_removes, 1);	// XXX
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
-	KASSERT(((uintptr_t)start_l3 & ((L3C_ENTRIES * sizeof(pt_entry_t)) -
-	    1)) == 0, ("pmap_remove_l3c: start_l3 is not aligned"));
-	KASSERT((sva & L3C_OFFSET) == 0,
-	    ("pmap_remove_l3c: sva is not aligned"));
-	end_l3 = start_l3 + L3C_ENTRIES;
+	KASSERT(((uintptr_t)l3p & ((L3C_ENTRIES * sizeof(pt_entry_t)) - 1)) ==
+	    0, ("pmap_remove_l3c: l3p is not aligned"));
+	KASSERT((va & L3C_OFFSET) == 0,
+	    ("pmap_remove_l3c: va is not aligned"));
 
 	/*
 	 * Hardware accessed and dirty bit maintenance might only update a
 	 * single L3 entry, so we must combine the accessed and dirty bits
 	 * from this entire set of contiguous L3 entries.
 	 */
-	old_first_l3 = pmap_load_clear(start_l3);
-	for (current_l3 = start_l3 + 1; current_l3 < end_l3; current_l3++) {
-		old_l3 = pmap_load_clear(current_l3);
-		KASSERT((old_l3 & ATTR_CONTIGUOUS) != 0,
-		    ("pmap_remove_l3c: missing ATTR_CONTIGUOUS"));
-		if ((old_l3 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
-		    (ATTR_S1_AP(ATTR_S1_AP_RW) | ATTR_SW_DBM))
+	old_first_l3 = pmap_load_clear(l3p);
+	for (tl3p = l3p + 1; tl3p < &l3p[L3C_ENTRIES]; tl3p++) {
+		l3e = pmap_load_clear(tl3p);
+		KASSERT((l3e & ATTR_CONTIGUOUS) != 0,
+		    ("pmap_remove_l3c: l3e is missing ATTR_CONTIGUOUS"));
+		if ((l3e & (ATTR_SW_DBM | ATTR_S1_AP_RW_BIT)) ==
+		    (ATTR_SW_DBM | ATTR_S1_AP(ATTR_S1_AP_RW)))
 			old_first_l3 &= ~ATTR_S1_AP_RW_BIT;
-		old_first_l3 |= old_l3 & ATTR_AF;
+		old_first_l3 |= l3e & ATTR_AF;
 	}
 	if ((old_first_l3 & ATTR_SW_WIRED) != 0)
 		pmap->pm_stats.wired_count -= L3C_ENTRIES;
@@ -3055,7 +3053,7 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
 				 * still provides access to that page.
 				 */
 				if (*vap != va_next) {
-					pmap_invalidate_range(pmap, *vap, sva);
+					pmap_invalidate_range(pmap, *vap, va);
 					*vap = va_next;
 				}
 				rw_wunlock(*lockp);
@@ -3065,24 +3063,24 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
 		}
 		m = PHYS_TO_VM_PAGE(old_first_l3 & ~ATTR_MASK);
 		pvh = page_to_pvh(m);
-		for (mt = m, va = sva; mt < &m[L3C_ENTRIES]; mt++, va +=
+		for (mt = m, tva = va; mt < &m[L3C_ENTRIES]; mt++, tva +=
 		    L3_SIZE) {
 			if (pmap_pte_dirty(pmap, old_first_l3))
 				vm_page_dirty(mt);
 			if ((old_first_l3 & ATTR_AF) != 0)
 				vm_page_aflag_set(mt, PGA_REFERENCED);
-			pmap_pvh_free(&mt->md, pmap, va);
+			pmap_pvh_free(&mt->md, pmap, tva);
 			if (TAILQ_EMPTY(&mt->md.pv_list) &&
 			    TAILQ_EMPTY(&pvh->pv_list))
 				vm_page_aflag_clear(mt, PGA_WRITEABLE);
 		}
 	}
 	if (*vap == va_next)
-		*vap = sva;
+		*vap = va;
 	if (ml3 != NULL) {
 		ml3->ref_count -= L3C_ENTRIES;
 		if (ml3->ref_count == 0) {
-			_pmap_unwire_l3(pmap, sva, ml3, free);
+			_pmap_unwire_l3(pmap, va, ml3, free);
 			return (true);
 		}
 	}
@@ -3452,43 +3450,47 @@ pmap_protect_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t sva, pt_entry_t mask,
  * pmap_protect_l3c: do the things to protect a 64KB page in a pmap
  */
 static void
-pmap_protect_l3c(pmap_t pmap, pt_entry_t *start_l3, vm_offset_t sva,
+pmap_protect_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va,
     vm_offset_t *vap, vm_offset_t va_next, pt_entry_t mask, pt_entry_t nbits)
 {
-	pt_entry_t l3e, *l3p;
+	pt_entry_t l3e, *tl3p;
 	vm_page_t m, mt;
 	bool dirty;
 
 	atomic_add_long(&pmap_l3c_protects, 1);	// XXX
 	PMAP_ASSERT_STAGE1(pmap);
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
-	KASSERT(((uintptr_t)start_l3 & ((L3C_ENTRIES * sizeof(pt_entry_t)) -
-	    1)) == 0, ("pmap_protect_l3c: start_l3 is not aligned"));
-	KASSERT((sva & L3C_OFFSET) == 0,
-	    ("pmap_protect_l3c: sva is not aligned"));
+	KASSERT(((uintptr_t)l3p & ((L3C_ENTRIES * sizeof(pt_entry_t)) - 1)) ==
+	    0, ("pmap_protect_l3c: l3p is not aligned"));
+	KASSERT((va & L3C_OFFSET) == 0,
+	    ("pmap_protect_l3c: va is not aligned"));
 	dirty = false;
-	for (l3p = start_l3; l3p < start_l3 + L3C_ENTRIES; l3p++) {
-		l3e = pmap_load(l3p);
-		while (!atomic_fcmpset_64(l3p, &l3e, (l3e & ~mask) | nbits))
+	for (tl3p = l3p; tl3p < &l3p[L3C_ENTRIES]; tl3p++) {
+		l3e = pmap_load(tl3p);
+		KASSERT((l3e & ATTR_CONTIGUOUS) != 0,
+		    ("pmap_protect_l3c: l3e is missing ATTR_CONTIGUOUS"));
+		while (!atomic_fcmpset_64(tl3p, &l3e, (l3e & ~mask) | nbits))
 			cpu_spinwait();
-		if ((l3e & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
-		    (ATTR_S1_AP(ATTR_S1_AP_RW) | ATTR_SW_DBM))
+		if ((l3e & (ATTR_SW_DBM | ATTR_S1_AP_RW_BIT)) ==
+		    (ATTR_SW_DBM | ATTR_S1_AP(ATTR_S1_AP_RW)))
 			dirty = true;
 	}
 
 	/*
-	 * When a dirty read/write mapping is write protected, update the
-	 * dirty field of each page in the superpage.
+	 * When a dirty read/write superpage mapping is write protected,
+	 * update the dirty field of each of the superpage's constituent 4KB
+	 * pages.
 	 */
 	if ((l3e & ATTR_SW_MANAGED) != 0 &&
-	    (nbits & ATTR_S1_AP(ATTR_S1_AP_RO)) != 0 && dirty) {
-		m = PHYS_TO_VM_PAGE(pmap_load(start_l3) & ~ATTR_MASK);
+	    (nbits & ATTR_S1_AP(ATTR_S1_AP_RO)) != 0 &&
+	    dirty) {
+		m = PHYS_TO_VM_PAGE(pmap_load(l3p) & ~ATTR_MASK);
 		for (mt = m; mt < &m[L3C_ENTRIES]; mt++)
 			vm_page_dirty(m);
 	}
 
 	if (*vap == va_next)
-		*vap = sva;
+		*vap = va;
 }
 
 /*
@@ -4938,21 +4940,21 @@ pmap_unwire(pmap_t pmap, vm_offset_t sva, vm_offset_t eva)
  * XXX
  */
 static bool
-pmap_copy_l3c(pmap_t dst_pmap, vm_offset_t addr, pt_entry_t ptetemp,
-    vm_page_t ml3, struct rwlock **lockp)
+pmap_copy_l3c(pmap_t pmap, vm_offset_t va, pt_entry_t l3e, vm_page_t ml3,
+    struct rwlock **lockp)
 {
 	pt_entry_t *l3, *l3p;
 
-	PMAP_ASSERT_STAGE1(dst_pmap);
-	PMAP_LOCK_ASSERT(dst_pmap, MA_OWNED);
-	KASSERT((addr & L3C_OFFSET) == 0,
-	    ("pmap_copy_l3c: addr is not aligned"));
-	KASSERT((ptetemp & ATTR_SW_MANAGED) != 0,
-	    ("pmap_copy_l3c: ptetemp is not managed"));
+	PMAP_ASSERT_STAGE1(pmap);
+	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
+	KASSERT((va & L3C_OFFSET) == 0,
+	    ("pmap_copy_l3c: va is not aligned"));
+	KASSERT((l3e & ATTR_SW_MANAGED) != 0,
+	    ("pmap_copy_l3c: l3e is not managed"));
 
 	ml3->ref_count += L3C_ENTRIES - 1;
 	l3 = (pt_entry_t *)PHYS_TO_DMAP(VM_PAGE_TO_PHYS(ml3));
-	l3 = &l3[pmap_l3_index(addr)];
+	l3 = &l3[pmap_l3_index(va)];
 
 	/*
 	 * Abort if a mapping already exists.
@@ -4967,11 +4969,11 @@ pmap_copy_l3c(pmap_t dst_pmap, vm_offset_t addr, pt_entry_t ptetemp,
 	/*
 	 * Enter on the PV list since we know this is managed memory.
 	 */
-	if (!pmap_pv_try_insert_l3c(dst_pmap, addr, PHYS_TO_VM_PAGE(ptetemp &
+	if (!pmap_pv_try_insert_l3c(pmap, va, PHYS_TO_VM_PAGE(l3e &
 	    ~ATTR_MASK), lockp)) {
 		if (ml3 != NULL) {
 			ml3->ref_count -= L3C_ENTRIES - 1;
-			pmap_abort_ptp(dst_pmap, addr, ml3);
+			pmap_abort_ptp(pmap, va, ml3);
 		}
 		return (false);
 	}
@@ -4979,18 +4981,17 @@ pmap_copy_l3c(pmap_t dst_pmap, vm_offset_t addr, pt_entry_t ptetemp,
 	/*
 	 * Increment counters
 	 */
-	pmap_resident_count_inc(dst_pmap, L3C_ENTRIES);
+	pmap_resident_count_inc(pmap, L3C_ENTRIES);
 
 	for (l3p = l3; l3p < &l3[L3C_ENTRIES]; l3p++) {
-		pmap_store(l3p, ptetemp);
-		ptetemp += L3_SIZE;
+		pmap_store(l3p, l3e);
+		l3e += L3_SIZE;
 	}
 
 	atomic_add_long(&pmap_l3c_copies, 1);	// XXX
 	atomic_add_long(&pmap_l3c_mappings, 1);
 	CTR2(KTR_PMAP, "pmap_copy_l3c: success for va %#lx in pmap %p",
-	    addr, dst_pmap);
-
+	    va, pmap);
 	return (true);
 }
 
