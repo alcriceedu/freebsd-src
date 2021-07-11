@@ -3011,7 +3011,7 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va, vm_offset_t *vap,
 {
 	struct md_page *pvh;
 	struct rwlock *new_lock;
-	pt_entry_t l3e, old_first_l3, *tl3p;
+	pt_entry_t first_l3e, l3e, *tl3p;
 	vm_offset_t tva;
 	vm_page_t m, mt;
 
@@ -3027,21 +3027,21 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va, vm_offset_t *vap,
 	 * single L3 entry, so we must combine the accessed and dirty bits
 	 * from this entire set of contiguous L3 entries.
 	 */
-	old_first_l3 = pmap_load_clear(l3p);
+	first_l3e = pmap_load_clear(l3p);
 	for (tl3p = l3p + 1; tl3p < &l3p[L3C_ENTRIES]; tl3p++) {
 		l3e = pmap_load_clear(tl3p);
 		KASSERT((l3e & ATTR_CONTIGUOUS) != 0,
 		    ("pmap_remove_l3c: l3e is missing ATTR_CONTIGUOUS"));
 		if ((l3e & (ATTR_SW_DBM | ATTR_S1_AP_RW_BIT)) ==
 		    (ATTR_SW_DBM | ATTR_S1_AP(ATTR_S1_AP_RW)))
-			old_first_l3 &= ~ATTR_S1_AP_RW_BIT;
-		old_first_l3 |= l3e & ATTR_AF;
+			first_l3e &= ~ATTR_S1_AP_RW_BIT;
+		first_l3e |= l3e & ATTR_AF;
 	}
-	if ((old_first_l3 & ATTR_SW_WIRED) != 0)
+	if ((first_l3e & ATTR_SW_WIRED) != 0)
 		pmap->pm_stats.wired_count -= L3C_ENTRIES;
 	pmap_resident_count_dec(pmap, L3C_ENTRIES);
-	if ((old_first_l3 & ATTR_SW_MANAGED) != 0) {
-		new_lock = PHYS_TO_PV_LIST_LOCK(old_first_l3 & ~ATTR_MASK);
+	if ((first_l3e & ATTR_SW_MANAGED) != 0) {
+		new_lock = PHYS_TO_PV_LIST_LOCK(first_l3e & ~ATTR_MASK);
 		if (new_lock != *lockp) {
 			if (*lockp != NULL) {
 				/*
@@ -3061,13 +3061,13 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va, vm_offset_t *vap,
 			*lockp = new_lock;
 			rw_wlock(*lockp);
 		}
-		m = PHYS_TO_VM_PAGE(old_first_l3 & ~ATTR_MASK);
+		m = PHYS_TO_VM_PAGE(first_l3e & ~ATTR_MASK);
 		pvh = page_to_pvh(m);
 		for (mt = m, tva = va; mt < &m[L3C_ENTRIES]; mt++, tva +=
 		    L3_SIZE) {
-			if (pmap_pte_dirty(pmap, old_first_l3))
+			if (pmap_pte_dirty(pmap, first_l3e))
 				vm_page_dirty(mt);
-			if ((old_first_l3 & ATTR_AF) != 0)
+			if ((first_l3e & ATTR_AF) != 0)
 				vm_page_aflag_set(mt, PGA_REFERENCED);
 			pmap_pvh_free(&mt->md, pmap, tva);
 			if (TAILQ_EMPTY(&mt->md.pv_list) &&
@@ -3458,7 +3458,6 @@ pmap_protect_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va,
 	bool dirty;
 
 	atomic_add_long(&pmap_l3c_protects, 1);	// XXX
-	PMAP_ASSERT_STAGE1(pmap);
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
 	KASSERT(((uintptr_t)l3p & ((L3C_ENTRIES * sizeof(pt_entry_t)) - 1)) ==
 	    0, ("pmap_protect_l3c: l3p is not aligned"));
@@ -4675,13 +4674,12 @@ static vm_page_t
 pmap_enter_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
     vm_page_t ml3, struct rwlock **lockp)
 {
-	pd_entry_t *pde;
-	pt_entry_t *l2, *l3, l3_val, *l3p;
+	pd_entry_t *l2p, *pde;
+	pt_entry_t l3e, *l3p, *tl3p;
 	vm_paddr_t pa;
 	vm_pindex_t l2pindex;
 	int lvl;
 
-	PMAP_ASSERT_STAGE1(pmap);
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
 	KASSERT((va & L3C_OFFSET) == 0,
 	    ("pmap_enter_l3c: va is not aligned"));
@@ -4695,32 +4693,32 @@ pmap_enter_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 	 */
 	if (va < VM_MAXUSER_ADDRESS) {
 		/*
-		 * Calculate pagetable page index
+		 * Calculate the page table page index.
 		 */
 		l2pindex = pmap_l2_pindex(va);
 		if (ml3 != NULL && ml3->pindex == l2pindex) {
 			ml3->ref_count += L3C_ENTRIES;
 		} else {
 			/*
-			 * Get the l2 entry
+			 * Get the L2 entry.
 			 */
 			pde = pmap_pde(pmap, va, &lvl);
 
 			/*
 			 * If the page table page is mapped, we just increment
-			 * the hold count, and activate it.  Otherwise, we
+			 * the ref count.  Otherwise, we
 			 * attempt to allocate a page table page.  If this
 			 * attempt fails, we don't retry.  Instead, we give up.
 			 */
 			if (lvl == 1) {
-				l2 = pmap_l1_to_l2(pde, va);
-				if ((pmap_load(l2) & ATTR_DESCR_MASK) ==
+				l2p = pmap_l1_to_l2(pde, va);
+				if ((pmap_load(l2p) & ATTR_DESCR_MASK) ==
 				    L2_BLOCK)
 					return (NULL);
 			}
 			if (lvl == 2 && pmap_load(pde) != 0) {
-				ml3 =
-				    PHYS_TO_VM_PAGE(pmap_load(pde) & ~ATTR_MASK);
+				ml3 = PHYS_TO_VM_PAGE(pmap_load(pde) &
+				    ~ATTR_MASK);
 				ml3->ref_count += L3C_ENTRIES;
 			} else {
 				/*
@@ -4733,8 +4731,8 @@ pmap_enter_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 				ml3->ref_count += L3C_ENTRIES - 1;
 			}
 		}
-		l3 = (pt_entry_t *)PHYS_TO_DMAP(VM_PAGE_TO_PHYS(ml3));
-		l3 = &l3[pmap_l3_index(va)];
+		l3p = (pt_entry_t *)PHYS_TO_DMAP(VM_PAGE_TO_PHYS(ml3));
+		l3p = &l3p[pmap_l3_index(va)];
 	} else {
 		ml3 = NULL;
 		pde = pmap_pde(kernel_pmap, va, &lvl);
@@ -4743,14 +4741,14 @@ pmap_enter_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 		     va));
 		KASSERT(lvl == 2,
 		    ("pmap_enter_l3c: Invalid level %d", lvl));
-		l3 = pmap_l2_to_l3(pde, va);
+		l3p = pmap_l2_to_l3(pde, va);
 	}
 
 	/*
 	 * Abort if a mapping already exists.
 	 */
-	for (l3p = l3; l3p < &l3[L3C_ENTRIES]; l3p++)
-		if (pmap_load(l3p) != 0) {
+	for (tl3p = l3p; tl3p < &l3p[L3C_ENTRIES]; tl3p++)
+		if (pmap_load(tl3p) != 0) {
 			if (ml3 != NULL)
 				ml3->ref_count -= L3C_ENTRIES;
 			return (NULL);
@@ -4769,40 +4767,42 @@ pmap_enter_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 	}
 
 	/*
-	 * Increment counters
+	 * Increment counters.
 	 */
 	pmap_resident_count_inc(pmap, L3C_ENTRIES);
 
 	pa = VM_PAGE_TO_PHYS(m);
+	KASSERT((pa & L3C_OFFSET) == 0,
+	    ("pmap_enter_l3c: pa is not aligned"));
 
 	/*
-	 * Sync icache before the mapping is stored to PTE
+	 * Sync the icache before the mapping is stored.
 	 */
 	if ((prot & VM_PROT_EXECUTE) != 0 && pmap != kernel_pmap &&
 	    m->md.pv_memattr == VM_MEMATTR_WRITE_BACK)
 		cpu_icache_sync_range(PHYS_TO_DMAP(pa), L3C_SIZE);
 
 	/*
-	 * Now validate mapping with RO and/or X protection
+	 * Validate the mapping with R and/or X protection.
 	 */
-	l3_val = pa | ATTR_DEFAULT | ATTR_S1_IDX(m->md.pv_memattr) |
+	l3e = pa | ATTR_DEFAULT | ATTR_S1_IDX(m->md.pv_memattr) |
 	    ATTR_S1_AP(ATTR_S1_AP_RO) | ATTR_CONTIGUOUS | L3_PAGE;
 	if ((prot & VM_PROT_EXECUTE) == 0 ||
 	    m->md.pv_memattr == VM_MEMATTR_DEVICE)
-		l3_val |= ATTR_S1_XN;
+		l3e |= ATTR_S1_XN;
 	if (va < VM_MAXUSER_ADDRESS)
-		l3_val |= ATTR_S1_AP(ATTR_S1_AP_USER) | ATTR_S1_PXN;
+		l3e |= ATTR_S1_AP(ATTR_S1_AP_USER) | ATTR_S1_PXN;
 	else
-		l3_val |= ATTR_S1_UXN;
+		l3e |= ATTR_S1_UXN;
 	if (pmap != kernel_pmap)
-		l3_val |= ATTR_S1_nG;
+		l3e |= ATTR_S1_nG;
 	if ((m->oflags & VPO_UNMANAGED) == 0) {
-		l3_val |= ATTR_SW_MANAGED;
-		l3_val &= ~ATTR_AF;
+		l3e |= ATTR_SW_MANAGED;
+		l3e &= ~ATTR_AF;
 	}
-	for (l3p = l3; l3p < &l3[L3C_ENTRIES]; l3p++) {
-		pmap_store(l3p, l3_val);
-		l3_val += L3_SIZE;
+	for (tl3p = l3p; tl3p < &l3p[L3C_ENTRIES]; tl3p++) {
+		pmap_store(tl3p, l3e);
+		l3e += L3_SIZE;
 	}
 	dsb(ishst);
 
@@ -4943,9 +4943,8 @@ static bool
 pmap_copy_l3c(pmap_t pmap, vm_offset_t va, pt_entry_t l3e, vm_page_t ml3,
     struct rwlock **lockp)
 {
-	pt_entry_t *l3, *l3p;
+	pt_entry_t *l3p, *tl3p;
 
-	PMAP_ASSERT_STAGE1(pmap);
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
 	KASSERT((va & L3C_OFFSET) == 0,
 	    ("pmap_copy_l3c: va is not aligned"));
@@ -4953,14 +4952,14 @@ pmap_copy_l3c(pmap_t pmap, vm_offset_t va, pt_entry_t l3e, vm_page_t ml3,
 	    ("pmap_copy_l3c: l3e is not managed"));
 
 	ml3->ref_count += L3C_ENTRIES - 1;
-	l3 = (pt_entry_t *)PHYS_TO_DMAP(VM_PAGE_TO_PHYS(ml3));
-	l3 = &l3[pmap_l3_index(va)];
+	l3p = (pt_entry_t *)PHYS_TO_DMAP(VM_PAGE_TO_PHYS(ml3));
+	l3p = &l3p[pmap_l3_index(va)];
 
 	/*
 	 * Abort if a mapping already exists.
 	 */
-	for (l3p = l3; l3p < &l3[L3C_ENTRIES]; l3p++)
-		if (pmap_load(l3p) != 0) {
+	for (tl3p = l3p; tl3p < &l3p[L3C_ENTRIES]; tl3p++)
+		if (pmap_load(tl3p) != 0) {
 			if (ml3 != NULL)
 				ml3->ref_count -= L3C_ENTRIES;
 			return (false);
@@ -4983,8 +4982,8 @@ pmap_copy_l3c(pmap_t pmap, vm_offset_t va, pt_entry_t l3e, vm_page_t ml3,
 	 */
 	pmap_resident_count_inc(pmap, L3C_ENTRIES);
 
-	for (l3p = l3; l3p < &l3[L3C_ENTRIES]; l3p++) {
-		pmap_store(l3p, l3e);
+	for (tl3p = l3p; tl3p < &l3p[L3C_ENTRIES]; tl3p++) {
+		pmap_store(tl3p, l3e);
 		l3e += L3_SIZE;
 	}
 
@@ -6827,8 +6826,7 @@ pmap_demote_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t va)
 }
 
 /*
- * Demote a 64KB page mapping to 16 4KB page mappings.
- * XXX
+ * Demote a 64KB contiguous mapping to 16 4KB page mappings.
  */
 static void
 pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
@@ -6836,7 +6834,6 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 	pt_entry_t *end_l3, *l3, mask, nbits, old_l3, *start_l3;
 	register_t intr;
 
-	PMAP_ASSERT_STAGE1(pmap);
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
 	start_l3 = (pt_entry_t *)((uintptr_t)l3p & ~((L3C_ENTRIES *
 	    sizeof(pt_entry_t)) - 1));
@@ -6896,7 +6893,6 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 static pt_entry_t
 pmap_load_l3c(pt_entry_t *l3p)
 {
-
 	pt_entry_t curr_l3, *end_l3, *l3, mask, nbits, *start_l3;
 
 	start_l3 = (pt_entry_t *)((uintptr_t)l3p & ~((L3C_ENTRIES *
