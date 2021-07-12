@@ -2828,8 +2828,8 @@ pmap_pv_insert_l2(pmap_t pmap, vm_offset_t va, pd_entry_t l2e, u_int flags,
 }
 
 /*
- * Conditionally create the PV entries for a 64KB page mapping if the required
- * memory can be allocated without resorting to reclamation.
+ * Conditionally creates the PV entries for a 64KB contiguous page mapping if
+ * the required memory can be allocated without resorting to reclamation.
  */
 static bool
 pmap_pv_try_insert_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m,
@@ -2996,13 +2996,10 @@ pmap_remove_l3(pmap_t pmap, pt_entry_t *l3, vm_offset_t va,
 }
 
 /*
- * pmap_remove_l3c: Do the things to unmap a level 3 contiguous superpage.
- *
+ * Removes the specified level 3 contiguous (64KB) page mapping.  Requests TLB
+ * invalidations to be performed by the caller through the returned "*vap".
  * Returns true if the level 3 table "ml3" was unmapped and added to the
  * spglist "free".  Otherwise, returns false.
- *
- * The caller is responsible for performing the TLB invalidations for [va,
- * va + L3C_SIZE) based the returned *vap. XXX
  */
 static bool
 pmap_remove_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va, vm_offset_t *vap,
@@ -3447,7 +3444,9 @@ pmap_protect_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t sva, pt_entry_t mask,
 }
 
 /*
- * pmap_protect_l3c: do the things to protect a 64KB page in a pmap
+ * Changes the protection enforced by the specified level 3 contiguous (64KB)
+ * page mapping.  Requests TLB invalidations to be performed by the caller
+ * through the returned "*vap".
  */
 static void
 pmap_protect_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va,
