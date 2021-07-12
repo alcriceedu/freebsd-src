@@ -383,8 +383,8 @@ static void pmap_abort_ptp(pmap_t pmap, vm_offset_t va, vm_page_t mpte);
 static bool pmap_activate_int(pmap_t pmap);
 static void pmap_alloc_asid(pmap_t pmap);
 static int pmap_change_attr_locked(vm_offset_t va, vm_size_t size, int mode);
-static bool pmap_copy_l3c(pmap_t pmap, vm_offset_t va, pt_entry_t l3e,
-    vm_page_t ml3, struct rwlock **lockp);
+static bool pmap_copy_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va,
+    pt_entry_t l3e, vm_page_t ml3, struct rwlock **lockp);
 static pt_entry_t *pmap_demote_l1(pmap_t pmap, pt_entry_t *l1, vm_offset_t va);
 static pt_entry_t *pmap_demote_l2_locked(pmap_t pmap, pt_entry_t *l2,
     vm_offset_t va, struct rwlock **lockp);
@@ -4937,13 +4937,14 @@ pmap_unwire(pmap_t pmap, vm_offset_t sva, vm_offset_t eva)
 }
 
 /*
- * XXX
+ * This function requires that the caller has already added one to ml3's
+ * ref_count in anticipation of creating a 4KB page mapping.
  */
 static bool
-pmap_copy_l3c(pmap_t pmap, vm_offset_t va, pt_entry_t l3e, vm_page_t ml3,
-    struct rwlock **lockp)
+pmap_copy_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va, pt_entry_t l3e,
+    vm_page_t ml3, struct rwlock **lockp)
 {
-	pt_entry_t *l3p, *tl3p;
+	pt_entry_t *tl3p;
 
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
 	KASSERT((va & L3C_OFFSET) == 0,
@@ -4951,42 +4952,28 @@ pmap_copy_l3c(pmap_t pmap, vm_offset_t va, pt_entry_t l3e, vm_page_t ml3,
 	KASSERT((l3e & ATTR_SW_MANAGED) != 0,
 	    ("pmap_copy_l3c: l3e is not managed"));
 
-	ml3->ref_count += L3C_ENTRIES - 1;
-	l3p = (pt_entry_t *)PHYS_TO_DMAP(VM_PAGE_TO_PHYS(ml3));
-	l3p = &l3p[pmap_l3_index(va)];
-
 	/*
 	 * Abort if a mapping already exists.
 	 */
 	for (tl3p = l3p; tl3p < &l3p[L3C_ENTRIES]; tl3p++)
 		if (pmap_load(tl3p) != 0) {
 			if (ml3 != NULL)
-				ml3->ref_count -= L3C_ENTRIES;
+				ml3->ref_count--;
 			return (false);
 		}
 
-	/*
-	 * Enter on the PV list since we know this is managed memory.
-	 */
-	if (!pmap_pv_try_insert_l3c(pmap, va, PHYS_TO_VM_PAGE(l3e &
-	    ~ATTR_MASK), lockp)) {
-		if (ml3 != NULL) {
-			ml3->ref_count -= L3C_ENTRIES - 1;
+	if (!pmap_pv_try_insert_l3c(pmap, va, PHYS_TO_VM_PAGE(l3e & ~ATTR_MASK),
+	    lockp)) {
+		if (ml3 != NULL)
 			pmap_abort_ptp(pmap, va, ml3);
-		}
 		return (false);
 	}
-
-	/*
-	 * Increment counters
-	 */
-	pmap_resident_count_inc(pmap, L3C_ENTRIES);
-
+	ml3->ref_count += L3C_ENTRIES - 1;
 	for (tl3p = l3p; tl3p < &l3p[L3C_ENTRIES]; tl3p++) {
 		pmap_store(tl3p, l3e);
 		l3e += L3_SIZE;
 	}
-
+	pmap_resident_count_inc(pmap, L3C_ENTRIES);
 	atomic_add_long(&pmap_l3c_copies, 1);	// XXX
 	atomic_add_long(&pmap_l3c_mappings, 1);
 	CTR2(KTR_PMAP, "pmap_copy_l3c: success for va %#lx in pmap %p",
@@ -5124,6 +5111,9 @@ pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, vm_offset_t dst_addr, vm_size_t len,
 			} else if ((dstmpte = pmap_alloc_l3(dst_pmap, addr,
 			    NULL)) == NULL)
 				goto out;
+			dst_pte = (pt_entry_t *)
+			    PHYS_TO_DMAP(VM_PAGE_TO_PHYS(dstmpte));
+			dst_pte = &dst_pte[pmap_l3_index(addr)];
 			if ((ptetemp & ATTR_CONTIGUOUS) != 0 && (addr &
 			    L3C_OFFSET) == 0 && addr + L3C_OFFSET <=
 			    va_next - 1) {
@@ -5133,17 +5123,14 @@ pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, vm_offset_t dst_addr, vm_size_t len,
 				 * of the accessed bit will be.  Clear
 				 * it?
 				 */
-				if (!pmap_copy_l3c(dst_pmap, addr, ptetemp &
-				    ~ATTR_SW_WIRED, dstmpte, &lock))
+				if (!pmap_copy_l3c(dst_pmap, dst_pte, addr,
+				    ptetemp & ~ATTR_SW_WIRED, dstmpte, &lock))
 					goto out;
 				addr += L3C_SIZE - PAGE_SIZE;
 				src_pte += L3C_ENTRIES - 1;
 				continue;
 			}
 			ptetemp &= ~ATTR_CONTIGUOUS;
-			dst_pte = (pt_entry_t *)
-			    PHYS_TO_DMAP(VM_PAGE_TO_PHYS(dstmpte));
-			dst_pte = &dst_pte[pmap_l3_index(addr)];
 			if (pmap_load(dst_pte) == 0 &&
 			    pmap_try_insert_pv_entry(dst_pmap, addr,
 			    PHYS_TO_VM_PAGE(ptetemp & ~ATTR_MASK), &lock)) {
