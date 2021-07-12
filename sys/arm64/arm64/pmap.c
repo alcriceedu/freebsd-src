@@ -5129,17 +5129,15 @@ pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, vm_offset_t dst_addr, vm_size_t len,
 					goto out;
 				addr += L3C_SIZE - PAGE_SIZE;
 				src_pte += L3C_ENTRIES - 1;
-				continue;
-			}
-			ptetemp &= ~ATTR_CONTIGUOUS;
-			if (pmap_load(dst_pte) == 0 &&
+			} else if (pmap_load(dst_pte) == 0 &&
 			    pmap_try_insert_pv_entry(dst_pmap, addr,
 			    PHYS_TO_VM_PAGE(ptetemp & ~ATTR_MASK), &lock)) {
 				/*
 				 * Clear the wired, modified, and accessed
 				 * (referenced) bits during the copy.
 				 */
-				mask = ATTR_AF | ATTR_SW_WIRED;
+				mask = ATTR_SW_WIRED | ATTR_CONTIGUOUS |
+				    ATTR_AF;
 				nbits = 0;
 				if ((ptetemp & ATTR_SW_DBM) != 0)
 					nbits |= ATTR_S1_AP_RW_BIT;
