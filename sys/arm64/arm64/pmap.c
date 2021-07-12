@@ -4969,6 +4969,14 @@ pmap_copy_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va, pt_entry_t l3e,
 		return (false);
 	}
 	ml3->ref_count += L3C_ENTRIES - 1;
+
+	/*
+	 * Clear the wired and accessed bits.  However, leave the dirty bit
+	 * unchanged because read/write superpage mappings are required to be
+	 * dirty.
+	 */
+	l3e &= ~(ATTR_SW_WIRED | ATTR_AF);
+
 	for (tl3p = l3p; tl3p < &l3p[L3C_ENTRIES]; tl3p++) {
 		pmap_store(tl3p, l3e);
 		l3e += L3_SIZE;
@@ -5117,14 +5125,8 @@ pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, vm_offset_t dst_addr, vm_size_t len,
 			if ((ptetemp & ATTR_CONTIGUOUS) != 0 && (addr &
 			    L3C_OFFSET) == 0 && addr + L3C_OFFSET <=
 			    va_next - 1) {
-				/*
-				 * Clear the wired bit during the copy.
-				 * XXX It's not obvious what the state
-				 * of the accessed bit will be.  Clear
-				 * it?
-				 */
 				if (!pmap_copy_l3c(dst_pmap, dst_pte, addr,
-				    ptetemp & ~ATTR_SW_WIRED, dstmpte, &lock))
+				    ptetemp, dstmpte, &lock))
 					goto out;
 				addr += L3C_SIZE - PAGE_SIZE;
 				src_pte += L3C_ENTRIES - 1;
