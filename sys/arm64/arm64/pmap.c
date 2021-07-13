@@ -399,7 +399,7 @@ static vm_page_t pmap_enter_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m,
 static pt_entry_t pmap_load_l3c(pt_entry_t *l3p);
 static void pmap_protect_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va,
     vm_offset_t *vap, vm_offset_t va_next, pt_entry_t mask, pt_entry_t nbits);
-static bool pmap_pv_try_insert_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m,
+static bool pmap_pv_insert_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m,
     struct rwlock **lockp);
 static int pmap_remove_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t sva,
     pd_entry_t l1e, struct spglist *free, struct rwlock **lockp);
@@ -2832,7 +2832,7 @@ pmap_pv_insert_l2(pmap_t pmap, vm_offset_t va, pd_entry_t l2e, u_int flags,
  * the required memory can be allocated without resorting to reclamation.
  */
 static bool
-pmap_pv_try_insert_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m,
+pmap_pv_insert_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m,
     struct rwlock **lockp)
 {
 	pv_entry_t pv;
@@ -2842,10 +2842,10 @@ pmap_pv_try_insert_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m,
 
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
 	KASSERT((va & L3C_OFFSET) == 0,
-	    ("pmap_pv_try_insert_l3c: va is not aligned"));
+	    ("pmap_pv_insert_l3c: va is not aligned"));
 	pa = VM_PAGE_TO_PHYS(m);
 	KASSERT((pa & L3C_OFFSET) == 0,
-	    ("pmap_pv_try_insert_l3c: pa is not aligned"));
+	    ("pmap_pv_insert_l3c: pa is not aligned"));
 	CHANGE_PV_LIST_LOCK_TO_PHYS(lockp, pa);
 	for (mt = m, tva = va; mt < &m[L3C_ENTRIES]; mt++, tva += L3_SIZE) {
 		/* Pass NULL instead of lockp to disable reclamation. */
@@ -4757,7 +4757,7 @@ pmap_enter_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 	 * Enter on the PV list if part of our managed memory.
 	 */
 	if ((m->oflags & VPO_UNMANAGED) == 0 &&
-	    !pmap_pv_try_insert_l3c(pmap, va, m, lockp)) {
+	    !pmap_pv_insert_l3c(pmap, va, m, lockp)) {
 		if (ml3 != NULL) {
 			ml3->ref_count -= L3C_ENTRIES - 1;
 			pmap_abort_ptp(pmap, va, ml3);
@@ -4961,7 +4961,7 @@ pmap_copy_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va, pt_entry_t l3e,
 			return (false);
 		}
 
-	if (!pmap_pv_try_insert_l3c(pmap, va, PHYS_TO_VM_PAGE(l3e & ~ATTR_MASK),
+	if (!pmap_pv_insert_l3c(pmap, va, PHYS_TO_VM_PAGE(l3e & ~ATTR_MASK),
 	    lockp)) {
 		if (ml3 != NULL)
 			pmap_abort_ptp(pmap, va, ml3);
