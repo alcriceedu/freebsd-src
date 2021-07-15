@@ -1193,6 +1193,10 @@ static u_long pmap_l3c_mappings;
 SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, mappings, CTLFLAG_RD,
     &pmap_l3c_mappings, 0, "64KB page mappings");
 
+static u_long pmap_l3c_promotions;
+SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, promotions, CTLFLAG_RD,
+    &pmap_l3c_promotions, 0, "64KB page promotions");
+
 static u_long pmap_l3c_removes;	// XXX
 SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, removes, CTLFLAG_RD,
     &pmap_l3c_removes, 0, "64KB page removes XXX");
@@ -3847,6 +3851,19 @@ setl3:
 	CTR2(KTR_PMAP, "pmap_promote_l2: success for va %#lx in pmap %p", va,
 		    pmap);
 }
+
+/*
+ * XXX
+ */
+static void
+pmap_promote_l3c(pmap_t pmap, pd_entry_t *l3p, vm_offset_t va,
+    struct rwlock **lockp)
+{
+
+	atomic_add_long(&pmap_l3c_promotions, 1);
+	CTR2(KTR_PMAP, "pmap_promote_l3c: success for va %#lx in pmap %p",
+	    va, pmap);
+}
 #endif /* VM_NRESERVLEVEL > 0 */
 
 static int
@@ -4254,6 +4271,14 @@ validate:
 	}
 
 #if VM_NRESERVLEVEL > 0
+	/*
+	 * XXX
+	 */
+	if (mpte == NULL &&
+	    (m->flags & PG_FICTITIOUS) == 0 && vm_reserv_xxx(m) &&
+	    pmap_ps_enabled(pmap))
+		pmap_promote_l3c(pmap, l3, va, &lock);
+
 	/*
 	 * Try to promote from level 3 pages to a level 2 superpage. This
 	 * currently only works on stage 1 pmaps as pmap_promote_l2 looks at
