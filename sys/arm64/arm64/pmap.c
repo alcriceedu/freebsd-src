@@ -1193,6 +1193,10 @@ static u_long pmap_l3c_mappings;
 SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, mappings, CTLFLAG_RD,
     &pmap_l3c_mappings, 0, "64KB page mappings");
 
+static u_long pmap_l3c_p_failures;
+SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, p_failures, CTLFLAG_RD,
+    &pmap_l3c_p_failures, 0, "64KB page promotion failures");
+
 static u_long pmap_l3c_promotions;
 SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, promotions, CTLFLAG_RD,
     &pmap_l3c_promotions, 0, "64KB page promotions");
@@ -3848,7 +3852,7 @@ setl3:
 	if ((newl2 & ATTR_SW_MANAGED) != 0)
 		pmap_pv_promote_l2(pmap, va, newl2 & ~ATTR_MASK, lockp);
 
-	newl2 &= ~ATTR_DESCR_MASK;
+	newl2 &= ~(ATTR_DESCR_MASK | ATTR_CONTIGUOUS);
 	newl2 |= L2_BLOCK;
 
 	pmap_update_entry(pmap, l2, newl2, sva, L2_SIZE);
@@ -3865,6 +3869,91 @@ static void
 pmap_promote_l3c(pmap_t pmap, pd_entry_t *l3p, vm_offset_t va,
     struct rwlock **lockp)
 {
+	pd_entry_t firstl3c, *l3, oldl3, pa;
+	
+	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
+	PMAP_ASSERT_STAGE1(pmap);
+
+	firstl3c = pmap_load(l3p);
+
+	/* 
+	 * Check that the first L3 entry is aligned and has its access
+	 * flag set.
+	 */
+	if (((firstl3c & (~ATTR_MASK | ATTR_AF)) & L3C_OFFSET) != ATTR_AF) {
+		atomic_add_long(&pmap_l3c_p_failures, 1);
+		CTR2(KTR_PMAP, "pmap_promote_l3c: failure for va %#lx"
+		    " in pmap %p", va, pmap);
+		return;
+	}
+
+set_first:
+	/*
+	 * If the first L3 entry is a clean read-write mapping, convert it
+	 * to a read-only mapping.
+	 */
+	if ((firstl3c & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
+	    (ATTR_S1_AP(ATTR_S1_AP_RO) | ATTR_SW_DBM)) {
+		/*
+		 * When the mapping is clean, i.e., ATTR_S1_AP_RO is set,
+		 * ATTR_SW_DBM can be cleared without a TLB invalidation.
+		 */
+		if (!atomic_fcmpset_64(l3p, &firstl3c, firstl3c & ~ATTR_SW_DBM))
+			goto set_first;
+		firstl3c &= ~ATTR_SW_DBM;
+	}
+
+	/*
+	 * Check that the rest of the L3 entries are compatible with the first,
+	 * and convert clean read-write mappings to read-only mappings.
+	 */
+	pa = firstl3c + L3C_SIZE - PAGE_SIZE;
+	for (l3 = l3p + L3C_ENTRIES - 1; l3 > l3p; l3--) {
+		oldl3 = pmap_load(l3);
+set_l3:
+		if ((oldl3 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
+		    (ATTR_S1_AP(ATTR_S1_AP_RO) | ATTR_SW_DBM)) {
+			/*
+			 * When the mapping is clean, i.e., ATTR_S1_AP_RO is
+			 * set, ATTR_SW_DBM can be cleared without a TLB
+			 * invalidation.
+			 */
+			if (!atomic_fcmpset_64(l3, &oldl3, oldl3 &
+			    ~ATTR_SW_DBM))
+				goto set_l3;
+			oldl3 &= ~ATTR_SW_DBM;
+		}
+		if (oldl3 != pa) {
+			atomic_add_long(&pmap_l3c_p_failures, 1);
+			CTR2(KTR_PMAP, "pmap_promote_l3c: failure for va %#lx"
+			    " in pmap %p", va, pmap);
+			return;
+		}
+		pa -= PAGE_SIZE;
+	}
+
+	/*
+	 * Clear the valid bit for each L3 entry.
+	 */
+	for (l3 = l3p; l3 < l3p + L3C_ENTRIES; l3++) {
+		oldl3 = pmap_load(l3);
+		while (!atomic_fcmpset_64(l3, &oldl3, oldl3 &
+		    ~ATTR_DESCR_VALID))
+			cpu_spinwait();
+	}
+
+	pmap_invalidate_range(pmap, va & ~L3C_OFFSET, (va + L3C_SIZE) &
+	    ~L3C_OFFSET);
+
+	/*
+	 * Remake the mappings with the contiguous bit set.
+	 */
+	for (l3 = l3p; l3 < l3p + L3C_ENTRIES; l3++) {
+		oldl3 = pmap_load(l3);
+		while (!atomic_fcmpset_64(l3, &oldl3, oldl3 | ATTR_CONTIGUOUS
+		    | ATTR_DESCR_VALID))
+			cpu_spinwait();
+	}
 
 	atomic_add_long(&pmap_l3c_promotions, 1);
 	CTR2(KTR_PMAP, "pmap_promote_l3c: success for va %#lx in pmap %p",
