@@ -3874,6 +3874,13 @@ pmap_promote_l3c(pmap_t pmap, pd_entry_t *l3p, vm_offset_t va,
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
 	PMAP_ASSERT_STAGE1(pmap);
 
+	/*
+	 * Compute the address of the first L3 entry in the superpage
+	 * candidate.
+	 */
+	l3p = (pt_entry_t *)((uintptr_t)l3p & ~((L3C_ENTRIES *
+	    sizeof(pt_entry_t)) - 1));
+
 	firstl3c = pmap_load(l3p);
 
 	/* 
