@@ -4376,7 +4376,7 @@ validate:
 	/*
 	 * XXX
 	 */
-	if (mpte == NULL &&
+	if ((mpte == NULL || mpte->ref_count >= L3C_ENTRIES) &&
 	    (m->flags & PG_FICTITIOUS) == 0 && vm_reserv_xxx(m) &&
 	    pmap_ps_enabled(pmap))
 		pmap_promote_l3c(pmap, l3, va, &lock);
