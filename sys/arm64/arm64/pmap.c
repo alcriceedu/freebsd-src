@@ -397,6 +397,7 @@ static int pmap_enter_l2(pmap_t pmap, vm_offset_t va, pd_entry_t new_l2,
 static vm_page_t pmap_enter_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m,
     vm_prot_t prot, vm_page_t ml3, struct rwlock **lockp);
 static pt_entry_t pmap_load_l3c(pt_entry_t *l3p);
+static void pmap_promote_l3c(pmap_t pmap, pd_entry_t *l3p, vm_offset_t va);
 static void pmap_protect_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va,
     vm_offset_t *vap, vm_offset_t va_next, pt_entry_t mask, pt_entry_t nbits);
 static bool pmap_pv_insert_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m,
@@ -3866,11 +3867,11 @@ setl3:
  * XXX
  */
 static void
-pmap_promote_l3c(pmap_t pmap, pd_entry_t *l3p, vm_offset_t va,
-    struct rwlock **lockp)
+pmap_promote_l3c(pmap_t pmap, pd_entry_t *l3p, vm_offset_t va)
 {
 	pd_entry_t firstl3c, *l3, oldl3, pa;
-	
+	register_t intr;
+
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
 	PMAP_ASSERT_STAGE1(pmap);
 
@@ -3883,7 +3884,7 @@ pmap_promote_l3c(pmap_t pmap, pd_entry_t *l3p, vm_offset_t va,
 
 	firstl3c = pmap_load(l3p);
 
-	/* 
+	/*
 	 * Check that the first L3 entry is aligned and has its access
 	 * flag set.
 	 */
@@ -3894,11 +3895,11 @@ pmap_promote_l3c(pmap_t pmap, pd_entry_t *l3p, vm_offset_t va,
 		return;
 	}
 
-set_first:
 	/*
 	 * If the first L3 entry is a clean read-write mapping, convert it
 	 * to a read-only mapping.
 	 */
+set_first:
 	if ((firstl3c & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
 	    (ATTR_S1_AP(ATTR_S1_AP_RO) | ATTR_SW_DBM)) {
 		/*
@@ -3938,6 +3939,7 @@ set_l3:
 		}
 		pa -= PAGE_SIZE;
 	}
+	intr = intr_disable();
 
 	/*
 	 * Clear the valid bit for each L3 entry.
@@ -3961,6 +3963,8 @@ set_l3:
 		    | ATTR_DESCR_VALID))
 			cpu_spinwait();
 	}
+	dsb(ishst);
+	intr_restore(intr);
 
 	atomic_add_long(&pmap_l3c_promotions, 1);
 	CTR2(KTR_PMAP, "pmap_promote_l3c: success for va %#lx in pmap %p",
@@ -4379,7 +4383,7 @@ validate:
 	if ((mpte == NULL || mpte->ref_count >= L3C_ENTRIES) &&
 	    (m->flags & PG_FICTITIOUS) == 0 && vm_reserv_xxx(m) &&
 	    pmap_ps_enabled(pmap))
-		pmap_promote_l3c(pmap, l3, va, &lock);
+		pmap_promote_l3c(pmap, l3, va);
 
 	/*
 	 * Try to promote from level 3 pages to a level 2 superpage. This
