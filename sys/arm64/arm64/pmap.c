@@ -6133,6 +6133,11 @@ small_mappings:
 		    (pmap_load_l3c(pte) & ATTR_AF) != 0) {
 			/* XXX */
 			atomic_add_long(&pmap_l3c_tsrefs, 1);
+			/*
+			 * An L3 contiguous (64KB) page mapping is regarded as
+			 * accessed until the accessed bit has been cleared in
+			 * all of its constituent entries.
+			 */
 			not_cleared++;
 		}
 		PMAP_UNLOCK(pmap);
