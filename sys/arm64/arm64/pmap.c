@@ -1214,10 +1214,6 @@ static u_long pmap_l3c_copies;	// XXX
 SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, copies, CTLFLAG_RD,
     &pmap_l3c_copies, 0, "64KB page copies XXX");
 
-static u_long pmap_l3c_tsrefs;	// XXX
-SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, tsrefs, CTLFLAG_RD,
-    &pmap_l3c_tsrefs, 0, "64KB page tsrefs XXX");
-
 /*
  * Invalidate a single TLB entry.
  */
@@ -6131,8 +6127,6 @@ small_mappings:
 				not_cleared++;
 		} else if ((tpte & ATTR_CONTIGUOUS) != 0 &&
 		    (pmap_load_l3c(pte) & ATTR_AF) != 0) {
-			/* XXX */
-			atomic_add_long(&pmap_l3c_tsrefs, 1);
 			/*
 			 * An L3 contiguous (64KB) page mapping is regarded as
 			 * accessed until the accessed bit has been cleared in
