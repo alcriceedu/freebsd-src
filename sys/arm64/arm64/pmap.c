@@ -1214,6 +1214,10 @@ static u_long pmap_l3c_copies;	// XXX
 SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, copies, CTLFLAG_RD,
     &pmap_l3c_copies, 0, "64KB page copies XXX");
 
+static u_long pmap_l3c_tsrefs;	// XXX
+SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, tsrefs, CTLFLAG_RD,
+    &pmap_l3c_tsrefs, 0, "64KB page tsrefs XXX");
+
 /*
  * Invalidate a single TLB entry.
  */
@@ -6127,6 +6131,8 @@ small_mappings:
 					 * like we do for 2MB pages.
 					 */
 					pmap_demote_l3c(pmap, pte, pv->pv_va);
+					/* XXX */
+					atomic_add_long(&pmap_l3c_tsrefs, 1);
 				}
 				pmap_clear_bits(pte, ATTR_AF);
 				pmap_invalidate_page(pmap, pv->pv_va);
