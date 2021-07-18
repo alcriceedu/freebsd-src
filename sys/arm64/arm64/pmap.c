@@ -6122,23 +6122,18 @@ small_mappings:
 		tpte = pmap_load(pte);
 		if (pmap_pte_dirty(pmap, tpte))
 			vm_page_dirty(m);
-		if ((tpte & ATTR_AF) != 0 || ((tpte & ATTR_CONTIGUOUS) != 0 &&
-		    ((tpte = pmap_load_l3c(pte)) & ATTR_AF) != 0)) {
+		if ((tpte & ATTR_AF) != 0) {
 			if ((tpte & ATTR_SW_WIRED) == 0) {
-				if ((tpte & ATTR_CONTIGUOUS) != 0) {
-					/*
-					 * XXX Avoid demotion for every page,
-					 * like we do for 2MB pages.
-					 */
-					pmap_demote_l3c(pmap, pte, pv->pv_va);
-					/* XXX */
-					atomic_add_long(&pmap_l3c_tsrefs, 1);
-				}
 				pmap_clear_bits(pte, ATTR_AF);
 				pmap_invalidate_page(pmap, pv->pv_va);
 				cleared++;
 			} else
 				not_cleared++;
+		} else if ((tpte & ATTR_CONTIGUOUS) != 0 &&
+		    (pmap_load_l3c(pte) & ATTR_AF) != 0) {
+			/* XXX */
+			atomic_add_long(&pmap_l3c_tsrefs, 1);
+			not_cleared++;
 		}
 		PMAP_UNLOCK(pmap);
 		/* Rotate the PV list if it has more than one entry. */
