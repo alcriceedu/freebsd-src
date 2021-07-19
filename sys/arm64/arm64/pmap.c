@@ -3861,7 +3861,7 @@ setl3:
 	if ((newl2 & ATTR_SW_MANAGED) != 0)
 		pmap_pv_promote_l2(pmap, va, newl2 & ~ATTR_MASK, lockp);
 
-	newl2 &= ~(ATTR_DESCR_MASK | ATTR_CONTIGUOUS);
+	newl2 &= ~(ATTR_CONTIGUOUS | ATTR_DESCR_MASK);
 	newl2 |= L2_BLOCK;
 
 	pmap_update_entry(pmap, l2, newl2, sva, L2_SIZE);
@@ -3881,7 +3881,6 @@ pmap_promote_l3c(pmap_t pmap, pd_entry_t *l3p, vm_offset_t va)
 	register_t intr;
 
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
-	PMAP_ASSERT_STAGE1(pmap);
 
 	/*
 	 * Compute the address of the first L3 entry in the superpage
@@ -6907,7 +6906,7 @@ pmap_demote_l2_locked(pmap_t pmap, pt_entry_t *l2, vm_offset_t va,
 	}
 	l3phys = VM_PAGE_TO_PHYS(ml3);
 	l3 = (pt_entry_t *)PHYS_TO_DMAP(l3phys);
-	newl3 = (oldl2 & ~ATTR_DESCR_MASK) | L3_PAGE;
+	newl3 = ATTR_CONTIGUOUS | (oldl2 & ~ATTR_DESCR_MASK) | L3_PAGE;
 	KASSERT((oldl2 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) !=
 	    (ATTR_S1_AP(ATTR_S1_AP_RO) | ATTR_SW_DBM),
 	    ("pmap_demote_l2: L2 entry is writeable but not dirty"));
