@@ -1218,6 +1218,10 @@ static u_long pmap_l3c_advises;	// XXX
 SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, advises, CTLFLAG_RD,
     &pmap_l3c_advises, 0, "64KB page advises XXX");
 
+static u_long pmap_l2_fills;	// XXX
+SYSCTL_ULONG(_vm_pmap_l2, OID_AUTO, fills, CTLFLAG_RD,
+    &pmap_l2_fills, 0, "XXX");
+
 /*
  * Invalidate a single TLB entry.
  */
@@ -6802,6 +6806,8 @@ pmap_fill_l3(pt_entry_t *firstl3, pt_entry_t newl3)
 		*l3 = newl3;
 		newl3 += L3_SIZE;
 	}
+	/* XXX */
+	atomic_add_long(&pmap_l2_fills, 1);
 }
 
 static void
