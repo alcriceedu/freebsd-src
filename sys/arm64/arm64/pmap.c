@@ -6124,6 +6124,10 @@ small_mappings:
 			vm_page_dirty(m);
 		if ((tpte & ATTR_AF) != 0) {
 			if ((tpte & ATTR_SW_WIRED) == 0) {
+				/*
+				 * Clear the accessed bit in this L3 entry
+				 * regardless of the contiguous bit.
+				 */
 				pmap_clear_bits(pte, ATTR_AF);
 				pmap_invalidate_page(pmap, pv->pv_va);
 				cleared++;
