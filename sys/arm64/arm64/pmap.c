@@ -3947,12 +3947,8 @@ set_l3:
 	/*
 	 * Clear the valid bit for each L3 entry.
 	 */
-	for (l3 = l3p; l3 < l3p + L3C_ENTRIES; l3++) {
-		oldl3 = pmap_load(l3);
-		while (!atomic_fcmpset_64(l3, &oldl3, oldl3 &
-		    ~ATTR_DESCR_VALID))
-			cpu_spinwait();
-	}
+	for (l3 = l3p; l3 < l3p + L3C_ENTRIES; l3++)
+		pmap_clear_bits(l3, ATTR_DESCR_VALID);
 
 	pmap_invalidate_range(pmap, va & ~L3C_OFFSET, (va + L3C_SIZE) &
 	    ~L3C_OFFSET);
@@ -3960,12 +3956,9 @@ set_l3:
 	/*
 	 * Remake the mappings with the contiguous bit set.
 	 */
-	for (l3 = l3p; l3 < l3p + L3C_ENTRIES; l3++) {
-		oldl3 = pmap_load(l3);
-		while (!atomic_fcmpset_64(l3, &oldl3, oldl3 | ATTR_CONTIGUOUS
-		    | ATTR_DESCR_VALID))
-			cpu_spinwait();
-	}
+	for (l3 = l3p; l3 < l3p + L3C_ENTRIES; l3++)
+		pmap_set_bits(l3, ATTR_CONTIGUOUS | ATTR_DESCR_VALID);
+
 	dsb(ishst);
 	intr_restore(intr);
 
