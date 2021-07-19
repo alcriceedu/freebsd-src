@@ -1214,10 +1214,6 @@ static u_long pmap_l3c_copies;	// XXX
 SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, copies, CTLFLAG_RD,
     &pmap_l3c_copies, 0, "64KB page copies XXX");
 
-static u_long pmap_l3c_advises;	// XXX
-SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, advises, CTLFLAG_RD,
-    &pmap_l3c_advises, 0, "64KB page advises XXX");
-
 static u_long pmap_l2_fills;	// XXX
 SYSCTL_ULONG(_vm_pmap_l2, OID_AUTO, fills, CTLFLAG_RD,
     &pmap_l2_fills, 0, "XXX");
@@ -6290,17 +6286,11 @@ pmap_advise(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, int advice)
 				    (oldl3 & ~ATTR_AF) |
 				    ATTR_S1_AP(ATTR_S1_AP_RO)))
 					cpu_spinwait();
-			} else if ((oldl3 & ATTR_AF) != 0 ||
-			    ((oldl3 & ATTR_CONTIGUOUS) != 0 &&
-			    ((oldl3 = pmap_load_l3c(l3)) & ATTR_AF) != 0)) {
-				if ((oldl3 & ATTR_CONTIGUOUS) != 0) {
-					/*
-					 * XXX Optimize whole page case?
-					 */
-					pmap_demote_l3c(pmap, l3, sva);
-					/* XXX */
-					atomic_add_long(&pmap_l3c_advises, 1);
-				}
+			} else if ((oldl3 & ATTR_AF) != 0) {
+				/*
+				 * Clear the accessed bit in this L3 entry
+				 * regardless of the contiguous bit.
+				 */
 				pmap_clear_bits(l3, ATTR_AF);
 			} else
 				goto maybe_invlrng;
