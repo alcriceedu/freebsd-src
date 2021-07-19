@@ -6268,10 +6268,12 @@ pmap_advise(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, int advice)
 					 * we have a repromotion trigger?
 					 */
 					pmap_demote_l3c(pmap, l3, sva);
+
 					/*
-					 * XXX Is ATTR_AF always set in oldl3,
-					 * so we don't need to pmap_load(l3)?
+					 * The L3 entry's accessed bit may have
+					 * changed.
 					 */
+					oldl3 = pmap_load(l3);
 				}
 				while (!atomic_fcmpset_long(l3, &oldl3,
 				    (oldl3 & ~ATTR_AF) |
