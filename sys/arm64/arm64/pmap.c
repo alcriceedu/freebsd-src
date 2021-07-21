@@ -1198,6 +1198,10 @@ static u_long pmap_l3c_p_failures;
 SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, p_failures, CTLFLAG_RD,
     &pmap_l3c_p_failures, 0, "64KB page promotion failures");
 
+static u_long pmap_l3c_p_failures_af_only; // XXX
+SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, p_failures_af_only, CTLFLAG_RD,
+    &pmap_l3c_p_failures_af_only, 0, "64KB page promotion failures AF only");
+
 static u_long pmap_l3c_promotions;
 SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, promotions, CTLFLAG_RD,
     &pmap_l3c_promotions, 0, "64KB page promotions");
@@ -3893,6 +3897,10 @@ pmap_promote_l3c(pmap_t pmap, pd_entry_t *l3p, vm_offset_t va)
 	 */
 	if (((firstl3c & (~ATTR_MASK | ATTR_AF)) & L3C_OFFSET) != ATTR_AF) {
 		atomic_add_long(&pmap_l3c_p_failures, 1);
+		if (((firstl3c & ATTR_AF) == 0) && ((firstl3c & ~ATTR_MASK &
+		    L3C_OFFSET) == 0)) // XXX
+			atomic_add_long(&pmap_l3c_p_failures_af_only, 1);
+
 		CTR2(KTR_PMAP, "pmap_promote_l3c: failure for va %#lx"
 		    " in pmap %p", va, pmap);
 		return;
