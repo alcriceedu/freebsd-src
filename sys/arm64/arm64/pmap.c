@@ -1179,6 +1179,10 @@ static u_long pmap_l2_p_failures;
 SYSCTL_ULONG(_vm_pmap_l2, OID_AUTO, p_failures, CTLFLAG_RD,
     &pmap_l2_p_failures, 0, "2MB page promotion failures");
 
+static u_long pmap_l2_p_failures_contig; // XXX
+SYSCTL_ULONG(_vm_pmap_l2, OID_AUTO, p_failures_c, CTLFLAG_RD,
+    &pmap_l2_p_failures_contig, 0, "2MB page promotion failures (contig)");
+
 static u_long pmap_l2_promotions;
 SYSCTL_ULONG(_vm_pmap_l2, OID_AUTO, promotions, CTLFLAG_RD,
     &pmap_l2_promotions, 0, "2MB page promotions");
@@ -3834,6 +3838,29 @@ setl3:
 			atomic_add_long(&pmap_l2_p_failures, 1);
 			CTR2(KTR_PMAP, "pmap_promote_l2: failure for va %#lx"
 			    " in pmap %p", va, pmap);
+
+			/* XXX */
+			unsigned int contig_cnt = 0;
+			if ((pmap_load(firstl3) & ATTR_CONTIGUOUS) != 0)
+				contig_cnt++;
+			for (; l3 > firstl3; l3--) {
+				oldl3 = pmap_load(l3);
+				if ((oldl3 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
+				    (ATTR_S1_AP(ATTR_S1_AP_RO) | ATTR_SW_DBM)) {
+					oldl3 &= ~ATTR_SW_DBM;
+				}
+				if ((oldl3 & ~ATTR_CONTIGUOUS) != (pa & ~ATTR_CONTIGUOUS)) {
+					return;
+				}
+				if ((oldl3 & ATTR_CONTIGUOUS) != 0)
+					contig_cnt++;
+				pa -= PAGE_SIZE;
+			}
+			atomic_add_long(&pmap_l2_p_failures_contig, 1);
+			CTR4(KTR_PMAP, "pmap_promote_l2: contig fail XN: %u DBM: %u RW: %u CC: %u",
+			    (oldl3 & ATTR_S1_XN) != 0, (oldl3 & ATTR_DBM) != 0, (oldl3 &
+			    ATTR_S1_AP_RW_BIT) != 0, contig_cnt);
+			
 			return;
 		}
 		pa -= PAGE_SIZE;
@@ -4137,7 +4164,7 @@ pmap_enter(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 		}
 	}
 
-	CTR2(KTR_PMAP, "pmap_enter: %.16lx -> %.16lx", va, pa);
+	// XXX CTR2(KTR_PMAP, "pmap_enter: %.16lx -> %.16lx", va, pa);
 
 	lock = NULL;
 	PMAP_LOCK(pmap);
@@ -4694,7 +4721,7 @@ pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va, vm_page_t m,
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
 	PMAP_ASSERT_STAGE1(pmap);
 
-	CTR2(KTR_PMAP, "pmap_enter_quick_locked: %p %lx", pmap, va);
+	// XXX CTR2(KTR_PMAP, "pmap_enter_quick_locked: %p %lx", pmap, va);
 	/*
 	 * In the case that a page table page is not
 	 * resident, we are creating it here.
