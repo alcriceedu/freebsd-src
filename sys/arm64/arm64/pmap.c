@@ -1206,6 +1206,10 @@ static u_long pmap_l3c_p_failures_af_only; // XXX
 SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, p_failures_af_only, CTLFLAG_RD,
     &pmap_l3c_p_failures_af_only, 0, "64KB page promotion failures AF only");
 
+static u_long pmap_l3c_p_failures_d_only; // XXX
+SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, p_failures_d_only, CTLFLAG_RD,
+    &pmap_l3c_p_failures_d_only, 0, "64KB page promotion failures dirty only");
+
 static u_long pmap_l3c_promotions;
 SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, promotions, CTLFLAG_RD,
     &pmap_l3c_promotions, 0, "64KB page promotions");
@@ -3973,6 +3977,13 @@ set_l3:
 			atomic_add_long(&pmap_l3c_p_failures, 1);
 			CTR2(KTR_PMAP, "pmap_promote_l3c: failure for va %#lx"
 			    " in pmap %p", va, pmap);
+
+			// XXX
+			if (((firstl3c & (ATTR_DBM | ATTR_S1_AP_RW_BIT)) ==
+			    ATTR_DBM) && ((oldl3 & ~(ATTR_DBM | ATTR_S1_AP_RW_BIT))
+			    == (pa & ~(ATTR_DBM | ATTR_S1_AP_RW_BIT))))
+				atomic_add_long(&pmap_l3c_p_failures_d_only, 1);
+
 			return;
 		}
 		pa -= PAGE_SIZE;
