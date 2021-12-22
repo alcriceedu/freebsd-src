@@ -271,9 +271,6 @@ mprsas_fw_work(struct mpr_softc *sc, struct mpr_fw_event_work *fw_event)
 	}
 	case MPI2_EVENT_SAS_ENCL_DEVICE_STATUS_CHANGE:
 	{
-		Mpi2EventDataSasEnclDevStatusChange_t *data;
-		data = (Mpi2EventDataSasEnclDevStatusChange_t *)
-		    fw_event->event_data;
 		mpr_mapping_enclosure_dev_status_change_event(sc,
 		    fw_event->event_data);
 		break;
@@ -1428,6 +1425,7 @@ mprsas_volume_add(struct mpr_softc *sc, u16 handle)
 	targ->tid = id;
 	targ->handle = handle;
 	targ->devname = wwid;
+	targ->flags = MPR_TARGET_FLAGS_VOLUME;
 	TAILQ_INIT(&targ->commands);
 	TAILQ_INIT(&targ->timedout_commands);
 	while (!SLIST_EMPTY(&targ->luns)) {

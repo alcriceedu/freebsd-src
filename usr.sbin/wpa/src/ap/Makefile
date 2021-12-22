@@ -12,7 +12,6 @@ INTERNALLIB=
 SRCS=	accounting.c \
 	ap_config.c \
 	ap_drv_ops.c \
-	ap_list.c \
 	ap_mlme.c \
 	authsrv.c \
 	beacon.c \
@@ -21,13 +20,8 @@ SRCS=	accounting.c \
 	dfs.c \
 	drv_callbacks.c \
 	eap_user_db.c \
-	gas_serv.c \
 	hostapd.c \
-	hs20.c \
-	hw_features.c \
-	ieee802_11.c \
 	ieee802_11_auth.c \
-	ieee802_11_he.c \
 	ieee802_11_ht.c \
 	ieee802_11_shared.c \
 	ieee802_11_vht.c \
@@ -44,14 +38,18 @@ SRCS=	accounting.c \
 	vlan_ifconfig.c \
 	vlan_init.c \
 	wmm.c \
+	wnm_ap.c \
 	wpa_auth.c \
 	wpa_auth_glue.c \
-	wpa_auth_ie.c \
-	wps_hostapd.c
+	wpa_auth_ie.c
 
-CFLAGS+=-DCONFIG_MBO \
-	-DCONFIG_RSN_PREAUTH \
-	-DHOSTAPD
+.if ${MK_WPA_SUPPLICANT_EAPOL} != "no"
+SRCS+=	gas_serv.c \
+	hs20.c \
+	wps_hostapd.c
+.endif
+
+CFLAGS+=-DHOSTAPD
 
 # We are only interested in includes at this point. Not libraries.
 LIBADD=

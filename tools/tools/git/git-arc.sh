@@ -342,7 +342,8 @@ build_commit_list()
     for chash in "$@"; do
         _commits=$(git rev-parse "${chash}")
         if ! git cat-file -e "${chash}"'^{commit}' >/dev/null 2>&1; then
-            _commits=$(git rev-list "$_commits" | tail -r)
+            # shellcheck disable=SC2086
+            _commits=$(git rev-list $_commits | tail -r)
         fi
         [ -n "$_commits" ] || err "invalid commit ID ${chash}"
         commits="$commits $_commits"
@@ -355,15 +356,19 @@ gitarc__create()
     local commit commits doprompt list o prev reviewers subscribers
 
     list=
+    prev=""
     if [ "$(git config --bool --get arc.list 2>/dev/null || echo false)" != "false" ]; then
         list=1
     fi
     doprompt=1
-    while getopts lr:s: o; do
+    while getopts lp:r:s: o; do
         case "$o" in
         l)
             list=1
             ;;
+	p)
+	    prev="$OPTARG"
+	    ;;
         r)
             reviewers="$OPTARG"
             ;;
@@ -390,7 +395,6 @@ gitarc__create()
     fi
 
     save_head
-    prev=""
     for commit in ${commits}; do
         if create_one_review "$commit" "$reviewers" "$subscribers" "$prev" \
                              "$doprompt"; then

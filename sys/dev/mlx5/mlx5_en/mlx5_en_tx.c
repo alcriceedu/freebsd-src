@@ -98,7 +98,7 @@ mlx5e_select_queue_by_send_tag(struct ifnet *ifp, struct mbuf *mb)
 top:
 #endif
 	/* get pointer to sendqueue */
-	switch (mb_tag->type) {
+	switch (mb_tag->sw->type) {
 #ifdef RATELIMIT
 	case IF_SND_TAG_TYPE_RATE_LIMIT:
 		sq = container_of(mb_tag,
@@ -516,7 +516,6 @@ mlx5e_get_vxlan_header_size(const struct mbuf *mb, struct mlx5e_tx_wqe *wqe,
 			return (0);
 		wqe->eth.swp_inner_l4_offset = eth_hdr_len / 2;
 		wqe->eth.cs_flags |= MLX5_ETH_WQE_L4_INNER_CSUM;
-		wqe->eth.swp_flags |= MLX5_ETH_WQE_SWP_INNER_L4_TYPE;
 		tcp_hlen = th->th_off << 2;
 		eth_hdr_len += tcp_hlen;
 		break;

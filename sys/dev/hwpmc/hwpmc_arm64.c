@@ -164,7 +164,7 @@ static int
 arm64_allocate_pmc(int cpu, int ri, struct pmc *pm,
   const struct pmc_op_pmcallocate *a)
 {
-	uint32_t caps, config;
+	uint32_t config;
 	struct arm64_cpu *pac;
 	enum pmc_event pe;
 
@@ -175,16 +175,15 @@ arm64_allocate_pmc(int cpu, int ri, struct pmc *pm,
 
 	pac = arm64_pcpu[cpu];
 
-	caps = a->pm_caps;
 	if (a->pm_class != PMC_CLASS_ARMV8) {
 		return (EINVAL);
 	}
 	pe = a->pm_ev;
 
 	/* Adjust the config value if needed. */
-	config = (uint32_t)pe;
+	config = a->pm_md.pm_md_config;
 	if ((a->pm_md.pm_md_flags & PM_MD_RAW_EVENT) == 0) {
-		config -= PMC_EV_ARMV8_FIRST;
+		config = (uint32_t)pe - PMC_EV_ARMV8_FIRST;
 		if (config > (PMC_EV_ARMV8_LAST - PMC_EV_ARMV8_FIRST))
 			return (EINVAL);
 	}
@@ -483,6 +482,16 @@ arm64_pcpu_init(struct pmc_mdep *md, int cpu)
 		phw->phw_pmc      = NULL;
 		pc->pc_hwpmcs[i + first_ri] = phw;
 	}
+
+	/*
+	 * Disable all counters and overflow interrupts. Upon reset they are in
+	 * an undefined state.
+	 *
+	 * Don't issue an isb here, just wait for the one in arm64_pmcr_write()
+	 * to make the writes visible.
+	 */
+	WRITE_SPECIALREG(pmcntenclr_el0, 0xffffffff);
+	WRITE_SPECIALREG(pmintenclr_el1, 0xffffffff);
 
 	/* Enable unit */
 	pmcr = arm64_pmcr_read();

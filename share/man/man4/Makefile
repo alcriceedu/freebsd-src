@@ -46,10 +46,10 @@ MAN=	aac.4 \
 	${_amdsmn.4} \
 	${_amdtemp.4} \
 	${_bxe.4} \
-	amr.4 \
 	${_aout.4} \
 	${_apic.4} \
 	arcmsr.4 \
+	arswitch.4 \
 	${_asmc.4} \
 	at45d.4 \
 	ata.4 \
@@ -110,7 +110,6 @@ MAN=	aac.4 \
 	chromebook_platform.4 \
 	${_chvgpio.4} \
 	ciss.4 \
-	cloudabi.4 \
 	${_coretemp.4} \
 	cp2112.4 \
 	${_cpuctl.4} \
@@ -142,7 +141,6 @@ MAN=	aac.4 \
 	ena.4 \
 	enc.4 \
 	epair.4 \
-	esp.4 \
 	est.4 \
 	et.4 \
 	etherswitch.4 \
@@ -166,6 +164,7 @@ MAN=	aac.4 \
 	gbde.4 \
 	gdb.4 \
 	gem.4 \
+	genet.4 \
 	geom.4 \
 	geom_linux_lvm.4 \
 	geom_map.4 \
@@ -223,7 +222,6 @@ MAN=	aac.4 \
 	iichid.4 \
 	iicmux.4 \
 	iicsmb.4 \
-	iir.4 \
 	${_igc.4} \
 	${_imcsmb.4} \
 	inet.4 \
@@ -288,22 +286,23 @@ MAN=	aac.4 \
 	mac_ntpd.4 \
 	mac_partition.4 \
 	mac_portacl.4 \
+	mac_priority.4 \
 	mac_seeotheruids.4 \
 	mac_stub.4 \
 	mac_test.4 \
 	malo.4 \
+	max44009.4 \
 	md.4 \
 	mdio.4 \
 	me.4 \
 	mem.4 \
-	meteor.4 \
 	mfi.4 \
+	${_mgb.4} \
 	miibus.4 \
 	mld.4 \
 	mlx.4 \
 	mlx4en.4 \
 	mlx5en.4 \
-	mly.4 \
 	mmc.4 \
 	mmcsd.4 \
 	mod_cc.4 \
@@ -353,7 +352,6 @@ MAN=	aac.4 \
 	ng_frame_relay.4 \
 	ng_gif.4 \
 	ng_gif_demux.4 \
-	ng_h4.4 \
 	ng_hci.4 \
 	ng_hole.4 \
 	ng_hub.4 \
@@ -379,7 +377,6 @@ MAN=	aac.4 \
 	ng_socket.4 \
 	ng_source.4 \
 	ng_split.4 \
-	ng_sppp.4 \
 	ng_sscfu.4 \
 	ng_sscop.4 \
 	ng_tag.4 \
@@ -418,9 +415,12 @@ MAN=	aac.4 \
 	owc.4 \
 	${_padlock.4} \
 	pass.4 \
+	pca954x.4 \
 	pccard.4 \
 	pccbb.4 \
 	pcf.4 \
+	pcf8574.4 \
+	pcf8591.4 \
 	${_pchtherm.4} \
 	pci.4 \
 	pcib.4 \
@@ -529,7 +529,6 @@ MAN=	aac.4 \
 	spigen.4 \
 	${_spkr.4} \
 	splash.4 \
-	sppp.4 \
 	ste.4 \
 	stf.4 \
 	stge.4 \
@@ -553,7 +552,6 @@ MAN=	aac.4 \
 	${_tpm.4} \
 	tty.4 \
 	tun.4 \
-	twa.4 \
 	twe.4 \
 	tws.4 \
 	udp.4 \
@@ -631,8 +629,6 @@ MLINKS+=${_bxe.4} ${_if_bxe.4}
 MLINKS+=cas.4 if_cas.4
 MLINKS+=cdce.4 if_cdce.4
 MLINKS+=cfi.4 cfid.4
-MLINKS+=cloudabi.4 cloudabi32.4 \
-	cloudabi.4 cloudabi64.4
 MLINKS+=crypto.4 cryptodev.4
 MLINKS+=cue.4 if_cue.4
 MLINKS+=cxgb.4 if_cxgb.4
@@ -670,6 +666,7 @@ MLINKS+=fwe.4 if_fwe.4
 MLINKS+=fwip.4 if_fwip.4
 MLINKS+=fxp.4 if_fxp.4
 MLINKS+=gem.4 if_gem.4
+MLINKS+=genet.4 if_genet.4
 MLINKS+=geom.4 GEOM.4
 MLINKS+=gif.4 if_gif.4
 MLINKS+=gpio.4 gpiobus.4
@@ -817,9 +814,9 @@ _if_vmx.4=	if_vmx.4
 _if_wpi.4=	if_wpi.4
 _igc.4=		igc.4
 _imcsmb.4=	imcsmb.4
-_ipmi.4=	ipmi.4
 _io.4=		io.4
 _itwd.4=	itwd.4
+_mgb.4=		mgb.4
 _nda.4=		nda.4
 _nfe.4=		nfe.4
 _nfsmb.4=	nfsmb.4
@@ -843,6 +840,7 @@ _tpm.4=		tpm.4
 _urtw.4=	urtw.4
 _viawd.4=	viawd.4
 _vmci.4=	vmci.4
+_vmd.4=		vmd.4
 _vmx.4=		vmx.4
 _wbwd.4=	wbwd.4
 _wpi.4=		wpi.4
@@ -861,7 +859,6 @@ _qlnxe.4=	qlnxe.4
 _sfxge.4=	sfxge.4
 _smartpqi.4=	smartpqi.4
 _sume.4=	sume.4
-_vmd.4=		vmd.4
 
 MLINKS+=qlxge.4 if_qlxge.4
 MLINKS+=qlxgb.4 if_qlxgb.4
@@ -887,6 +884,7 @@ _nvme.4=	nvme.4
 
 .if ${MACHINE_CPUARCH} == "amd64" || ${MACHINE_CPUARCH} == "i386" || \
 	 ${MACHINE_CPUARCH} == "aarch64"
+_ipmi.4=	ipmi.4
 _linux.4=	linux.4
 _ossl.4=	ossl.4
 .endif
@@ -940,7 +938,6 @@ MLINKS+=	efidev.4 efirtc.4
 .if ${MK_ISCSI} != "no"
 MAN+=		cfiscsi.4
 MAN+=		iscsi.4
-MAN+=		iscsi_initiator.4
 MAN+=		iser.4
 .endif
 

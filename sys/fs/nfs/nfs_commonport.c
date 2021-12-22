@@ -76,6 +76,7 @@ void (*nfsd_call_servertimer)(void) = NULL;
 void (*ncl_call_invalcaches)(struct vnode *) = NULL;
 vop_advlock_t *nfs_advlock_p = NULL;
 vop_reclaim_t *nfs_reclaim_p = NULL;
+uint32_t nfs_srvmaxio = NFS_SRVMAXIO;
 
 int nfs_pnfsio(task_fn_t *, void *);
 
@@ -238,12 +239,11 @@ nfsrv_object_create(struct vnode *vp, struct thread *td)
  * Look up a file name. Basically just initialize stuff and call namei().
  */
 int
-nfsrv_lookupfilename(struct nameidata *ndp, char *fname, NFSPROC_T *p)
+nfsrv_lookupfilename(struct nameidata *ndp, char *fname, NFSPROC_T *p __unused)
 {
 	int error;
 
-	NDINIT(ndp, LOOKUP, FOLLOW | LOCKLEAF, UIO_USERSPACE, fname,
-	    p);
+	NDINIT(ndp, LOOKUP, FOLLOW | LOCKLEAF, UIO_USERSPACE, fname);
 	error = namei(ndp);
 	if (!error) {
 		NDFREE(ndp, NDF_ONLY_PNBUF);
@@ -303,11 +303,11 @@ nfsvno_getfs(struct nfsfsinfo *sip, int isdgram)
 	if (isdgram)
 		pref = NFS_MAXDGRAMDATA;
 	else
-		pref = NFS_SRVMAXIO;
-	sip->fs_rtmax = NFS_SRVMAXIO;
+		pref = nfs_srvmaxio;
+	sip->fs_rtmax = nfs_srvmaxio;
 	sip->fs_rtpref = pref;
 	sip->fs_rtmult = NFS_FABLKSIZE;
-	sip->fs_wtmax = NFS_SRVMAXIO;
+	sip->fs_wtmax = nfs_srvmaxio;
 	sip->fs_wtpref = pref;
 	sip->fs_wtmult = NFS_FABLKSIZE;
 	sip->fs_dtpref = pref;

@@ -479,25 +479,8 @@ reloc_non_plt(Obj_Entry *obj, Obj_Entry *obj_rtld, int flags,
 					return (-1);
 				}
 			}
-			/* Test weak undefined thread variable */
-			if (def->st_shndx != SHN_UNDEF) {
-				*where = def->st_value + rela->r_addend +
-				    defobj->tlsoffset;
-			} else {
-				/*
-				 * XXX We should relocate undefined thread
-				 * weak variable address to NULL, but how?
-				 * Can we return error in this situation?
-				 */
-				rtld_printf("%s: Unable to relocate undefined "
-				"weak TLS variable\n", obj->path);
-#if 0
-				return (-1);
-#else
-				*where = def->st_value + rela->r_addend +
-				    defobj->tlsoffset;
-#endif
-			}
+			*where = def->st_value + rela->r_addend +
+			    defobj->tlsoffset;
 			break;
 
 		/*
@@ -533,7 +516,6 @@ reloc_non_plt(Obj_Entry *obj, Obj_Entry *obj_rtld, int flags,
 void
 allocate_initial_tls(Obj_Entry *objs)
 {
-	Elf_Addr **tp;
 
 	/*
 	* Fix the size of the static TLS block by using the maximum
@@ -543,19 +525,14 @@ allocate_initial_tls(Obj_Entry *objs)
 	tls_static_space = tls_last_offset + tls_last_size +
 	    RTLD_STATIC_TLS_EXTRA;
 
-	tp = (Elf_Addr **) allocate_tls(objs, NULL, TLS_TCB_SIZE, 16);
-
-	asm volatile("msr	tpidr_el0, %0" : : "r"(tp));
+	_tcb_set(allocate_tls(objs, NULL, TLS_TCB_SIZE, TLS_TCB_ALIGN));
 }
 
 void *
 __tls_get_addr(tls_index* ti)
 {
-      char *p;
-      void *_tp;
+	uintptr_t **dtvp;
 
-      __asm __volatile("mrs	%0, tpidr_el0"  : "=r" (_tp));
-      p = tls_get_addr_common((Elf_Addr **)(_tp), ti->ti_module, ti->ti_offset);
-
-      return (p);
+	dtvp = &_tcb_get()->tcb_dtv;
+	return (tls_get_addr_common(dtvp, ti->ti_module, ti->ti_offset));
 }

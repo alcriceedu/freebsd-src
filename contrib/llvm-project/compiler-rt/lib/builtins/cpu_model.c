@@ -99,6 +99,7 @@ enum ProcessorSubtypes {
   INTEL_COREI7_SAPPHIRERAPIDS,
   INTEL_COREI7_ALDERLAKE,
   AMDFAM19H_ZNVER3,
+  INTEL_COREI7_ROCKETLAKE,
   CPU_SUBTYPE_MAX
 };
 
@@ -382,6 +383,13 @@ getIntelProcessorTypeAndSubtype(unsigned Family, unsigned Model,
       CPU = "skylake";
       *Type = INTEL_COREI7;
       *Subtype = INTEL_COREI7_SKYLAKE;
+      break;
+
+    // Rocketlake:
+    case 0xa7:
+      CPU = "rocketlake";
+      *Type = INTEL_COREI7;
+      *Subtype = INTEL_COREI7_ROCKETLAKE;
       break;
 
     // Skylake Xeon:
@@ -775,8 +783,14 @@ _Bool __aarch64_have_lse_atomics
 #define HWCAP_ATOMICS (1 << 8)
 #endif
 static void CONSTRUCTOR_ATTRIBUTE init_have_lse_atomics(void) {
+#if defined(__FreeBSD__)
+  unsigned long hwcap;
+  int result = elf_aux_info(AT_HWCAP, &hwcap, sizeof hwcap);
+  __aarch64_have_lse_atomics = result == 0 && (hwcap & HWCAP_ATOMICS) != 0;
+#else
   unsigned long hwcap = getauxval(AT_HWCAP);
   __aarch64_have_lse_atomics = (hwcap & HWCAP_ATOMICS) != 0;
+#endif
 }
 #endif // defined(__has_include)
 #endif // __has_include(<sys/auxv.h>)

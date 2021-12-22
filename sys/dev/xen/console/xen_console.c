@@ -273,7 +273,7 @@ static void
 xencons_early_init_ring(struct xencons_priv *cons)
 {
 	cons->intf = pmap_mapdev_attr(ptoa(xen_get_console_mfn()), PAGE_SIZE,
-	    VM_MEMATTR_WRITE_BACK);
+	    VM_MEMATTR_XEN);
 	cons->evtchn = xen_get_console_evtchn();
 }
 
@@ -701,7 +701,7 @@ static struct ttydevsw xencons_ttydevsw = {
 static void
 xencons_identify(driver_t *driver, device_t parent)
 {
-	device_t child;
+	device_t child __unused;
 
 	if (main_cons.ops == NULL)
 		return;

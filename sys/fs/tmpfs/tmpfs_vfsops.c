@@ -469,7 +469,7 @@ tmpfs_mount(struct mount *mp)
 	MNT_ILOCK(mp);
 	mp->mnt_flag |= MNT_LOCAL;
 	mp->mnt_kern_flag |= MNTK_LOOKUP_SHARED | MNTK_EXTENDED_SHARED |
-	    MNTK_TEXT_REFS | MNTK_NOMSYNC;
+	    MNTK_NOMSYNC;
 	if (!nonc && (mp->mnt_flag & MNT_UNION) == 0)
 		mp->mnt_kern_flag |= MNTK_FPLOOKUP;
 	MNT_IUNLOCK(mp);
@@ -479,7 +479,7 @@ tmpfs_mount(struct mount *mp)
 	vfs_getnewfsid(mp);
 	vfs_mountedfrom(mp, "tmpfs");
 
-	return 0;
+	return (0);
 }
 
 /* ARGSUSED2 */
@@ -644,7 +644,7 @@ tmpfs_statfs(struct mount *mp, struct statfs *sbp)
 		sbp->f_ffree = sbp->f_files - used;
 	/* sbp->f_owner = tmp->tn_uid; */
 
-	return 0;
+	return (0);
 }
 
 static int

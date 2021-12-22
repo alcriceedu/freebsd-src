@@ -105,6 +105,8 @@ struct tcphdr {
 #define	TCPOPT_FAST_OPEN	34
 #define	   TCPOLEN_FAST_OPEN_EMPTY	2
 
+#define	MAX_TCPOPTLEN		40	/* Absolute maximum TCP options len */
+
 /* Miscellaneous constants */
 #define	MAX_SACK_BLKS	6	/* Max # SACK blocks stored at receiver side */
 #define	TCP_MAX_SACK	4	/* MAX # SACKs sent in any segment */
@@ -208,6 +210,7 @@ struct tcphdr {
 #define	TCP_PCAP_OUT	2048	/* number of output packets to keep */
 #define	TCP_PCAP_IN	4096	/* number of input packets to keep */
 #define TCP_FUNCTION_BLK 8192	/* Set the tcp function pointers to the specified stack */
+#define TCP_FUNCTION_ALIAS 8193	/* Get the current tcp function pointer name alias */
 /* Options for Rack and BBR */
 #define	TCP_REUSPORT_LB_NUMA   1026	/* set listen socket numa domain */
 #define TCP_RACK_MBUF_QUEUE   1050 /* Do we allow mbuf queuing if supported */
@@ -307,7 +310,8 @@ struct tcphdr {
 #define TCP_RACK_PACING_BETA 1138	/* Changing the beta for pacing */
 #define TCP_RACK_PACING_BETA_ECN 1139	/* Changing the beta for ecn with pacing */
 #define TCP_RACK_TIMER_SLOP 1140	/* Set or get the timer slop used */
-
+#define TCP_RACK_DSACK_OPT 1141		/* How do we setup rack timer DSACK options bit 1/2 */
+#define TCP_RACK_ENABLE_HYSTART 1142	/* Do we allow hystart in the CC modules */
 /* Start of reserved space for third-party user-settable options. */
 #define	TCP_VENDOR	SO_VENDOR
 

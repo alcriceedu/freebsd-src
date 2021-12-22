@@ -116,9 +116,26 @@ int nmbjumbop;			/* limits number of page size jumbo clusters */
 int nmbjumbo9;			/* limits number of 9k jumbo clusters */
 int nmbjumbo16;			/* limits number of 16k jumbo clusters */
 
-bool mb_use_ext_pgs = true;	/* use M_EXTPG mbufs for sendfile & TLS */
-SYSCTL_BOOL(_kern_ipc, OID_AUTO, mb_use_ext_pgs, CTLFLAG_RWTUN,
+bool mb_use_ext_pgs = false;	/* use M_EXTPG mbufs for sendfile & TLS */
+
+static int
+sysctl_mb_use_ext_pgs(SYSCTL_HANDLER_ARGS)
+{
+	int error, extpg;
+
+	extpg = mb_use_ext_pgs;
+	error = sysctl_handle_int(oidp, &extpg, 0, req);
+	if (error == 0 && req->newptr != NULL) {
+		if (extpg != 0 && !PMAP_HAS_DMAP)
+			error = EOPNOTSUPP;
+		else
+			mb_use_ext_pgs = extpg != 0;
+	}
+	return (error);
+}
+SYSCTL_PROC(_kern_ipc, OID_AUTO, mb_use_ext_pgs, CTLTYPE_INT | CTLFLAG_RW,
     &mb_use_ext_pgs, 0,
+    sysctl_mb_use_ext_pgs, "IU",
     "Use unmapped mbufs for sendfile(2) and TLS offload");
 
 static quad_t maxmbufmem;	/* overall real memory limit for all mbufs */
@@ -137,6 +154,7 @@ static void
 tunable_mbinit(void *dummy)
 {
 	quad_t realmem;
+	int extpg;
 
 	/*
 	 * The default limit for all mbuf related memory is 1/2 of all
@@ -173,6 +191,16 @@ tunable_mbinit(void *dummy)
 	if (nmbufs < nmbclusters + nmbjumbop + nmbjumbo9 + nmbjumbo16)
 		nmbufs = lmax(maxmbufmem / MSIZE / 5,
 		    nmbclusters + nmbjumbop + nmbjumbo9 + nmbjumbo16);
+
+	/*
+	 * Unmapped mbufs can only safely be used on platforms with a direct
+	 * map.
+	 */
+	if (PMAP_HAS_DMAP) {
+		extpg = 1;
+		TUNABLE_INT_FETCH("kern.ipc.mb_use_ext_pgs", &extpg);
+		mb_use_ext_pgs = extpg != 0;
+	}
 }
 SYSINIT(tunable_mbinit, SI_SUB_KMEM, SI_ORDER_MIDDLE, tunable_mbinit, NULL);
 
@@ -652,7 +680,7 @@ static void
 mb_dtor_mbuf(void *mem, int size, void *arg)
 {
 	struct mbuf *m;
-	unsigned long flags;
+	unsigned long flags __diagused;
 
 	m = (struct mbuf *)mem;
 	flags = (unsigned long)arg;
@@ -683,7 +711,7 @@ mb_dtor_pack(void *mem, int size, void *arg)
 	KASSERT(m->m_ext.ext_arg2 == NULL, ("%s: ext_arg2 != NULL", __func__));
 	KASSERT(m->m_ext.ext_size == MCLBYTES, ("%s: ext_size != MCLBYTES", __func__));
 	KASSERT(m->m_ext.ext_type == EXT_PACKET, ("%s: ext_type != EXT_PACKET", __func__));
-#ifdef INVARIANTS
+#if defined(INVARIANTS) && !defined(KMSAN)
 	trash_dtor(m->m_ext.ext_buf, MCLBYTES, arg);
 #endif
 	/*
@@ -742,7 +770,7 @@ mb_zinit_pack(void *mem, int size, int how)
 	    m->m_ext.ext_buf == NULL)
 		return (ENOMEM);
 	m->m_ext.ext_type = EXT_PACKET;	/* Override. */
-#ifdef INVARIANTS
+#if defined(INVARIANTS) && !defined(KMSAN)
 	trash_init(m->m_ext.ext_buf, MCLBYTES, how);
 #endif
 	return (0);
@@ -758,11 +786,11 @@ mb_zfini_pack(void *mem, int size)
 	struct mbuf *m;
 
 	m = (struct mbuf *)mem;
-#ifdef INVARIANTS
+#if defined(INVARIANTS) && !defined(KMSAN)
 	trash_fini(m->m_ext.ext_buf, MCLBYTES);
 #endif
 	uma_zfree_arg(zone_clust, m->m_ext.ext_buf, NULL);
-#ifdef INVARIANTS
+#if defined(INVARIANTS) && !defined(KMSAN)
 	trash_dtor(mem, size, NULL);
 #endif
 }
@@ -784,7 +812,7 @@ mb_ctor_pack(void *mem, int size, void *arg, int how)
 	type = args->type;
 	MPASS((flags & M_NOFREE) == 0);
 
-#ifdef INVARIANTS
+#if defined(INVARIANTS) && !defined(KMSAN)
 	trash_ctor(m->m_ext.ext_buf, MCLBYTES, arg, how);
 #endif
 
@@ -1372,6 +1400,44 @@ m_get2(int size, int how, short type, int flags)
 }
 
 /*
+ * m_get3() allocates minimum mbuf that would fit "size" argument.
+ * Unlike m_get2() it can allocate clusters up to MJUM16BYTES.
+ */
+struct mbuf *
+m_get3(int size, int how, short type, int flags)
+{
+	struct mb_args args;
+	struct mbuf *m, *n;
+	uma_zone_t zone;
+
+	if (size <= MJUMPAGESIZE)
+		return (m_get2(size, how, type, flags));
+
+	if (size > MJUM16BYTES)
+		return (NULL);
+
+	args.flags = flags;
+	args.type = type;
+
+	m = uma_zalloc_arg(zone_mbuf, &args, how);
+	if (m == NULL)
+		return (NULL);
+
+	if (size <= MJUM9BYTES)
+		zone = zone_jumbo9;
+	else
+		zone = zone_jumbo16;
+
+	n = uma_zalloc_arg(zone, m, how);
+	if (n == NULL) {
+		m_free_raw(m);
+		return (NULL);
+	}
+
+	return (m);
+}
+
+/*
  * m_getjcl() returns an mbuf with a cluster of the specified size attached.
  * For size it takes MCLBYTES, MJUMPAGESIZE, MJUM9BYTES, MJUM16BYTES.
  */
@@ -1547,13 +1613,14 @@ m_snd_tag_alloc(struct ifnet *ifp, union if_snd_tag_alloc_params *params,
 }
 
 void
-m_snd_tag_init(struct m_snd_tag *mst, struct ifnet *ifp, u_int type)
+m_snd_tag_init(struct m_snd_tag *mst, struct ifnet *ifp,
+    const struct if_snd_tag_sw *sw)
 {
 
 	if_ref(ifp);
 	mst->ifp = ifp;
 	refcount_init(&mst->refcount, 1);
-	mst->type = type;
+	mst->sw = sw;
 	counter_u64_add(snd_tag_count, 1);
 }
 
@@ -1563,7 +1630,7 @@ m_snd_tag_destroy(struct m_snd_tag *mst)
 	struct ifnet *ifp;
 
 	ifp = mst->ifp;
-	ifp->if_snd_tag_free(mst);
+	mst->sw->snd_tag_free(mst);
 	if_rele(ifp);
 	counter_u64_add(snd_tag_count, -1);
 }
@@ -1585,8 +1652,8 @@ mb_alloc_ext_plus_pages(int len, int how)
 	npgs = howmany(len, PAGE_SIZE);
 	for (i = 0; i < npgs; i++) {
 		do {
-			pg = vm_page_alloc(NULL, 0, VM_ALLOC_NORMAL |
-			    VM_ALLOC_NOOBJ | VM_ALLOC_NODUMP | VM_ALLOC_WIRED);
+			pg = vm_page_alloc_noobj(VM_ALLOC_NODUMP |
+			    VM_ALLOC_WIRED);
 			if (pg == NULL) {
 				if (how == M_NOWAIT) {
 					m->m_epg_npgs = i;

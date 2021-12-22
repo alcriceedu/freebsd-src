@@ -68,7 +68,6 @@ typedef struct {
     TLS_TCB_SIZE
 #define calculate_tls_offset(prev_offset, prev_size, size, align, offset) \
     round(prev_offset + prev_size, align)
-#define calculate_tls_end(off, size)    ((off) + (size))
 #define calculate_tls_post_size(align)  0
 
 extern void *__tls_get_addr(tls_index *ti);
@@ -77,7 +76,5 @@ extern void *__tls_get_addr(tls_index *ti);
 #define	RTLD_DEFAULT_STACK_EXEC		PROT_EXEC
 
 #define md_abi_variant_hook(x)
-
-#define	TLS_DTV_OFFSET	0
 
 #endif

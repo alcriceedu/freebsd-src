@@ -49,7 +49,7 @@ enum {
 	T5_REGMAP_SIZE = (332 * 1024),
 };
 
-enum { MEM_EDC0, MEM_EDC1, MEM_MC, MEM_MC0 = MEM_MC, MEM_MC1 };
+enum { MEM_EDC0, MEM_EDC1, MEM_MC, MEM_MC0 = MEM_MC, MEM_MC1, MEM_HMA };
 
 enum dev_master { MASTER_CANT, MASTER_MAY, MASTER_MUST };
 
@@ -443,8 +443,11 @@ struct link_config {
 	int8_t requested_aneg;	/* link autonegotiation */
 	int8_t requested_fc;	/* flow control */
 	int8_t requested_fec;	/* FEC */
+	int8_t force_fec;	/* FORCE_FEC in L1_CFG32 command. */
 	u_int requested_speed;	/* speed (Mbps) */
+	uint32_t requested_caps;/* rcap in last l1cfg issued by the driver. */
 
+	/* These are populated with information from the firmware. */
 	uint32_t pcaps;		/* link capabilities */
 	uint32_t acaps;		/* advertised capabilities */
 	uint32_t lpacaps;	/* peer advertised capabilities */

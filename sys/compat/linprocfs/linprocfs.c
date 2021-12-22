@@ -482,7 +482,7 @@ linprocfs_domtab(PFS_FILL_ARGS)
 	 * Ideally, this would use the current chroot rather than some
 	 * hardcoded path.
 	 */
-	NDINIT(&nd, LOOKUP, FOLLOW, UIO_SYSSPACE, linux_emul_path, td);
+	NDINIT(&nd, LOOKUP, FOLLOW, UIO_SYSSPACE, linux_emul_path);
 	flep = NULL;
 	error = namei(&nd);
 	lep = linux_emul_path;
@@ -539,7 +539,7 @@ linprocfs_doprocmountinfo(PFS_FILL_ARGS)
 	 * Ideally, this would use the current chroot rather than some
 	 * hardcoded path.
 	 */
-	NDINIT(&nd, LOOKUP, FOLLOW, UIO_SYSSPACE, linux_emul_path, td);
+	NDINIT(&nd, LOOKUP, FOLLOW, UIO_SYSSPACE, linux_emul_path);
 	flep = NULL;
 	error = namei(&nd);
 	lep = linux_emul_path;
@@ -1089,12 +1089,12 @@ linprocfs_doprocstatus(PFS_FILL_ARGS)
 	sbuf_printf(sb, "Pid:\t%d\n",		p->p_pid);
 	sbuf_printf(sb, "PPid:\t%d\n",		kp.ki_ppid );
 	sbuf_printf(sb, "TracerPid:\t%d\n",	kp.ki_tracer );
-	sbuf_printf(sb, "Uid:\t%d %d %d %d\n",	p->p_ucred->cr_ruid,
+	sbuf_printf(sb, "Uid:\t%d\t%d\t%d\t%d\n", p->p_ucred->cr_ruid,
 						p->p_ucred->cr_uid,
 						p->p_ucred->cr_svuid,
 						/* FreeBSD doesn't have fsuid */
 						p->p_ucred->cr_uid);
-	sbuf_printf(sb, "Gid:\t%d %d %d %d\n",	p->p_ucred->cr_rgid,
+	sbuf_printf(sb, "Gid:\t%d\t%d\t%d\t%d\n", p->p_ucred->cr_rgid,
 						p->p_ucred->cr_gid,
 						p->p_ucred->cr_svgid,
 						/* FreeBSD doesn't have fsgid */
@@ -1169,7 +1169,7 @@ linprocfs_doproccwd(PFS_FILL_ARGS)
 	char *fullpath = "unknown";
 	char *freepath = NULL;
 
-	pwd = pwd_hold(td);
+	pwd = pwd_hold_proc(p);
 	vn_fullpath(pwd->pwd_cdir, &fullpath, &freepath);
 	sbuf_printf(sb, "%s", fullpath);
 	if (freepath)
@@ -1189,7 +1189,7 @@ linprocfs_doprocroot(PFS_FILL_ARGS)
 	char *fullpath = "unknown";
 	char *freepath = NULL;
 
-	pwd = pwd_hold(td);
+	pwd = pwd_hold_proc(p);
 	vp = jailed(p->p_ucred) ? pwd->pwd_jdir : pwd->pwd_rdir;
 	vn_fullpath(vp, &fullpath, &freepath);
 	sbuf_printf(sb, "%s", fullpath);
@@ -1277,7 +1277,6 @@ linprocfs_doprocmaps(PFS_FILL_ARGS)
 	char *name = "", *freename = NULL;
 	const char *l_map_str;
 	ino_t ino;
-	int ref_count, shadow_count, flags;
 	int error;
 	struct vnode *vp;
 	struct vattr vat;
@@ -1331,9 +1330,6 @@ linprocfs_doprocmaps(PFS_FILL_ARGS)
 				vref(vp);
 			if (lobj != obj)
 				VM_OBJECT_RUNLOCK(lobj);
-			flags = obj->flags;
-			ref_count = obj->ref_count;
-			shadow_count = obj->shadow_count;
 			VM_OBJECT_RUNLOCK(obj);
 			if (vp != NULL) {
 				vn_fullpath(vp, &name, &freename);
@@ -1342,15 +1338,17 @@ linprocfs_doprocmaps(PFS_FILL_ARGS)
 				ino = vat.va_fileid;
 				vput(vp);
 			} else if (SV_PROC_ABI(p) == SV_ABI_LINUX) {
-				if (e_start == p->p_sysent->sv_shared_page_base)
+				/*
+				 * sv_shared_page_base pointed out to the
+				 * FreeBSD sharedpage, PAGE_SIZE is a size
+				 * of it. The vDSO page is above.
+				 */
+				if (e_start == p->p_sysent->sv_shared_page_base +
+				    PAGE_SIZE)
 					name = vdso_str;
 				if (e_end == p->p_sysent->sv_usrstack)
 					name = stack_str;
 			}
-		} else {
-			flags = 0;
-			ref_count = 0;
-			shadow_count = 0;
 		}
 
 		/*

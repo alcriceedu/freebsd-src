@@ -265,6 +265,9 @@ struct tcpcb {
 	uint64_t t_sndtlpbyte;		/* total tail loss probe bytes sent */
 	uint64_t t_sndbytes;		/* total bytes sent */
 	uint64_t t_snd_rxt_bytes;	/* total bytes retransmitted */
+	uint32_t t_dsack_bytes;		/* Total number of dsack bytes we have received */
+	uint32_t t_dsack_tlp_bytes;	/* Total number of dsack bytes we have received for TLPs sent */
+	uint32_t t_dsack_pack;		/* Total dsack packets we have recieved */
 
 	uint8_t t_tfo_client_cookie_len; /* TCP Fast Open client cookie length */
 	uint32_t t_end_info_status;	/* Status flag of end info */
@@ -525,18 +528,14 @@ struct tcptw {
 		t_unused:16;
 	tcp_seq		snd_nxt;
 	tcp_seq		rcv_nxt;
-	tcp_seq		iss;
-	tcp_seq		irs;
 	u_short		last_win;	/* cached window value */
 	short		tw_so_options;	/* copy of so_options */
 	struct ucred	*tw_cred;	/* user credentials */
 	u_int32_t	t_recent;
 	u_int32_t	ts_offset;	/* our timestamp offset */
-	u_int		t_starttime;
 	int		tw_time;
 	TAILQ_ENTRY(tcptw) tw_2msl;
-	void		*tw_pspare;	/* TCP_SIGNATURE */
-	u_int		*tw_spare;	/* TCP_SIGNATURE */
+	u_int		tw_flags;	/* tcpcb t_flags */
 };
 
 #define	intotcpcb(ip)	((struct tcpcb *)(ip)->inp_ppcb)
@@ -703,7 +702,17 @@ struct	tcpstat {
 	uint64_t tcps_tunneled_pkts;	/* Packets encap's in UDP received */
 	uint64_t tcps_tunneled_errs;	/* Packets that had errors that were UDP encaped */
 
-	uint64_t _pad[9];		/* 6 UTO, 3 TBD */
+	/* Dsack related stats */
+	uint64_t tcps_dsack_count;	/* Number of ACKs arriving with DSACKs */
+	uint64_t tcps_dsack_bytes;	/* Number of bytes DSACK'ed no TLP */
+	uint64_t tcps_dsack_tlp_bytes;	/* Number of bytes DSACK'ed due to TLPs */
+
+	/* TCPS_TIME_WAIT usage stats */
+	uint64_t tcps_tw_recycles;	/* Times time-wait was recycled. */
+	uint64_t tcps_tw_resets;	/* Times time-wait sent a reset. */
+	uint64_t tcps_tw_responds;	/* Times time-wait sent a valid ack. */
+
+	uint64_t _pad[6];		/* 3 UTO, 3 TBD */
 };
 
 #define	tcps_rcvmemdrop	tcps_rcvreassfull	/* compat */
@@ -801,9 +810,12 @@ struct xtcpcb {
 	uint32_t	t_rcv_wnd;		/* (s) */
 	uint32_t	t_snd_wnd;		/* (s) */
 	uint32_t	xt_ecn;			/* (s) */
+	uint32_t	t_dsack_bytes;		/* (n) */
+	uint32_t	t_dsack_tlp_bytes;	/* (n) */
+	uint32_t	t_dsack_pack;		/* (n) */
 	uint16_t	xt_encaps_port;		/* (s) */
 	int16_t		spare16;
-	int32_t		spare32[25];
+	int32_t		spare32[22];
 } __aligned(8);
 
 #ifdef _KERNEL
@@ -897,7 +909,6 @@ VNET_DECLARE(int, tcp_sc_rst_sock_fail);
 VNET_DECLARE(int, tcp_sendspace);
 VNET_DECLARE(int, tcp_udp_tunneling_overhead);
 VNET_DECLARE(int, tcp_udp_tunneling_port);
-VNET_DECLARE(struct inpcbhead, tcb);
 VNET_DECLARE(struct inpcbinfo, tcbinfo);
 
 #define	V_tcp_do_lrd			VNET(tcp_do_lrd)
@@ -906,7 +917,6 @@ VNET_DECLARE(struct inpcbinfo, tcbinfo);
 #define	V_tcp_do_newcwv			VNET(tcp_do_newcwv)
 #define	V_drop_synfin			VNET(drop_synfin)
 #define	V_path_mtu_discovery		VNET(path_mtu_discovery)
-#define	V_tcb				VNET(tcb)
 #define	V_tcbinfo			VNET(tcbinfo)
 #define	V_tcp_abc_l_var			VNET(tcp_abc_l_var)
 #define	V_tcp_autorcvbuf_max		VNET(tcp_autorcvbuf_max)
@@ -956,6 +966,7 @@ int	 tcp_ccalgounload(struct cc_algo *unload_algo);
 struct tcpcb *
 	 tcp_close(struct tcpcb *);
 void	 tcp_discardcb(struct tcpcb *);
+bool	 tcp_freecb(struct tcpcb *);
 void	 tcp_twstart(struct tcpcb *);
 void	 tcp_twclose(struct tcptw *, int);
 void	 tcp_ctlinput(int, struct sockaddr *, void *);
@@ -1009,6 +1020,7 @@ int register_tcp_functions_as_name(struct tcp_function_block *blk,
 int deregister_tcp_functions(struct tcp_function_block *blk, bool quiesce,
     bool force);
 struct tcp_function_block *find_and_ref_tcp_functions(struct tcp_function_set *fs);
+int find_tcp_function_alias(struct tcp_function_block *blk, struct tcp_function_set *fs);
 void tcp_switch_back_to_default(struct tcpcb *tp);
 struct tcp_function_block *
 find_and_ref_tcp_fb(struct tcp_function_block *fs);
@@ -1041,6 +1053,7 @@ extern uint32_t tcp_ack_war_cnt;
 
 uint32_t tcp_maxmtu(struct in_conninfo *, struct tcp_ifcap *);
 uint32_t tcp_maxmtu6(struct in_conninfo *, struct tcp_ifcap *);
+void	 tcp6_use_min_mtu(struct tcpcb *);
 u_int	 tcp_maxseg(const struct tcpcb *);
 u_int	 tcp_fixed_maxseg(const struct tcpcb *);
 void	 tcp_mss_update(struct tcpcb *, int, int, struct hc_metrics_lite *,
@@ -1064,6 +1077,7 @@ int	 tcp_twcheck(struct inpcb *, struct tcpopt *, struct tcphdr *,
 	    struct mbuf *, int);
 void	 tcp_setpersist(struct tcpcb *);
 void	 tcp_slowtimo(void);
+void	 tcp_record_dsack(struct tcpcb *tp, tcp_seq start, tcp_seq end, int tlp);
 struct tcptemp *
 	 tcpip_maketemplate(struct inpcb *);
 void	 tcpip_fillheaders(struct inpcb *, uint16_t, void *, void *);
@@ -1144,8 +1158,6 @@ static inline void
 tcp_account_for_send(struct tcpcb *tp, uint32_t len, uint8_t is_rxt,
     uint8_t is_tlp, int hw_tls)
 {
-	uint64_t rexmit_percent;
-
 	if (is_tlp) {
 		tp->t_sndtlppack++;
 		tp->t_sndtlpbyte += len;
@@ -1156,11 +1168,13 @@ tcp_account_for_send(struct tcpcb *tp, uint32_t len, uint8_t is_rxt,
 	else
 		tp->t_sndbytes += len;
 
-	if (hw_tls && is_rxt) {
-		rexmit_percent = (1000ULL * tp->t_snd_rxt_bytes) / (10ULL * (tp->t_snd_rxt_bytes + tp->t_sndbytes));
+#ifdef KERN_TLS
+	if (hw_tls && is_rxt && len != 0) {
+		uint64_t rexmit_percent = (1000ULL * tp->t_snd_rxt_bytes) / (10ULL * (tp->t_snd_rxt_bytes + tp->t_sndbytes));
 		if (rexmit_percent > ktls_ifnet_max_rexmit_pct)
 			ktls_disable_ifnet(tp);
 	}
+#endif
 
 }
 #endif /* _KERNEL */

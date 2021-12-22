@@ -96,7 +96,6 @@ struct g_class {
 	u_int			version;
 	u_int			spare0;
 	g_taste_t		*taste;
-	g_config_t		*config;
 	g_ctl_req_t		*ctlreq;
 	g_init_t		*init;
 	g_fini_t		*fini;
@@ -260,6 +259,7 @@ extern int g_debugflags;
 
 /* geom_event.c */
 typedef void g_event_t(void *, int flag);
+struct g_event;
 #define EV_CANCEL	1
 int g_post_event(g_event_t *func, void *arg, int flag, ...);
 int g_waitfor_event(g_event_t *func, void *arg, int flag, ...);
@@ -269,6 +269,8 @@ int g_media_changed(struct g_provider *pp, int flag);
 int g_media_gone(struct g_provider *pp, int flag);
 void g_orphan_provider(struct g_provider *pp, int error);
 void g_waitidlelock(void);
+struct g_event *g_alloc_event(int flag);
+void g_post_event_ep(g_event_t *func, void *arg, struct g_event *ep, ...);
 
 /* geom_subr.c */
 int g_access(struct g_consumer *cp, int nread, int nwrite, int nexcl);

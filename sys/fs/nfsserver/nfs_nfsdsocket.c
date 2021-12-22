@@ -198,7 +198,7 @@ int (*nfsrv4_ops0[NFSV42_NOPS])(struct nfsrv_descript *,
 	nfsrvd_allocate,
 	(int (*)(struct nfsrv_descript *, int, vnode_t , struct nfsexstuff *))0,
 	nfsrvd_notsupp,
-	nfsrvd_notsupp,
+	nfsrvd_deallocate,
 	nfsrvd_ioadvise,
 	nfsrvd_layouterror,
 	nfsrvd_layoutstats,
@@ -721,6 +721,9 @@ nfsrvd_compound(struct nfsrv_descript *nd, int isdgram, u_char *tag,
 	int bextpg, bextpgsiz;
 
 	p = curthread;
+
+	/* Check for and optionally clear the no space flags for DSs. */
+	nfsrv_checknospc();
 
 	NFSVNO_EXINIT(&vpnes);
 	NFSVNO_EXINIT(&savevpnes);

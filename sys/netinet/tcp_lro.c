@@ -228,7 +228,7 @@ struct vxlan_header {
 };
 
 static inline void *
-tcp_lro_low_level_parser(void *ptr, struct lro_parser *parser, bool update_data, bool is_vxlan)
+tcp_lro_low_level_parser(void *ptr, struct lro_parser *parser, bool update_data, bool is_vxlan, int mlen)
 {
 	const struct ether_vlan_header *eh;
 	void *old;
@@ -258,16 +258,21 @@ tcp_lro_low_level_parser(void *ptr, struct lro_parser *parser, bool update_data,
 		}
 		/* advance to next header */
 		ptr = (uint8_t *)ptr + ETHER_HDR_LEN + ETHER_VLAN_ENCAP_LEN;
+		mlen -= (ETHER_HDR_LEN  + ETHER_VLAN_ENCAP_LEN);
 	} else {
 		eth_type = eh->evl_encap_proto;
 		/* advance to next header */
+		mlen -= ETHER_HDR_LEN;
 		ptr = (uint8_t *)ptr + ETHER_HDR_LEN;
 	}
-
+	if (__predict_false(mlen <= 0))
+		return (NULL);
 	switch (eth_type) {
 #ifdef INET
 	case htons(ETHERTYPE_IP):
 		parser->ip4 = ptr;
+		if (__predict_false(mlen < sizeof(struct ip)))
+			return (NULL);
 		/* Ensure there are no IPv4 options. */
 		if ((parser->ip4->ip_hl << 2) != sizeof (*parser->ip4))
 			break;
@@ -275,12 +280,15 @@ tcp_lro_low_level_parser(void *ptr, struct lro_parser *parser, bool update_data,
 		if (parser->ip4->ip_off & htons(IP_MF|IP_OFFMASK))
 			break;
 		ptr = (uint8_t *)ptr + (parser->ip4->ip_hl << 2);
+		mlen -= sizeof(struct ip);
 		if (update_data) {
 			parser->data.s_addr.v4 = parser->ip4->ip_src;
 			parser->data.d_addr.v4 = parser->ip4->ip_dst;
 		}
 		switch (parser->ip4->ip_p) {
 		case IPPROTO_UDP:
+			if (__predict_false(mlen < sizeof(struct udphdr)))
+				return (NULL);
 			parser->udp = ptr;
 			if (update_data) {
 				parser->data.lro_type = LRO_TYPE_IPV4_UDP;
@@ -294,6 +302,8 @@ tcp_lro_low_level_parser(void *ptr, struct lro_parser *parser, bool update_data,
 			return (ptr);
 		case IPPROTO_TCP:
 			parser->tcp = ptr;
+			if (__predict_false(mlen < sizeof(struct tcphdr)))
+				return (NULL);
 			if (update_data) {
 				parser->data.lro_type = LRO_TYPE_IPV4_TCP;
 				parser->data.s_port = parser->tcp->th_sport;
@@ -301,6 +311,8 @@ tcp_lro_low_level_parser(void *ptr, struct lro_parser *parser, bool update_data,
 			} else {
 				MPASS(parser->data.lro_type == LRO_TYPE_IPV4_TCP);
 			}
+			if (__predict_false(mlen < (parser->tcp->th_off << 2)))
+				return (NULL);
 			ptr = (uint8_t *)ptr + (parser->tcp->th_off << 2);
 			parser->total_hdr_len = (uint8_t *)ptr - (uint8_t *)old;
 			return (ptr);
@@ -312,13 +324,18 @@ tcp_lro_low_level_parser(void *ptr, struct lro_parser *parser, bool update_data,
 #ifdef INET6
 	case htons(ETHERTYPE_IPV6):
 		parser->ip6 = ptr;
+		if (__predict_false(mlen < sizeof(struct ip6_hdr)))
+			return (NULL);
 		ptr = (uint8_t *)ptr + sizeof(*parser->ip6);
 		if (update_data) {
 			parser->data.s_addr.v6 = parser->ip6->ip6_src;
 			parser->data.d_addr.v6 = parser->ip6->ip6_dst;
 		}
+		mlen -= sizeof(struct ip6_hdr);
 		switch (parser->ip6->ip6_nxt) {
 		case IPPROTO_UDP:
+			if (__predict_false(mlen < sizeof(struct udphdr)))
+				return (NULL);
 			parser->udp = ptr;
 			if (update_data) {
 				parser->data.lro_type = LRO_TYPE_IPV6_UDP;
@@ -331,6 +348,8 @@ tcp_lro_low_level_parser(void *ptr, struct lro_parser *parser, bool update_data,
 			parser->total_hdr_len = (uint8_t *)ptr - (uint8_t *)old;
 			return (ptr);
 		case IPPROTO_TCP:
+			if (__predict_false(mlen < sizeof(struct tcphdr)))
+				return (NULL);
 			parser->tcp = ptr;
 			if (update_data) {
 				parser->data.lro_type = LRO_TYPE_IPV6_TCP;
@@ -339,6 +358,8 @@ tcp_lro_low_level_parser(void *ptr, struct lro_parser *parser, bool update_data,
 			} else {
 				MPASS(parser->data.lro_type == LRO_TYPE_IPV6_TCP);
 			}
+			if (__predict_false(mlen < (parser->tcp->th_off << 2)))
+				return (NULL);
 			ptr = (uint8_t *)ptr + (parser->tcp->th_off << 2);
 			parser->total_hdr_len = (uint8_t *)ptr - (uint8_t *)old;
 			return (ptr);
@@ -363,7 +384,7 @@ tcp_lro_parser(struct mbuf *m, struct lro_parser *po, struct lro_parser *pi, boo
 	void *data_ptr;
 
 	/* Try to parse outer headers first. */
-	data_ptr = tcp_lro_low_level_parser(m->m_data, po, update_data, false);
+	data_ptr = tcp_lro_low_level_parser(m->m_data, po, update_data, false, m->m_len);
 	if (data_ptr == NULL || po->total_hdr_len > m->m_len)
 		return (NULL);
 
@@ -373,6 +394,10 @@ tcp_lro_parser(struct mbuf *m, struct lro_parser *po, struct lro_parser *pi, boo
 			po->data.vlan_id =
 			    htons(m->m_pkthdr.ether_vtag) & htons(EVL_VLID_MASK);
 		}
+		/* Store decrypted flag, if any. */
+		if (__predict_false((m->m_pkthdr.csum_flags &
+		    CSUM_TLS_MASK) == CSUM_TLS_DECRYPTED))
+			po->data.lro_flags |= LRO_FLAG_DECRYPTED;
 	}
 
 	switch (po->data.lro_type) {
@@ -383,8 +408,9 @@ tcp_lro_parser(struct mbuf *m, struct lro_parser *po, struct lro_parser *pi, boo
 			break;
 
 		/* Try to parse inner headers. */
-		data_ptr = tcp_lro_low_level_parser(data_ptr, pi, update_data, true);
-		if (data_ptr == NULL || pi->total_hdr_len > m->m_len)
+		data_ptr = tcp_lro_low_level_parser(data_ptr, pi, update_data, true,
+						    (m->m_len - ((caddr_t)data_ptr - m->m_data)));
+		if (data_ptr == NULL || (pi->total_hdr_len + po->total_hdr_len) > m->m_len)
 			break;
 
 		/* Verify supported header types. */
@@ -573,6 +599,7 @@ tcp_lro_flush_inactive(struct lro_ctrl *lc, const struct timeval *timeout)
 	uint64_t now, tov;
 	struct bintime bt;
 
+	NET_EPOCH_ASSERT();
 	if (LIST_EMPTY(&lc->lro_active))
 		return;
 
@@ -807,6 +834,8 @@ tcp_flush_out_entry(struct lro_ctrl *lc, struct lro_entry *le)
 			le->m_head->m_pkthdr.csum_flags = CSUM_DATA_VALID |
 			    CSUM_PSEUDO_HDR | CSUM_IP_CHECKED | CSUM_IP_VALID;
 			le->m_head->m_pkthdr.csum_data = 0xffff;
+			if (__predict_false(le->outer.data.lro_flags & LRO_FLAG_DECRYPTED))
+				le->m_head->m_pkthdr.csum_flags |= CSUM_TLS_DECRYPTED;
 			break;
 		case LRO_TYPE_IPV6_TCP:
 			csum = tcp_lro_update_checksum(&le->inner, le,
@@ -818,6 +847,8 @@ tcp_flush_out_entry(struct lro_ctrl *lc, struct lro_entry *le)
 			le->m_head->m_pkthdr.csum_flags = CSUM_DATA_VALID |
 			    CSUM_PSEUDO_HDR;
 			le->m_head->m_pkthdr.csum_data = 0xffff;
+			if (__predict_false(le->outer.data.lro_flags & LRO_FLAG_DECRYPTED))
+				le->m_head->m_pkthdr.csum_flags |= CSUM_TLS_DECRYPTED;
 			break;
 		case LRO_TYPE_NONE:
 			switch (le->outer.data.lro_type) {
@@ -828,6 +859,8 @@ tcp_flush_out_entry(struct lro_ctrl *lc, struct lro_entry *le)
 				le->m_head->m_pkthdr.csum_flags = CSUM_DATA_VALID |
 				    CSUM_PSEUDO_HDR | CSUM_IP_CHECKED | CSUM_IP_VALID;
 				le->m_head->m_pkthdr.csum_data = 0xffff;
+				if (__predict_false(le->outer.data.lro_flags & LRO_FLAG_DECRYPTED))
+					le->m_head->m_pkthdr.csum_flags |= CSUM_TLS_DECRYPTED;
 				break;
 			case LRO_TYPE_IPV6_TCP:
 				csum = tcp_lro_update_checksum(&le->outer, le,
@@ -836,6 +869,8 @@ tcp_flush_out_entry(struct lro_ctrl *lc, struct lro_entry *le)
 				le->m_head->m_pkthdr.csum_flags = CSUM_DATA_VALID |
 				    CSUM_PSEUDO_HDR;
 				le->m_head->m_pkthdr.csum_data = 0xffff;
+				if (__predict_false(le->outer.data.lro_flags & LRO_FLAG_DECRYPTED))
+					le->m_head->m_pkthdr.csum_flags |= CSUM_TLS_DECRYPTED;
 				break;
 			default:
 				break;
@@ -995,7 +1030,7 @@ again:
 	}
 	if ((th->th_flags & ~(TH_ACK | TH_PUSH)) != 0) {
 		/*
-		 * Make sure that previously seen segements/ACKs are delivered
+		 * Make sure that previously seen segments/ACKs are delivered
 		 * before this segment, e.g. FIN.
 		 */
 		le->m_head->m_nextpkt = m->m_nextpkt;
@@ -1152,8 +1187,6 @@ tcp_lro_lookup(struct ifnet *ifp, struct lro_parser *pa)
 {
 	struct inpcb *inp;
 
-	NET_EPOCH_ASSERT();
-
 	switch (pa->data.lro_type) {
 #ifdef INET6
 	case LRO_TYPE_IPV6_TCP:
@@ -1277,8 +1310,7 @@ tcp_lro_flush_tcphpts(struct lro_ctrl *lc, struct lro_entry *le)
 
 	/* Check if the inp is dead, Jim. */
 	if (tp == NULL ||
-	    (inp->inp_flags & (INP_DROPPED | INP_TIMEWAIT)) ||
-	    (inp->inp_flags2 & INP_FREED)) {
+	    (inp->inp_flags & (INP_DROPPED | INP_TIMEWAIT))) {
 		INP_WUNLOCK(inp);
 		return (TCP_LRO_CANNOT);
 	}
@@ -1322,7 +1354,7 @@ tcp_lro_flush_tcphpts(struct lro_ctrl *lc, struct lro_entry *le)
 	if (le->m_head != NULL) {
 		counter_u64_add(tcp_inp_lro_direct_queue, 1);
 		tcp_lro_log(tp, lc, le, NULL, 22, 1,
-			    inp->inp_flags2, inp->inp_in_input, 1);
+			    inp->inp_flags2, inp->inp_in_dropq, 1);
 		tcp_queue_pkts(inp, tp, le);
 	}
 	if (should_wake) {
@@ -1343,7 +1375,10 @@ tcp_lro_flush(struct lro_ctrl *lc, struct lro_entry *le)
 	/* Only optimise if there are multiple packets waiting. */
 #ifdef TCPHPTS
 	int error;
+#endif
 
+	NET_EPOCH_ASSERT();
+#ifdef TCPHPTS
 	CURVNET_SET(lc->ifp->if_vnet);
 	error = tcp_lro_flush_tcphpts(lc, le);
 	CURVNET_RESTORE();
@@ -1454,6 +1489,7 @@ tcp_lro_flush_all(struct lro_ctrl *lc)
 	uint64_t nseq;
 	unsigned x;
 
+	NET_EPOCH_ASSERT();
 	/* check if no mbufs to flush */
 	if (lc->lro_mbuf_count == 0)
 		goto done;
@@ -1561,7 +1597,7 @@ do_bpf_strip_and_compress(struct inpcb *inp, struct lro_ctrl *lc,
 	uint32_t *ts_ptr;
 	int32_t n_mbuf;
 	bool other_opts, can_compress;
-	uint16_t lro_type;
+	uint8_t lro_type;
 	uint16_t iptos;
 	int tcp_hdr_offset;
 	int idx;
@@ -1894,6 +1930,7 @@ tcp_lro_rx(struct lro_ctrl *lc, struct mbuf *m, uint32_t csum)
 void
 tcp_lro_queue_mbuf(struct lro_ctrl *lc, struct mbuf *mb)
 {
+	NET_EPOCH_ASSERT();
 	/* sanity checks */
 	if (__predict_false(lc->ifp == NULL || lc->lro_mbuf_data == NULL ||
 	    lc->lro_mbuf_max == 0)) {

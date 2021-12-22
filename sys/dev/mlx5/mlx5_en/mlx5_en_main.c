@@ -35,15 +35,9 @@
 
 #include <net/debugnet.h>
 
-#ifndef ETH_DRIVER_VERSION
-#define	ETH_DRIVER_VERSION	"3.6.0"
-#endif
-#define DRIVER_RELDATE	"December 2020"
-
-static const char mlx5e_version[] = "mlx5en: Mellanox Ethernet driver "
-	ETH_DRIVER_VERSION " (" DRIVER_RELDATE ")\n";
-
 static int mlx5e_get_wqe_sz(struct mlx5e_priv *priv, u32 *wqe_sz, u32 *nsegs);
+static if_snd_tag_query_t mlx5e_ul_snd_tag_query;
+static if_snd_tag_free_t mlx5e_ul_snd_tag_free;
 
 struct mlx5e_channel_param {
 	struct mlx5e_rq_param rq;
@@ -352,6 +346,12 @@ static const struct media mlx5e_ext_mode_table[MLX5E_EXT_LINK_SPEEDS_NUMBER][MLX
 		.subtype = IFM_400G_LR8,	/* XXX */
 		.baudrate = IF_Gbps(400ULL),
 	},
+};
+
+static const struct if_snd_tag_sw mlx5e_ul_snd_tag_sw = {
+	.snd_tag_query = mlx5e_ul_snd_tag_query,
+	.snd_tag_free = mlx5e_ul_snd_tag_free,
+	.type = IF_SND_TAG_TYPE_UNLIMITED
 };
 
 DEBUGNET_DEFINE(mlx5_en);
@@ -1104,7 +1104,7 @@ static int mlx5e_fast_calibration = 1;
 static int mlx5e_normal_calibration = 30;
 
 static SYSCTL_NODE(_hw_mlx5, OID_AUTO, calibr, CTLFLAG_RW | CTLFLAG_MPSAFE, 0,
-    "MLX5 timestamp calibration parameteres");
+    "MLX5 timestamp calibration parameters");
 
 SYSCTL_INT(_hw_mlx5_calibr, OID_AUTO, duration, CTLFLAG_RWTUN,
     &mlx5e_calibration_duration, 0,
@@ -1126,10 +1126,10 @@ mlx5e_reset_calibration_callout(struct mlx5e_priv *priv)
 	if (priv->clbr_done == 0)
 		mlx5e_calibration_callout(priv);
 	else
-		callout_reset_curcpu(&priv->tstmp_clbr, (priv->clbr_done <
+		callout_reset_sbt_curcpu(&priv->tstmp_clbr, (priv->clbr_done <
 		    mlx5e_calibration_duration ? mlx5e_fast_calibration :
-		    mlx5e_normal_calibration) * hz, mlx5e_calibration_callout,
-		    priv);
+		    mlx5e_normal_calibration) * SBT_1S, 0,
+		    mlx5e_calibration_callout, priv, C_DIRECT_EXEC);
 }
 
 static uint64_t
@@ -2121,7 +2121,7 @@ mlx5e_chan_static_init(struct mlx5e_priv *priv, struct mlx5e_channel *c, int ix)
 	c->ix = ix;
 
 	/* setup send tag */
-	m_snd_tag_init(&c->tag, c->priv->ifp, IF_SND_TAG_TYPE_UNLIMITED);
+	m_snd_tag_init(&c->tag, c->priv->ifp, &mlx5e_ul_snd_tag_sw);
 
 	init_completion(&c->completion);
 
@@ -2636,7 +2636,7 @@ mlx5e_open_tis(struct mlx5e_priv *priv, int tc)
 static void
 mlx5e_close_tis(struct mlx5e_priv *priv, int tc)
 {
-	mlx5_core_destroy_tis(priv->mdev, priv->tisn[tc]);
+	mlx5_core_destroy_tis(priv->mdev, priv->tisn[tc], 0);
 }
 
 static int
@@ -2965,7 +2965,7 @@ static void
 mlx5e_close_tir(struct mlx5e_priv *priv, int tt, bool inner_vxlan)
 {
 	mlx5_core_destroy_tir(priv->mdev, inner_vxlan ?
-	    priv->tirn_inner_vxlan[tt] : priv->tirn[tt]);
+	    priv->tirn_inner_vxlan[tt] : priv->tirn[tt], 0);
 }
 
 static int
@@ -3740,7 +3740,7 @@ mlx5e_mkey_set_relaxed_ordering(struct mlx5_core_dev *mdev, void *mkc)
 
 static int
 mlx5e_create_mkey(struct mlx5e_priv *priv, u32 pdn,
-		  struct mlx5_core_mr *mkey)
+		  struct mlx5_core_mkey *mkey)
 {
 	struct ifnet *ifp = priv->ifp;
 	struct mlx5_core_dev *mdev = priv->mdev;
@@ -4182,7 +4182,7 @@ mlx5e_setup_pauseframes(struct mlx5e_priv *priv)
 	PRIV_UNLOCK(priv);
 }
 
-int
+static int
 mlx5e_ul_snd_tag_alloc(struct ifnet *ifp,
     union if_snd_tag_alloc_params *params,
     struct m_snd_tag **ppmt)
@@ -4224,7 +4224,7 @@ mlx5e_ul_snd_tag_alloc(struct ifnet *ifp,
 	}
 }
 
-int
+static int
 mlx5e_ul_snd_tag_query(struct m_snd_tag *pmt, union if_snd_tag_query_params *params)
 {
 	struct mlx5e_channel *pch =
@@ -4235,7 +4235,7 @@ mlx5e_ul_snd_tag_query(struct m_snd_tag *pmt, union if_snd_tag_query_params *par
 	return (0);
 }
 
-void
+static void
 mlx5e_ul_snd_tag_free(struct m_snd_tag *pmt)
 {
 	struct mlx5e_channel *pch =
@@ -4264,52 +4264,6 @@ mlx5e_snd_tag_alloc(struct ifnet *ifp,
 #ifdef KERN_TLS
 	case IF_SND_TAG_TYPE_TLS:
 		return (mlx5e_tls_snd_tag_alloc(ifp, params, ppmt));
-#endif
-	default:
-		return (EOPNOTSUPP);
-	}
-}
-
-static int
-mlx5e_snd_tag_modify(struct m_snd_tag *pmt, union if_snd_tag_modify_params *params)
-{
-
-	switch (pmt->type) {
-#ifdef RATELIMIT
-	case IF_SND_TAG_TYPE_RATE_LIMIT:
-		return (mlx5e_rl_snd_tag_modify(pmt, params));
-#ifdef KERN_TLS
-	case IF_SND_TAG_TYPE_TLS_RATE_LIMIT:
-		return (mlx5e_tls_snd_tag_modify(pmt, params));
-#endif
-#endif
-	case IF_SND_TAG_TYPE_UNLIMITED:
-#ifdef KERN_TLS
-	case IF_SND_TAG_TYPE_TLS:
-#endif
-	default:
-		return (EOPNOTSUPP);
-	}
-}
-
-static int
-mlx5e_snd_tag_query(struct m_snd_tag *pmt, union if_snd_tag_query_params *params)
-{
-
-	switch (pmt->type) {
-#ifdef RATELIMIT
-	case IF_SND_TAG_TYPE_RATE_LIMIT:
-		return (mlx5e_rl_snd_tag_query(pmt, params));
-#ifdef KERN_TLS
-	case IF_SND_TAG_TYPE_TLS_RATE_LIMIT:
-		return (mlx5e_tls_snd_tag_query(pmt, params));
-#endif
-#endif
-	case IF_SND_TAG_TYPE_UNLIMITED:
-		return (mlx5e_ul_snd_tag_query(pmt, params));
-#ifdef KERN_TLS
-	case IF_SND_TAG_TYPE_TLS:
-		return (mlx5e_tls_snd_tag_query(pmt, params));
 #endif
 	default:
 		return (EOPNOTSUPP);
@@ -4359,34 +4313,6 @@ mlx5e_ratelimit_query(struct ifnet *ifp __unused, struct if_ratelimit_query_resu
 	q->min_segment_burst = 1;
 }
 #endif
-
-static void
-mlx5e_snd_tag_free(struct m_snd_tag *pmt)
-{
-
-	switch (pmt->type) {
-#ifdef RATELIMIT
-	case IF_SND_TAG_TYPE_RATE_LIMIT:
-		mlx5e_rl_snd_tag_free(pmt);
-		break;
-#ifdef KERN_TLS
-	case IF_SND_TAG_TYPE_TLS_RATE_LIMIT:
-		mlx5e_tls_snd_tag_free(pmt);
-		break;
-#endif
-#endif
-	case IF_SND_TAG_TYPE_UNLIMITED:
-		mlx5e_ul_snd_tag_free(pmt);
-		break;
-#ifdef KERN_TLS
-	case IF_SND_TAG_TYPE_TLS:
-		mlx5e_tls_snd_tag_free(pmt);
-		break;
-#endif
-	default:
-		break;
-	}
-}
 
 static void
 mlx5e_ifm_add(struct mlx5e_priv *priv, int type)
@@ -4475,9 +4401,6 @@ mlx5e_create_ifp(struct mlx5_core_dev *mdev)
 #endif
 	ifp->if_capabilities |= IFCAP_VXLAN_HWCSUM | IFCAP_VXLAN_HWTSO;
 	ifp->if_snd_tag_alloc = mlx5e_snd_tag_alloc;
-	ifp->if_snd_tag_free = mlx5e_snd_tag_free;
-	ifp->if_snd_tag_modify = mlx5e_snd_tag_modify;
-	ifp->if_snd_tag_query = mlx5e_snd_tag_query;
 #ifdef RATELIMIT
 	ifp->if_ratelimit_query = mlx5e_ratelimit_query;
 #endif
@@ -4538,12 +4461,12 @@ mlx5e_create_ifp(struct mlx5_core_dev *mdev)
 	/* reuse mlx5core's watchdog workqueue */
 	priv->wq = mdev->priv.health.wq_watchdog;
 
-	err = mlx5_core_alloc_pd(mdev, &priv->pdn);
+	err = mlx5_core_alloc_pd(mdev, &priv->pdn, 0);
 	if (err) {
 		mlx5_en_err(ifp, "mlx5_core_alloc_pd failed, %d\n", err);
 		goto err_free_wq;
 	}
-	err = mlx5_alloc_transport_domain(mdev, &priv->tdn);
+	err = mlx5_alloc_transport_domain(mdev, &priv->tdn, 0);
 	if (err) {
 		mlx5_en_err(ifp,
 		    "mlx5_alloc_transport_domain failed, %d\n", err);
@@ -4691,7 +4614,7 @@ mlx5e_create_ifp(struct mlx5_core_dev *mdev)
 	    OID_AUTO, "rx_clbr_done", CTLFLAG_RD,
 	    &priv->clbr_done, 0,
 	    "RX timestamps calibration state");
-	callout_init(&priv->tstmp_clbr, CALLOUT_DIRECT);
+	callout_init(&priv->tstmp_clbr, 1);
 	mlx5e_reset_calibration_callout(priv);
 
 	pa.pa_version = PFIL_VERSION;
@@ -4709,10 +4632,10 @@ err_create_mkey:
 	mlx5_core_destroy_mkey(priv->mdev, &priv->mr);
 
 err_dealloc_transport_domain:
-	mlx5_dealloc_transport_domain(mdev, priv->tdn);
+	mlx5_dealloc_transport_domain(mdev, priv->tdn, 0);
 
 err_dealloc_pd:
-	mlx5_core_dealloc_pd(mdev, priv->pdn);
+	mlx5_core_dealloc_pd(mdev, priv->pdn, 0);
 
 err_free_wq:
 	flush_workqueue(priv->wq);
@@ -4808,8 +4731,8 @@ mlx5e_destroy_ifp(struct mlx5_core_dev *mdev, void *vpriv)
 	sysctl_ctx_free(&priv->sysctl_ctx);
 
 	mlx5_core_destroy_mkey(priv->mdev, &priv->mr);
-	mlx5_dealloc_transport_domain(priv->mdev, priv->tdn);
-	mlx5_core_dealloc_pd(priv->mdev, priv->pdn);
+	mlx5_dealloc_transport_domain(priv->mdev, priv->tdn, 0);
+	mlx5_core_dealloc_pd(priv->mdev, priv->pdn, 0);
 	mlx5e_disable_async_events(priv);
 	flush_workqueue(priv->wq);
 	mlx5e_priv_static_destroy(priv, mdev, mdev->priv.eq_table.num_comp_vectors);
@@ -4909,14 +4832,6 @@ mlx5e_cleanup(void)
 {
 	mlx5_unregister_interface(&mlx5e_interface);
 }
-
-static void
-mlx5e_show_version(void __unused *arg)
-{
-
-	printf("%s", mlx5e_version);
-}
-SYSINIT(mlx5e_show_version, SI_SUB_DRIVERS, SI_ORDER_ANY, mlx5e_show_version, NULL);
 
 module_init_order(mlx5e_init, SI_ORDER_SIXTH);
 module_exit_order(mlx5e_cleanup, SI_ORDER_SIXTH);

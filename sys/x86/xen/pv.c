@@ -180,7 +180,7 @@ hammer_time_xen(vm_paddr_t start_info_paddr)
 			HYPERVISOR_shutdown(SHUTDOWN_crash);
 		}
 		mod = (struct hvm_modlist_entry *)
-		    (vm_paddr_t)start_info->modlist_paddr + KERNBASE;
+		    (start_info->modlist_paddr + KERNBASE);
 		if (mod[0].paddr >= physfree) {
 			xc_printf("ERROR: unexpected module memory address\n");
 			HYPERVISOR_shutdown(SHUTDOWN_crash);
@@ -255,10 +255,7 @@ xen_pvh_parse_symtab(void)
 {
 	Elf_Ehdr *ehdr;
 	Elf_Shdr *shdr;
-	uint32_t size;
 	int i, j;
-
-	size = end;
 
 	ehdr = (Elf_Ehdr *)(&end + 1);
 	if (memcmp(ehdr->e_ident, ELFMAG, SELFMAG) ||

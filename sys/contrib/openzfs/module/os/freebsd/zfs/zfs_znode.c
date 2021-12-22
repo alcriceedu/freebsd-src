@@ -1079,9 +1079,18 @@ zfs_rezget(znode_t *zp)
 	 * the vnode in case of error, but currently we cannot do that
 	 * because of the LOR between the vnode lock and z_teardown_lock.
 	 * So, instead, we have to "doom" the znode in the illumos style.
+	 *
+	 * Ignore invalid pages during the scan.  This is to avoid deadlocks
+	 * between page busying and the teardown lock, as pages are busied prior
+	 * to a VOP_GETPAGES operation, which acquires the teardown read lock.
+	 * Such pages will be invalid and can safely be skipped here.
 	 */
 	vp = ZTOV(zp);
+#if __FreeBSD_version >= 1400042
+	vn_pages_remove_valid(vp, 0, 0);
+#else
 	vn_pages_remove(vp, 0, 0);
+#endif
 
 	ZFS_OBJ_HOLD_ENTER(zfsvfs, obj_num);
 
@@ -1481,12 +1490,16 @@ zfs_free_range(znode_t *zp, uint64_t off, uint64_t len)
 	error = dmu_free_long_range(zfsvfs->z_os, zp->z_id, off, len);
 
 	if (error == 0) {
+#if __FreeBSD_version >= 1400032
+		vnode_pager_purge_range(ZTOV(zp), off, off + len);
+#else
 		/*
-		 * In FreeBSD we cannot free block in the middle of a file,
-		 * but only at the end of a file, so this code path should
-		 * never happen.
+		 * Before __FreeBSD_version 1400032 we cannot free block in the
+		 * middle of a file, but only at the end of a file, so this code
+		 * path should never happen.
 		 */
 		vnode_pager_setsize(ZTOV(zp), off);
+#endif
 	}
 
 	zfs_rangelock_exit(lr);

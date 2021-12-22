@@ -45,7 +45,6 @@ ssize_t kboot_copyout(vm_offset_t src, void *dest, const size_t len);
 ssize_t kboot_readin(readin_handle_t fd, vm_offset_t dest, const size_t len);
 int kboot_autoload(void);
 uint64_t kboot_loadaddr(u_int type, void *data, uint64_t addr);
-int kboot_setcurrdev(struct env_var *ev, int flags, const void *value);
 static void kboot_kseg_get(int *nseg, void **ptr);
 
 extern int command_fdt_internal(int argc, char *argv[]);
@@ -483,18 +482,7 @@ kboot_kseg_get(int *nseg, void **ptr)
 void
 _start(int argc, const char **argv, char **env)
 {
-// This makes error "variable 'sp' is uninitialized" be just a warning on clang.
-// Initializing 'sp' is not desired here as it would overwrite "r1" original value
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic warning "-Wuninitialized"
-#endif
-	register volatile void **sp asm("r1");
-	main((int)sp[0], (const char **)&sp[1]);
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#endif
-
+	main(argc, argv);
 }
 
 /*
@@ -511,4 +499,3 @@ command_fdt(int argc, char *argv[])
 }
         
 COMMAND_SET(fdt, "fdt", "flattened device tree handling", command_fdt);
-
