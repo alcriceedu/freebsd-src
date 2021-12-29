@@ -1225,7 +1225,7 @@ SYSCTL_ULONG(_vm_pmap_l2, OID_AUTO, promotions, CTLFLAG_RD,
 /*
  * If the given value for "final_only" is false, then any cached intermediate-
  * level entries, i.e., L{0,1,2}_TABLE entries, are invalidated in addition to
- * any cached final-level entry, i.e., an L{1,2}_BLOCK or a L3_PAGE entry.
+ * any cached final-level entry, i.e., either an L{1,2}_BLOCK or L3_PAGE entry.
  * Otherwise, just the cached final-level entry is invalidated.
  */
 static __inline void
