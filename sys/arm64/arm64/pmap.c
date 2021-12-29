@@ -4196,7 +4196,9 @@ pmap_enter_l2(pmap_t pmap, vm_offset_t va, pd_entry_t new_l2, u_int flags,
 			 * Both pmap_remove_l2() and pmap_remove_l3_range()
 			 * will leave the kernel page table page zero filled.
 			 * Nonetheless, the TLB could have an intermediate
-			 * entry for the kernel page table page.
+			 * entry for the kernel page table page, so request
+			 * an invalidation at all levels after clearing
+			 * the L2_TABLE entry.
 			 */
 			mt = PHYS_TO_VM_PAGE(pmap_load(l2) & ~ATTR_MASK);
 			if (pmap_insert_pt_page(pmap, mt, false))
