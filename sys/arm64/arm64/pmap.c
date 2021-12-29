@@ -3496,7 +3496,9 @@ pmap_update_entry(pmap_t pmap, pd_entry_t *pte, pd_entry_t newpte,
 	pmap_clear_bits(pte, ATTR_DESCR_VALID);
 
 	/*
-	 * XXX
+	 * When promoting, the L{1,2}_TABLE entry that is being replaced might
+	 * be cached, so we invalidate intermediate entries as well as final
+	 * entries.
 	 */
 	pmap_invalidate_range(pmap, va, va + size, false);
 
