@@ -1730,7 +1730,7 @@ _pmap_unwire_l3(pmap_t pmap, vm_offset_t va, vm_page_t m, struct spglist *free)
 		l2 = pmap_l2(pmap, va);
 		pmap_clear(l2);
 	}
-	pmap_invalidate_page(pmap, va, false);
+	pmap_resident_count_dec(pmap, 1);
 	if (m->pindex < NUL2E) {
 		/* We just released an l3, unhold the matching l2 */
 		pd_entry_t *l1, tl1;
@@ -1750,7 +1750,7 @@ _pmap_unwire_l3(pmap_t pmap, vm_offset_t va, vm_page_t m, struct spglist *free)
 		l1pg = PHYS_TO_VM_PAGE(tl0 & ~ATTR_MASK);
 		pmap_unwire_l3(pmap, va, l1pg, free);
 	}
-	pmap_resident_count_dec(pmap, 1);
+	pmap_invalidate_page(pmap, va, false);
 
 	/*
 	 * Put page on a list so that it is released after
