@@ -1782,17 +1782,8 @@ pmap_abort_ptp(pmap_t pmap, vm_offset_t va, vm_page_t mpte)
 	struct spglist free;
 
 	SLIST_INIT(&free);
-	if (pmap_unwire_l3(pmap, va, mpte, &free)) {
-		/*
-		 * Although "va" was never mapped, the TLB could nonetheless
-		 * have intermediate entries that refer to the freed page
-		 * table pages.  Invalidate those entries.
-		 *
-		 * XXX redundant invalidation (See _pmap_unwire_l3().)
-		 */
-		pmap_invalidate_page(pmap, va, false);
+	if (pmap_unwire_l3(pmap, va, mpte, &free))
 		vm_page_free_pages_toq(&free, true);
-	}
 }
 
 void
