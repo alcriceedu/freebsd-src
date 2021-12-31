@@ -3057,12 +3057,18 @@ pmap_remove_l3_range(pmap_t pmap, pd_entry_t l2e, vm_offset_t sva,
 					vm_page_aflag_clear(m, PGA_WRITEABLE);
 			}
 		}
-		if (va == eva)
-			va = sva;
 		if (l3pg != NULL && pmap_unwire_l3(pmap, sva, l3pg, free)) {
-			sva += L3_SIZE;
+			/*
+			 * _pmap_unwire_l3() has already invalidated the TLB
+			 * entries at all levels for "sva".  So, we need not
+			 * perform "sva += L3_SIZE;" here.  Moreover, we need
+			 * not perform "va = sva;" if "sva" is at the start
+			 * of a new valid range consisting of a single page.
+			 */
 			break;
 		}
+		if (va == eva)
+			va = sva;
 	}
 	if (va != eva)
 		pmap_invalidate_range(pmap, va, sva, true);
