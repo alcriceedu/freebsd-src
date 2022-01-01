@@ -1261,12 +1261,13 @@ pmap_invalidate_page(pmap_t pmap, vm_offset_t va, bool final_only)
 	if (pmap == kernel_pmap) {
 		r = atop(va);
 		pmap_invalidate_kernel(r, final_only);
+		dsb(ish);
+		isb();
 	} else {
 		r = ASID_TO_OPERAND(COOKIE_TO_ASID(pmap->pm_cookie)) | atop(va);
 		pmap_invalidate_user(r, final_only);
+		dsb(ish);
 	}
-	dsb(ish);
-	isb();
 }
 
 /*
@@ -1287,15 +1288,16 @@ pmap_invalidate_range(pmap_t pmap, vm_offset_t sva, vm_offset_t eva,
 		end = atop(eva);
 		for (r = start; r < end; r++)
 			pmap_invalidate_kernel(r, final_only);
+		dsb(ish);
+		isb();
 	} else {
 		start = end = ASID_TO_OPERAND(COOKIE_TO_ASID(pmap->pm_cookie));
 		start |= atop(sva);
 		end |= atop(eva);
 		for (r = start; r < end; r++)
 			pmap_invalidate_user(r, final_only);
+		dsb(ish);
 	}
-	dsb(ish);
-	isb();
 }
 
 /*
@@ -1312,12 +1314,13 @@ pmap_invalidate_all(pmap_t pmap)
 	dsb(ishst);
 	if (pmap == kernel_pmap) {
 		__asm __volatile("tlbi vmalle1is");
+		dsb(ish);
+		isb();
 	} else {
 		r = ASID_TO_OPERAND(COOKIE_TO_ASID(pmap->pm_cookie));
 		__asm __volatile("tlbi aside1is, %0" : : "r" (r));
+		dsb(ish);
 	}
-	dsb(ish);
-	isb();
 }
 
 /*
