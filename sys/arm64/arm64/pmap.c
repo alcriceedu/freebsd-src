@@ -1247,7 +1247,8 @@ pmap_invalidate_user(uint64_t r, bool final_only)
 }
 
 /*
- * Invalidate a single TLB entry.
+ * Invalidates any cached final- and optionally intermediate-level TLB entries
+ * for the specified virtual address in the given virtual address space.
  */
 static __inline void
 pmap_invalidate_page(pmap_t pmap, vm_offset_t va, bool final_only)
@@ -1268,6 +1269,10 @@ pmap_invalidate_page(pmap_t pmap, vm_offset_t va, bool final_only)
 	isb();
 }
 
+/*
+ * Invalidates any cached final- and optionally intermediate-level TLB entries
+ * for the specified virtual address range in the given virtual address space.
+ */
 static __inline void
 pmap_invalidate_range(pmap_t pmap, vm_offset_t sva, vm_offset_t eva,
     bool final_only)
@@ -1293,6 +1298,10 @@ pmap_invalidate_range(pmap_t pmap, vm_offset_t sva, vm_offset_t eva,
 	isb();
 }
 
+/*
+ * Invalidates all cached intermediate- and final-level TLB entries for the
+ * given virtual address space.
+ */
 static __inline void
 pmap_invalidate_all(pmap_t pmap)
 {
