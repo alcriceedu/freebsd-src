@@ -6264,11 +6264,27 @@ pmap_advise(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, int advice)
 					 * Unconditionally demote the 64KB
 					 * page because we do not allow
 					 * writeable, clean superpages.
-					 * XXX Destroy a 4KB mapping so that
-					 * we have a repromotion trigger?
 					 */
 					pmap_demote_l3c(pmap, l3, sva);
 
+					/*
+                                         * Destroy a 4KB mapping so that a
+                                         * subsequent access may act as a
+                                         * repromotion trigger.
+                                        */
+                                        if ((oldl3 & ATTR_SW_WIRED) == 0) {
+                                        	KASSERT(pmap_load(l3) != 0,
+                                        	    ("pmap_advise: invalid PTE"));
+
+						lock = NULL;
+
+						pmap_remove_l3(pmap, l3, sva,
+						    pmap_load(l2), NULL, &lock);
+
+						if (lock != NULL)
+							rw_wunlock(lock);
+					}
+					
 					/*
 					 * The L3 entry's accessed bit may have
 					 * changed.
