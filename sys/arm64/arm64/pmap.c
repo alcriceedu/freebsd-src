@@ -3791,48 +3791,23 @@ pmap_promote_l2(pmap_t pmap, pd_entry_t *l2, vm_offset_t va,
 	firstl3 = pmap_l2_to_l3(l2, sva);
 	newl2 = pmap_load(firstl3);
 
-	if (((newl2 & (~ATTR_MASK | ATTR_AF)) & L2_OFFSET) != ATTR_AF) {
-		atomic_add_long(&pmap_l2_p_failures, 1);
-		CTR2(KTR_PMAP, "pmap_promote_l2: failure for va %#lx"
-		    " in pmap %p", va, pmap);
-		return;
-	}
+	if ((newl2 & ATTR_CONTIGUOUS) != ATTR_CONTIGUOUS) {
+                atomic_add_long(&pmap_l2_p_failures, 1);
+                CTR2(KTR_PMAP, "pmap_promote_l2: failure for va %#lx"
+                    " in pmap %p", va, pmap);
+                return;
+        }
 
-setl2:
-	if ((newl2 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
-	    (ATTR_S1_AP(ATTR_S1_AP_RO) | ATTR_SW_DBM)) {
-		/*
-		 * When the mapping is clean, i.e., ATTR_S1_AP_RO is set,
-		 * ATTR_SW_DBM can be cleared without a TLB invalidation.
-		 */
-		if (!atomic_fcmpset_64(firstl3, &newl2, newl2 & ~ATTR_SW_DBM))
-			goto setl2;
-		newl2 &= ~ATTR_SW_DBM;
-	}
-
-	pa = newl2 + L2_SIZE - PAGE_SIZE;
-	for (l3 = firstl3 + NL3PG - 1; l3 > firstl3; l3--) {
+	pa = (newl2 + L2_SIZE - L3C_SIZE) & ~ATTR_AF;
+	for (l3 = firstl3 + NL3PG - L3C_ENTRIES; l3 > firstl3; l3 -= L3C_ENTRIES) {
 		oldl3 = pmap_load(l3);
-setl3:
-		if ((oldl3 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
-		    (ATTR_S1_AP(ATTR_S1_AP_RO) | ATTR_SW_DBM)) {
-			/*
-			 * When the mapping is clean, i.e., ATTR_S1_AP_RO is
-			 * set, ATTR_SW_DBM can be cleared without a TLB
-			 * invalidation.
-			 */
-			if (!atomic_fcmpset_64(l3, &oldl3, oldl3 &
-			    ~ATTR_SW_DBM))
-				goto setl3;
-			oldl3 &= ~ATTR_SW_DBM;
-		}
-		if (oldl3 != pa) {
+		if ((oldl3 & ~ATTR_AF) != pa) {
 			atomic_add_long(&pmap_l2_p_failures, 1);
 			CTR2(KTR_PMAP, "pmap_promote_l2: failure for va %#lx"
 			    " in pmap %p", va, pmap);
 			return;
 		}
-		pa -= PAGE_SIZE;
+		pa -= L3C_SIZE;
 	}
 
 	/*
