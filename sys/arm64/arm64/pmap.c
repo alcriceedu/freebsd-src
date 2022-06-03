@@ -3798,10 +3798,17 @@ pmap_promote_l2(pmap_t pmap, pd_entry_t *l2, vm_offset_t va,
                 return;
         }
 
-	pa = (newl2 + L2_SIZE - L3C_SIZE) & ~ATTR_AF;
+	if (((newl2 & (~ATTR_MASK | ATTR_AF)) & L2_OFFSET) != ATTR_AF) {
+                atomic_add_long(&pmap_l2_p_failures, 1);
+                CTR2(KTR_PMAP, "pmap_promote_l2: failure for va %#lx"
+                    " in pmap %p", va, pmap);
+                return;
+        }
+
+	pa = newl2 + L2_SIZE - L3C_SIZE;
 	for (l3 = firstl3 + NL3PG - L3C_ENTRIES; l3 > firstl3; l3 -= L3C_ENTRIES) {
 		oldl3 = pmap_load(l3);
-		if ((oldl3 & ~ATTR_AF) != pa) {
+		if (oldl3 != pa) {
 			atomic_add_long(&pmap_l2_p_failures, 1);
 			CTR2(KTR_PMAP, "pmap_promote_l2: failure for va %#lx"
 			    " in pmap %p", va, pmap);
