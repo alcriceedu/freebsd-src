@@ -866,11 +866,17 @@
         ..
         vm
         ..
+        vmm
+        ..
     ..
     usr.bin
         apply
         ..
         awk
+	    bugs-fixed
+	    ..
+	    netbsd
+	    ..
         ..
         basename
         ..
@@ -993,6 +999,8 @@
         dc
         ..
         diff
+        ..
+        diff3
         ..
         dirname
         ..

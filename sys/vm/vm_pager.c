@@ -217,6 +217,15 @@ pbuf_zsecond_create(const char *name, int max)
 
 	zone = uma_zsecond_create(name, pbuf_ctor, pbuf_dtor, NULL, NULL,
 	    pbuf_zone);
+
+#ifdef KMSAN
+	/*
+	 * Shrink the size of the pbuf pools if KMSAN is enabled, otherwise the
+	 * shadows of the large KVA allocations eat up too much memory.
+	 */
+	max /= 3;
+#endif
+
 	/*
 	 * uma_prealloc() rounds up to items per slab. If we would prealloc
 	 * immediately on every pbuf_zsecond_create(), we may accumulate too
@@ -329,12 +338,11 @@ vm_pager_get_pages(vm_object_t object, vm_page_t *m, int count, int *rbehind,
 		 * updated the array.
 		 */
 #ifdef INVARIANTS
-		VM_OBJECT_RLOCK(object);
-		KASSERT(m[i] == vm_page_lookup(object, pindex++),
+		KASSERT(m[i] == vm_page_relookup(object, pindex++),
 		    ("%s: mismatch page %p pindex %ju", __func__,
 		    m[i], (uintmax_t )pindex - 1));
-		VM_OBJECT_RUNLOCK(object);
 #endif
+
 		/*
 		 * Zero out partially filled data.
 		 */

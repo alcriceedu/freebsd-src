@@ -10,6 +10,7 @@ __BOOT_DEFS_MK__=${MFILE}
 MK_CTF=		no
 MK_SSP=		no
 MK_PROFILE=	no
+MK_PIE=		no
 MAN=
 .if !defined(PIC)
 NO_PIC=
@@ -23,6 +24,12 @@ INTERNALLIB=
 # to disable more and more features. Boot loader performance is never improved
 # enough to make that hassle worth chasing.
 _CPUCFLAGS=
+
+.if ${LDFLAGS:M-nostdlib}
+# Sanitizers won't work unless we link against libc (e.g. in userboot/test).
+MK_ASAN:=	no
+MK_UBSAN:=	no
+.endif
 
 .include <src.opts.mk>
 .include <bsd.linker.mk>
@@ -113,10 +120,12 @@ CFLAGS+= -DLOADER_DISK_SUPPORT
 
 # Machine specific flags for all builds here
 
-# Ensure PowerPC64 and PowerPC64LE boot loaders are compiled as 32 bit
-# and in big endian.
-.if ${MACHINE_ARCH:Mpowerpc64*} != ""
+# Ensure PowerPC64 and PowerPC64LE boot loaders are compiled as 32 bit.
+# PowerPC64LE boot loaders are 32-bit little-endian.
+.if ${MACHINE_ARCH} == "powerpc64"
 CFLAGS+=	-m32 -mcpu=powerpc -mbig-endian
+.elif ${MACHINE_ARCH} == "powerpc64le"
+CFLAGS+=	-m32 -mcpu=powerpc -mlittle-endian
 .endif
 
 # For amd64, there's a bit of mixed bag. Some of the tree (i386, lib*32) is
@@ -128,8 +137,6 @@ CFLAGS+=	-m32
 LD_FLAGS+=	-m elf_i386_fbsd
 AFLAGS+=	--32
 .endif
-
-SSP_CFLAGS=
 
 # Add in the no float / no SIMD stuff and announce we're freestanding
 # aarch64 and riscv don't have -msoft-float, but all others do.
@@ -178,10 +185,6 @@ CFLAGS+=	-mno-relax
 # when this test succeeds rather than require dd to be a bootstrap tool.
 DD_NOSTATUS!=(dd status=none count=0 2> /dev/null && echo status=none) || true
 DD=dd ${DD_NOSTATUS}
-
-.if ${MACHINE_CPUARCH} == "mips"
-CFLAGS+=	-G0 -fno-pic -mno-abicalls
-.endif
 
 #
 # Have a sensible default

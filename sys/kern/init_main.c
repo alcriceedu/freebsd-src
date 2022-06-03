@@ -402,6 +402,12 @@ null_set_syscall_retval(struct thread *td __unused, int error __unused)
 	panic("null_set_syscall_retval");
 }
 
+static void
+null_set_fork_retval(struct thread *td __unused)
+{
+
+}
+
 struct sysentvec null_sysvec = {
 	.sv_size	= 0,
 	.sv_table	= NULL,
@@ -430,6 +436,7 @@ struct sysentvec null_sysvec = {
 	.sv_schedtail	= NULL,
 	.sv_thread_detach = NULL,
 	.sv_trap	= NULL,
+	.sv_set_fork_retval = null_set_fork_retval,
 };
 
 /*
@@ -766,7 +773,7 @@ start_init(void *dummy)
 		 */
 		KASSERT((td->td_pflags & TDP_EXECVMSPC) == 0,
 		    ("nested execve"));
-		oldvmspace = td->td_proc->p_vmspace;
+		oldvmspace = p->p_vmspace;
 		error = kern_execve(td, &args, NULL, oldvmspace);
 		KASSERT(error != 0,
 		    ("kern_execve returned success, not EJUSTRETURN"));

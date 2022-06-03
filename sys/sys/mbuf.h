@@ -140,10 +140,12 @@ struct m_tag {
  * Static network interface owned tag.
  * Allocated through ifp->if_snd_tag_alloc().
  */
+struct if_snd_tag_sw;
+
 struct m_snd_tag {
 	struct ifnet *ifp;		/* network interface tag belongs to */
+	const struct if_snd_tag_sw *sw;
 	volatile u_int refcount;
-	u_int	type;			/* One of IF_SND_TAG_TYPE_*. */
 };
 
 /*
@@ -495,6 +497,12 @@ m_epg_pagelen(const struct mbuf *m, int pidx, int pgoff)
      M_TSTMP_HPREC|M_TSTMP_LRO|M_PROTOFLAGS)
 
 /*
+ * Flags preserved during demote.
+ */
+#define	M_DEMOTEFLAGS \
+    (M_EXT | M_RDONLY | M_NOFREE | M_EXTPG)
+
+/*
  * Mbuf flag description for use with printf(9) %b identifier.
  */
 #define	M_FLAG_BITS \
@@ -719,6 +727,8 @@ m_epg_pagelen(const struct mbuf *m, int pidx, int pgoff)
 #define	CSUM_UDP_IPV6		CSUM_IP6_UDP
 #define	CSUM_TCP_IPV6		CSUM_IP6_TCP
 #define	CSUM_SCTP_IPV6		CSUM_IP6_SCTP
+#define	CSUM_TLS_MASK		(CSUM_L5_CALC|CSUM_L5_VALID)
+#define	CSUM_TLS_DECRYPTED	CSUM_L5_CALC
 
 /*
  * mbuf types describing the content of the mbuf (including external storage).
@@ -829,6 +839,7 @@ struct mbuf	*m_fragment(struct mbuf *, int, int);
 void		 m_freem(struct mbuf *);
 void		 m_free_raw(struct mbuf *);
 struct mbuf	*m_get2(int, int, short, int);
+struct mbuf	*m_get3(int, int, short, int);
 struct mbuf	*m_getjcl(int, short, int, int);
 struct mbuf	*m_getm2(struct mbuf *, int, int, short, int);
 struct mbuf	*m_getptr(struct mbuf *, int, int *);
@@ -848,7 +859,8 @@ int		 m_unmapped_uiomove(const struct mbuf *, int, struct uio *,
 struct mbuf	*m_unshare(struct mbuf *, int);
 int		 m_snd_tag_alloc(struct ifnet *,
 		    union if_snd_tag_alloc_params *, struct m_snd_tag **);
-void		 m_snd_tag_init(struct m_snd_tag *, struct ifnet *, u_int);
+void		 m_snd_tag_init(struct m_snd_tag *, struct ifnet *,
+		    const struct if_snd_tag_sw *);
 void		 m_snd_tag_destroy(struct m_snd_tag *);
 
 static __inline int
@@ -1347,7 +1359,7 @@ extern bool		mb_use_ext_pgs;	/* Use ext_pgs for sendfile */
 #define	PACKET_TAG_DIVERT			17 /* divert info */
 #define	PACKET_TAG_IPFORWARD			18 /* ipforward info */
 #define	PACKET_TAG_MACLABEL	(19 | MTAG_PERSISTENT) /* MAC label */
-#define	PACKET_TAG_PF		(21 | MTAG_PERSISTENT) /* PF/ALTQ information */
+#define	PACKET_TAG_PF				21 /* PF/ALTQ information */
 #define	PACKET_TAG_RTSOCKFAM			25 /* rtsock sa family */
 #define	PACKET_TAG_IPOPTIONS			27 /* Saved IP options */
 #define	PACKET_TAG_CARP				28 /* CARP info */

@@ -167,6 +167,8 @@ struct tls_session_params {
 #define	KTLS_RX		2
 
 struct iovec;
+struct ktls_ocf_session;
+struct ktls_ocf_encrypt_state;
 struct ktls_session;
 struct m_snd_tag;
 struct mbuf;
@@ -175,16 +177,15 @@ struct socket;
 
 struct ktls_session {
 	union {
-		int	(*sw_encrypt)(struct ktls_session *tls, struct mbuf *m,
-		    struct iovec *dst, int iovcnt);
+		int	(*sw_encrypt)(struct ktls_ocf_encrypt_state *state,
+		    struct ktls_session *tls, struct mbuf *m,
+		    struct iovec *outiov, int outiovcnt);
 		int	(*sw_decrypt)(struct ktls_session *tls,
 		    const struct tls_record_layer *hdr, struct mbuf *m,
 		    uint64_t seqno, int *trailer_len);
 	};
-	union {
-		void *cipher;
-		struct m_snd_tag *snd_tag;
-	};
+	struct ktls_ocf_session *ocf_session;
+	struct m_snd_tag *snd_tag;
 	struct tls_session_params params;
 	u_int	wq_index;
 	volatile u_int refcount;
@@ -195,26 +196,34 @@ struct ktls_session {
 	struct inpcb *inp;
 	bool reset_pending;
 	bool disable_ifnet_pending;
+	bool sync_dispatch;
+	bool sequential_records;
+
+	/* Only used for TLS 1.0. */
+	uint64_t next_seqno;
+	STAILQ_HEAD(, mbuf) pending_records;
 } __aligned(CACHE_LINE_SIZE);
 
+extern unsigned int ktls_ifnet_max_rexmit_pct;
+
 void ktls_check_rx(struct sockbuf *sb);
+void ktls_disable_ifnet(void *arg);
 int ktls_enable_rx(struct socket *so, struct tls_enable *en);
 int ktls_enable_tx(struct socket *so, struct tls_enable *en);
 void ktls_destroy(struct ktls_session *tls);
 void ktls_frame(struct mbuf *m, struct ktls_session *tls, int *enqueue_cnt,
     uint8_t record_type);
-void ktls_ocf_free(struct ktls_session *tls);
-int ktls_ocf_try(struct socket *so, struct ktls_session *tls, int direction);
 void ktls_seq(struct sockbuf *sb, struct mbuf *m);
 void ktls_enqueue(struct mbuf *m, struct socket *so, int page_count);
 void ktls_enqueue_to_free(struct mbuf *m);
-int ktls_get_rx_mode(struct socket *so);
+int ktls_get_rx_mode(struct socket *so, int *modep);
 int ktls_set_tx_mode(struct socket *so, int mode);
-int ktls_get_tx_mode(struct socket *so);
+int ktls_get_tx_mode(struct socket *so, int *modep);
 int ktls_output_eagain(struct inpcb *inp, struct ktls_session *tls);
 #ifdef RATELIMIT
 int ktls_modify_txrtlmt(struct ktls_session *tls, uint64_t max_pacing_rate);
 #endif
+bool ktls_pending_rx_info(struct sockbuf *sb, uint64_t *seqnop, size_t *residp);
 
 static inline struct ktls_session *
 ktls_hold(struct ktls_session *tls)
@@ -232,17 +241,6 @@ ktls_free(struct ktls_session *tls)
 	if (refcount_release(&tls->refcount))
 		ktls_destroy(tls);
 }
-
-#ifdef KERN_TLS
-extern unsigned int ktls_ifnet_max_rexmit_pct;
-void ktls_disable_ifnet(void *arg);
-#else
-#define ktls_ifnet_max_rexmit_pct 1
-static inline void
-ktls_disable_ifnet(void *arg __unused)
-{
-}
-#endif
 
 #endif /* !_KERNEL */
 #endif /* !_SYS_KTLS_H_ */

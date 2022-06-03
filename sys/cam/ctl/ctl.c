@@ -1978,7 +1978,7 @@ ctl_init(void)
 
 	SYSCTL_ADD_PROC(&softc->sysctl_ctx,SYSCTL_CHILDREN(softc->sysctl_tree),
 	    OID_AUTO, "ha_role",
-	    CTLTYPE_INT | CTLFLAG_RWTUN | CTLFLAG_NEEDGIANT,
+	    CTLTYPE_INT | CTLFLAG_RWTUN | CTLFLAG_MPSAFE,
 	    softc, 0, ctl_ha_role_sysctl, "I", "HA role for this head");
 
 	if (softc->is_single == 0) {
@@ -8552,7 +8552,7 @@ done:
 /*
  * This routine is for handling a message from the other SC pertaining to
  * persistent reserve out. All the error checking will have been done
- * so only perorming the action need be done here to keep the two
+ * so only performing the action need be done here to keep the two
  * in sync.
  */
 static void
@@ -10899,7 +10899,7 @@ ctl_seq_check(union ctl_io *io1, union ctl_io *io2)
 {
 	uint64_t lba1, lba2;
 	uint64_t len1, len2;
-	int retval;
+	int retval __diagused;
 
 	if (io1->io_hdr.flags & CTL_FLAG_SERSEQ_DONE)
 		return (CTL_ACTION_PASS);

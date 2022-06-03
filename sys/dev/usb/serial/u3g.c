@@ -499,6 +499,7 @@ static const STRUCT_USB_HOST_ID u3g_devs[] = {
 	U3G_DEV(QUANTA, Q101, 0),
 	U3G_DEV(QUANTA, Q111, 0),
 	U3G_DEV(QUECTEL, EC25, 0),
+	U3G_DEV(QUECTEL, EM05, 0),
 	U3G_DEV(SIERRA, AC402, 0),
 	U3G_DEV(SIERRA, AC595U, 0),
 	U3G_DEV(SIERRA, AC313U, 0),
@@ -978,7 +979,8 @@ u3g_attach(device_t dev)
 
 		/* set stall by default */
 		mtx_lock(&sc->sc_mtx);
-		usbd_xfer_set_zlp(sc->sc_xfer[nports][U3G_BULK_WR]);
+		usbd_xfer_set_stall(sc->sc_xfer[nports][U3G_BULK_WR]);
+		usbd_xfer_set_stall(sc->sc_xfer[nports][U3G_BULK_RD]);
 		mtx_unlock(&sc->sc_mtx);
 
 		nports++;	/* found one port */
@@ -1099,9 +1101,6 @@ u3g_write_callback(struct usb_xfer *xfer, usb_error_t error)
 	case USB_ST_TRANSFERRED:
 	case USB_ST_SETUP:
 tr_setup:
-		if (usbd_xfer_get_and_clr_zlp(xfer))
-			break;
-
 		for (frame = 0; frame != U3G_TXFRAMES; frame++) {
 			usbd_xfer_set_frame_offset(xfer, frame * U3G_TXSIZE, frame);
 

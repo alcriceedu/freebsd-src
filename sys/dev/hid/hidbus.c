@@ -172,6 +172,25 @@ hidbus_locate(const void *desc, hid_size_t size, int32_t u, enum hid_kind k,
 	return (0);
 }
 
+bool
+hidbus_is_collection(const void *desc, hid_size_t size, int32_t usage,
+    uint8_t tlc_index)
+{
+	struct hid_data *d;
+	struct hid_item h;
+	bool ret = false;
+
+	d = hid_start_parse(desc, size, 0);
+	HIDBUS_FOREACH_ITEM(d, &h, tlc_index) {
+		if (h.kind == hid_collection && h.usage == usage) {
+			ret = true;
+			break;
+		}
+	}
+	hid_end_parse(d);
+	return (ret);
+}
+
 static device_t
 hidbus_add_child(device_t dev, u_int order, const char *name, int unit)
 {
@@ -525,7 +544,7 @@ hidbus_find_child(device_t bus, int32_t usage)
 	device_t *children, child;
 	int ccount, i;
 
-	GIANT_REQUIRED;
+	bus_topo_assert();
 
 	/* Get a list of all hidbus children */
 	if (device_get_children(bus, &children, &ccount) != 0)
@@ -705,7 +724,7 @@ hid_set_report_descr(device_t dev, const void *data, hid_size_t len)
 	bool is_bus;
 	int error;
 
-	GIANT_REQUIRED;
+	bus_topo_assert();
 
 	is_bus = device_get_devclass(dev) == hidbus_devclass;
 	bus = is_bus ? dev : device_get_parent(dev);

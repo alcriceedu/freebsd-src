@@ -89,7 +89,7 @@ int	ffs_own_mount(const struct mount *mp);
 int	ffs_reallocblks(struct vop_reallocblks_args *);
 int	ffs_realloccg(struct inode *, ufs2_daddr_t, ufs2_daddr_t,
 	    ufs2_daddr_t, int, int, int, struct ucred *, struct buf **);
-int	ffs_reload(struct mount *, struct thread *, int);
+int	ffs_reload(struct mount *, int);
 int	ffs_sbget(void *, struct fs **, off_t, struct malloc_type *,
 	    int (*)(void *, off_t, void **, int));
 int	ffs_sbput(void *, struct fs *, off_t, int (*)(void *, off_t, void *,
@@ -136,12 +136,6 @@ int	ffs_breadz(struct ufsmount *, struct vnode *, daddr_t, daddr_t, int,
  */
 #define	FFSR_FORCE	0x0001
 #define	FFSR_UNSUSPEND	0x0002
-
-/*
- * Request standard superblock location in ffs_sbget
- */
-#define	STDSB			-1	/* Fail if check-hash is bad */
-#define	STDSB_NOHASHFAIL	-2	/* Ignore check-hash failure */
 
 /*
  * Definitions for TRIM interface

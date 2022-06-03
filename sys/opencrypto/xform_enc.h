@@ -48,12 +48,13 @@
 /* Declarations */
 struct enc_xform {
 	int type;
-	char *name;
+	const char *name;
 	size_t ctxsize;
 	uint16_t blocksize;	/* Required input block size -- 1 for stream ciphers. */
 	uint16_t native_blocksize;	/* Used for stream ciphers. */
 	uint16_t ivsize;
 	uint16_t minkey, maxkey;
+	uint16_t macsize;		/* For AEAD ciphers. */
 
 	/*
 	 * Encrypt/decrypt a single block.  For stream ciphers this
@@ -62,7 +63,7 @@ struct enc_xform {
 	void (*encrypt) (void *, const uint8_t *, uint8_t *);
 	void (*decrypt) (void *, const uint8_t *, uint8_t *);
 	int (*setkey) (void *, const uint8_t *, int len);
-	void (*reinit) (void *, const uint8_t *);
+	void (*reinit) (void *, const uint8_t *, size_t);
 
 	/*
 	 * For stream ciphers, encrypt/decrypt the final partial block
@@ -70,19 +71,25 @@ struct enc_xform {
 	 */
 	void (*encrypt_last) (void *, const uint8_t *, uint8_t *, size_t len);
 	void (*decrypt_last) (void *, const uint8_t *, uint8_t *, size_t len);
+
+	/*
+	 * For AEAD ciphers, update and generate MAC/tag.
+	 */
+	int  (*update) (void *, const void *, u_int);
+	void (*final) (uint8_t *, void *);
 };
 
 
-extern struct enc_xform enc_xform_null;
-extern struct enc_xform enc_xform_rijndael128;
-extern struct enc_xform enc_xform_aes_icm;
-extern struct enc_xform enc_xform_aes_nist_gcm;
-extern struct enc_xform enc_xform_aes_nist_gmac;
-extern struct enc_xform enc_xform_aes_xts;
-extern struct enc_xform enc_xform_camellia;
-extern struct enc_xform enc_xform_chacha20;
-extern struct enc_xform enc_xform_chacha20_poly1305;
-extern struct enc_xform enc_xform_ccm;
+extern const struct enc_xform enc_xform_null;
+extern const struct enc_xform enc_xform_aes_cbc;
+extern const struct enc_xform enc_xform_aes_icm;
+extern const struct enc_xform enc_xform_aes_nist_gcm;
+extern const struct enc_xform enc_xform_aes_nist_gmac;
+extern const struct enc_xform enc_xform_aes_xts;
+extern const struct enc_xform enc_xform_camellia;
+extern const struct enc_xform enc_xform_chacha20;
+extern const struct enc_xform enc_xform_chacha20_poly1305;
+extern const struct enc_xform enc_xform_ccm;
 
 struct aes_icm_ctx {
 	uint32_t	ac_ek[4*(RIJNDAEL_MAXNR + 1)];

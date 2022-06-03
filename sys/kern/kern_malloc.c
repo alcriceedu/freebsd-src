@@ -58,6 +58,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/kernel.h>
 #include <sys/lock.h>
 #include <sys/malloc.h>
+#include <sys/msan.h>
 #include <sys/mutex.h>
 #include <sys/vmmeter.h>
 #include <sys/proc.h>
@@ -654,8 +655,13 @@ void *
 	indx = kmemsize[size >> KMEM_ZSHIFT];
 	zone = kmemzones[indx].kz_zone[mtp_get_subzone(mtp)];
 	va = uma_zalloc(zone, flags);
-	if (va != NULL)
+	if (va != NULL) {
 		size = zone->uz_size;
+		if ((flags & M_ZERO) == 0) {
+			kmsan_mark(va, size, KMSAN_STATE_UNINIT);
+			kmsan_orig(va, size, KMSAN_TYPE_MALLOC, KMSAN_RET_ADDR);
+		}
+	}
 	malloc_type_zone_allocated(mtp, va == NULL ? 0 : size, indx);
 	if (__predict_false(va == NULL)) {
 		KASSERT((flags & M_WAITOK) == 0,
@@ -736,6 +742,12 @@ malloc_domainset(size_t size, struct malloc_type *mtp, struct domainset *ds,
 	if (va != NULL)
 		kasan_mark((void *)va, osize, size, KASAN_MALLOC_REDZONE);
 #endif
+#ifdef KMSAN
+	if ((flags & M_ZERO) == 0) {
+		kmsan_mark(va, size, KMSAN_STATE_UNINIT);
+		kmsan_orig(va, size, KMSAN_TYPE_MALLOC, KMSAN_RET_ADDR);
+	}
+#endif
 	return (va);
 }
 
@@ -772,13 +784,20 @@ malloc_domainset_exec(size_t size, struct malloc_type *mtp, struct domainset *ds
 }
 
 void *
+malloc_aligned(size_t size, size_t align, struct malloc_type *type, int flags)
+{
+	return (malloc_domainset_aligned(size, align, type, DOMAINSET_RR(),
+	    flags));
+}
+
+void *
 malloc_domainset_aligned(size_t size, size_t align,
     struct malloc_type *mtp, struct domainset *ds, int flags)
 {
 	void *res;
 	size_t asize;
 
-	KASSERT(align != 0 && powerof2(align),
+	KASSERT(powerof2(align),
 	    ("malloc_domainset_aligned: wrong align %#zx size %#zx",
 	    align, size));
 	KASSERT(align <= PAGE_SIZE,
@@ -793,6 +812,8 @@ malloc_domainset_aligned(size_t size, size_t align,
 	 * align, since malloc zones provide alignment equal to their
 	 * size.
 	 */
+	if (size == 0)
+		size = 1;
 	asize = size <= align ? align : 1UL << flsl(size - 1);
 
 	res = malloc_domainset(asize, mtp, ds, flags);
@@ -1091,6 +1112,13 @@ malloc_usable_size(const void *addr)
 	else
 		size = malloc_large_size(slab);
 #endif
+
+	/*
+	 * Unmark the redzone to avoid reports from consumers who are
+	 * (presumably) about to use the full allocation size.
+	 */
+	kasan_mark(addr, size, size, 0);
+
 	return (size);
 }
 
@@ -1168,13 +1196,15 @@ kmeminit(void)
 
 	vm_kmem_size = round_page(vm_kmem_size);
 
-#ifdef KASAN
 	/*
-	 * With KASAN enabled, dynamically allocated kernel memory is shadowed.
-	 * Account for this when setting the UMA limit.
+	 * With KASAN or KMSAN enabled, dynamically allocated kernel memory is
+	 * shadowed.  Account for this when setting the UMA limit.
 	 */
+#if defined(KASAN)
 	vm_kmem_size = (vm_kmem_size * KASAN_SHADOW_SCALE) /
 	    (KASAN_SHADOW_SCALE + 1);
+#elif defined(KMSAN)
+	vm_kmem_size /= 3;
 #endif
 
 #ifdef DEBUG_MEMGUARD
@@ -1223,7 +1253,7 @@ mallocinit(void *dummy)
 		for (subzone = 0; subzone < numzones; subzone++) {
 			kmemzones[indx].kz_zone[subzone] =
 			    uma_zcreate(name, size,
-#if defined(INVARIANTS) && !defined(KASAN)
+#if defined(INVARIANTS) && !defined(KASAN) && !defined(KMSAN)
 			    mtrash_ctor, mtrash_dtor, mtrash_init, mtrash_fini,
 #else
 			    NULL, NULL, NULL, NULL,

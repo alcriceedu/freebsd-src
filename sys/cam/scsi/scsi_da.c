@@ -49,6 +49,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/cons.h>
 #include <sys/endian.h>
 #include <sys/proc.h>
+#include <sys/reboot.h>
 #include <sys/sbuf.h>
 #include <geom/geom.h>
 #include <geom/geom_disk.h>
@@ -1558,7 +1559,7 @@ static sbintime_t da_default_softtimeout = DA_DEFAULT_SOFTTIMEOUT;
 static int da_send_ordered = DA_DEFAULT_SEND_ORDERED;
 static int da_disable_wp_detection = 0;
 static int da_enable_biospeedup = 1;
-static int da_enable_uma_ccbs = 0;
+static int da_enable_uma_ccbs = 1;
 
 static SYSCTL_NODE(_kern_cam, OID_AUTO, da, CTLFLAG_RD | CTLFLAG_MPSAFE, 0,
     "CAM Direct Access Disk driver");
@@ -1579,7 +1580,7 @@ SYSCTL_INT(_kern_cam_da, OID_AUTO, enable_uma_ccbs, CTLFLAG_RWTUN,
 	    &da_enable_uma_ccbs, 0, "Use UMA for CCBs");
 
 SYSCTL_PROC(_kern_cam_da, OID_AUTO, default_softtimeout,
-    CTLTYPE_UINT | CTLFLAG_RW | CTLFLAG_NEEDGIANT, NULL, 0,
+    CTLTYPE_UINT | CTLFLAG_RW | CTLFLAG_MPSAFE, NULL, 0,
     dasysctlsofttimeout, "I",
     "Soft I/O timeout (ms)");
 TUNABLE_INT64("kern.cam.da.default_softtimeout", &da_default_softtimeout);
@@ -2280,17 +2281,17 @@ dasysctlinit(void *context, int pending)
 	 */
 	SYSCTL_ADD_PROC(&softc->sysctl_ctx, SYSCTL_CHILDREN(softc->sysctl_tree),
 		OID_AUTO, "delete_method",
-		CTLTYPE_STRING | CTLFLAG_RWTUN | CTLFLAG_NEEDGIANT,
+		CTLTYPE_STRING | CTLFLAG_RWTUN | CTLFLAG_MPSAFE,
 		softc, 0, dadeletemethodsysctl, "A",
 		"BIO_DELETE execution method");
 	SYSCTL_ADD_PROC(&softc->sysctl_ctx, SYSCTL_CHILDREN(softc->sysctl_tree),
 		OID_AUTO, "delete_max",
-		CTLTYPE_U64 | CTLFLAG_RW | CTLFLAG_NEEDGIANT,
+		CTLTYPE_U64 | CTLFLAG_RW | CTLFLAG_MPSAFE,
 		softc, 0, dadeletemaxsysctl, "Q",
 		"Maximum BIO_DELETE size");
 	SYSCTL_ADD_PROC(&softc->sysctl_ctx, SYSCTL_CHILDREN(softc->sysctl_tree),
 		OID_AUTO, "minimum_cmd_size",
-		CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_NEEDGIANT,
+		CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_MPSAFE,
 		&softc->minimum_cmd_size, 0, dacmdsizesysctl, "I",
 		"Minimum CDB size");
 	SYSCTL_ADD_UQUAD(&softc->sysctl_ctx,
@@ -2308,12 +2309,12 @@ dasysctlinit(void *context, int pending)
 
 	SYSCTL_ADD_PROC(&softc->sysctl_ctx, SYSCTL_CHILDREN(softc->sysctl_tree),
 		OID_AUTO, "zone_mode",
-		CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_NEEDGIANT,
+		CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE,
 		softc, 0, dazonemodesysctl, "A",
 		"Zone Mode");
 	SYSCTL_ADD_PROC(&softc->sysctl_ctx, SYSCTL_CHILDREN(softc->sysctl_tree),
 		OID_AUTO, "zone_support",
-		CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_NEEDGIANT,
+		CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE,
 		softc, 0, dazonesupsysctl, "A",
 		"Zone Support");
 	SYSCTL_ADD_UQUAD(&softc->sysctl_ctx,
@@ -4486,7 +4487,7 @@ dazonedone(struct cam_periph *periph, union ccb *ccb)
 			/*
 			 * NOTE: we're mapping the values here directly
 			 * from the SCSI/ATA bit definitions to the bio.h
-			 * definitons.  There is also a warning in
+			 * definitions. There is also a warning in
 			 * disk_zone.h, but the impact is that if
 			 * additional values are added in the SCSI/ATA
 			 * specs these will be visible to consumers of
@@ -4533,13 +4534,11 @@ dadone(struct cam_periph *periph, union ccb *done_ccb)
 	struct bio *bp, *bp1;
 	struct da_softc *softc;
 	struct ccb_scsiio *csio;
-	u_int32_t  priority;
 	da_ccb_state state;
 
 	CAM_DEBUG(periph->path, CAM_DEBUG_TRACE, ("dadone\n"));
 
 	softc = (struct da_softc *)periph->softc;
-	priority = done_ccb->ccb_h.pinfo.priority;
 	csio = &done_ccb->csio;
 
 #if defined(BUF_TRACKING) || defined(FULL_BUF_TRACKING)
@@ -5304,7 +5303,6 @@ dadone_probeata(struct cam_periph *periph, union ccb *done_ccb)
 	u_int32_t  priority;
 	int continue_probe;
 	int error;
-	int16_t *ptr;
 
 	CAM_DEBUG(periph->path, CAM_DEBUG_TRACE, ("dadone_probeata\n"));
 
@@ -5312,7 +5310,6 @@ dadone_probeata(struct cam_periph *periph, union ccb *done_ccb)
 	priority = done_ccb->ccb_h.pinfo.priority;
 	csio = &done_ccb->csio;
 	ata_params = (struct ata_params *)csio->data_ptr;
-	ptr = (uint16_t *)ata_params;
 	continue_probe = 0;
 	error = 0;
 
@@ -5897,12 +5894,10 @@ static void
 dadone_tur(struct cam_periph *periph, union ccb *done_ccb)
 {
 	struct da_softc *softc;
-	struct ccb_scsiio *csio;
 
 	CAM_DEBUG(periph->path, CAM_DEBUG_TRACE, ("dadone_tur\n"));
 
 	softc = (struct da_softc *)periph->softc;
-	csio = &done_ccb->csio;
 
 	cam_periph_assert(periph, MA_OWNED);
 
@@ -5927,7 +5922,7 @@ static void
 dareprobe(struct cam_periph *periph)
 {
 	struct da_softc	  *softc;
-	int status;
+	int status __diagused;
 
 	softc = (struct da_softc *)periph->softc;
 
@@ -6250,6 +6245,9 @@ dashutdown(void * arg, int howto)
 	struct da_softc *softc;
 	union ccb *ccb;
 	int error;
+
+	if ((howto & RB_NOSYNC) != 0)
+		return;
 
 	CAM_PERIPH_FOREACH(periph, &dadriver) {
 		softc = (struct da_softc *)periph->softc;

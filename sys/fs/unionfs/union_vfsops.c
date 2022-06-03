@@ -74,27 +74,26 @@ static struct vfsops unionfs_vfsops;
 static int
 unionfs_domount(struct mount *mp)
 {
-	int		error;
 	struct mount   *lowermp, *uppermp;
 	struct vnode   *lowerrootvp;
 	struct vnode   *upperrootvp;
 	struct unionfs_mount *ump;
-	struct thread *td;
 	char           *target;
 	char           *tmp;
 	char           *ep;
-	int		len;
+	struct nameidata nd, *ndp;
+	struct vattr	va;
+	unionfs_copymode copymode;
+	unionfs_whitemode whitemode;
 	int		below;
+	int		error;
+	int		len;
 	uid_t		uid;
 	gid_t		gid;
 	u_short		udir;
 	u_short		ufile;
-	unionfs_copymode copymode;
-	unionfs_whitemode whitemode;
-	struct nameidata nd, *ndp;
-	struct vattr	va;
 
-	UNIONFSDEBUG("unionfs_mount(mp = %p)\n", (void *)mp);
+	UNIONFSDEBUG("unionfs_mount(mp = %p)\n", mp);
 
 	error = 0;
 	below = 0;
@@ -105,7 +104,6 @@ unionfs_domount(struct mount *mp)
 	copymode = UNIONFS_TRANSPARENT;	/* default */
 	whitemode = UNIONFS_WHITE_ALWAYS;
 	ndp = &nd;
-	td = curthread;
 
 	if (mp->mnt_flag & MNT_ROOTFS) {
 		vfs_mount_error(mp, "Cannot union mount root filesystem");
@@ -234,7 +232,7 @@ unionfs_domount(struct mount *mp)
 	/*
 	 * Find upper node
 	 */
-	NDINIT(ndp, LOOKUP, FOLLOW | LOCKLEAF, UIO_SYSSPACE, target, td);
+	NDINIT(ndp, LOOKUP, FOLLOW | LOCKLEAF, UIO_SYSSPACE, target);
 	if ((error = namei(ndp)))
 		return (error);
 
@@ -245,8 +243,8 @@ unionfs_domount(struct mount *mp)
 	upperrootvp = ndp->ni_vp;
 
 	/* create unionfs_mount */
-	ump = (struct unionfs_mount *)malloc(sizeof(struct unionfs_mount),
-	    M_UNIONFSMNT, M_WAITOK | M_ZERO);
+	ump = malloc(sizeof(struct unionfs_mount), M_UNIONFSMNT,
+	    M_WAITOK | M_ZERO);
 
 	/*
 	 * Save reference
@@ -284,7 +282,7 @@ unionfs_domount(struct mount *mp)
 	 * Get the unionfs root vnode.
 	 */
 	error = unionfs_nodeget(mp, ump->um_uppervp, ump->um_lowervp,
-	    NULLVP, &(ump->um_rootvp), NULL, td);
+	    NULLVP, &(ump->um_rootvp), NULL);
 	vrele(upperrootvp);
 	if (error != 0) {
 		free(ump, M_UNIONFSMNT);
@@ -292,14 +290,16 @@ unionfs_domount(struct mount *mp)
 		return (error);
 	}
 
-	lowermp = vfs_pin_from_vp(ump->um_lowervp);
-	uppermp = vfs_pin_from_vp(ump->um_uppervp);
+	lowermp = vfs_register_upper_from_vp(ump->um_lowervp, mp,
+	    &ump->um_lower_link);
+	uppermp = vfs_register_upper_from_vp(ump->um_uppervp, mp,
+	    &ump->um_upper_link);
 
 	if (lowermp == NULL || uppermp == NULL) {
 		if (lowermp != NULL)
-			vfs_unpin(lowermp);
+			vfs_unregister_upper(lowermp, &ump->um_lower_link);
 		if (uppermp != NULL)
-			vfs_unpin(uppermp);
+			vfs_unregister_upper(uppermp, &ump->um_upper_link);
 		free(ump, M_UNIONFSMNT);
 		mp->mnt_data = NULL;
 		return (ENOENT);
@@ -338,7 +338,7 @@ unionfs_unmount(struct mount *mp, int mntflags)
 	int		freeing;
 	int		flags;
 
-	UNIONFSDEBUG("unionfs_unmount: mp = %p\n", (void *)mp);
+	UNIONFSDEBUG("unionfs_unmount: mp = %p\n", mp);
 
 	ump = MOUNTTOUNIONFSMOUNT(mp);
 	flags = 0;
@@ -357,8 +357,8 @@ unionfs_unmount(struct mount *mp, int mntflags)
 	if (error)
 		return (error);
 
-	vfs_unpin(ump->um_lowervp->v_mount);
-	vfs_unpin(ump->um_uppervp->v_mount);
+	vfs_unregister_upper(ump->um_lowervp->v_mount, &ump->um_lower_link);
+	vfs_unregister_upper(ump->um_uppervp->v_mount, &ump->um_upper_link);
 	free(ump, M_UNIONFSMNT);
 	mp->mnt_data = NULL;
 
@@ -369,7 +369,7 @@ static int
 unionfs_root(struct mount *mp, int flags, struct vnode **vpp)
 {
 	struct unionfs_mount *ump;
-	struct vnode   *vp;
+	struct vnode *vp;
 
 	ump = MOUNTTOUNIONFSMOUNT(mp);
 	vp = ump->um_rootvp;
@@ -425,14 +425,14 @@ static int
 unionfs_statfs(struct mount *mp, struct statfs *sbp)
 {
 	struct unionfs_mount *ump;
-	int		error;
 	struct statfs	*mstat;
 	uint64_t	lbsize;
+	int		error;
 
 	ump = MOUNTTOUNIONFSMOUNT(mp);
 
 	UNIONFSDEBUG("unionfs_statfs(mp = %p, lvp = %p, uvp = %p)\n",
-	    (void *)mp, (void *)ump->um_lowervp, (void *)ump->um_uppervp);
+	    mp, ump->um_lowervp, ump->um_uppervp);
 
 	mstat = malloc(sizeof(struct statfs), M_STATFS, M_WAITOK | M_ZERO);
 

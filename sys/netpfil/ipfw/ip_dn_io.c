@@ -591,7 +591,8 @@ serve_sched(struct mq *q, struct dn_sch_inst *si, uint64_t now)
 	struct dn_schk *s = si->sched;
 	struct mbuf *m = NULL;
 	int delay_line_idle = (si->dline.mq.head == NULL);
-	int done, bw;
+	int done;
+	uint32_t bw;
 
 	if (q == NULL) {
 		q = &def_q;
@@ -840,7 +841,8 @@ tag_mbuf(struct mbuf *m, int dir, struct ip_fw_args *fwa)
 	m_tag_prepend(m, mtag);		/* Attach to mbuf chain. */
 	dt = (struct dn_pkt_tag *)(mtag + 1);
 	dt->rule = fwa->rule;
-	dt->rule.info &= IPFW_ONEPASS;	/* only keep this info */
+	/* only keep this info */
+	dt->rule.info &= (IPFW_ONEPASS | IPFW_IS_DUMMYNET);
 	dt->dn_dir = dir;
 	dt->ifp = fwa->flags & IPFW_ARGS_OUT ? fwa->ifp : NULL;
 	/* dt->output tame is updated as we move through */

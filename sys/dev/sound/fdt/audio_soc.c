@@ -61,7 +61,7 @@ struct audio_soc_channel {
 struct audio_soc_softc {
 	/*
 	 * pcm_register assumes that sc is snddev_info,
-	 * so this has to be first structure member for "compatiblity"
+	 * so this has to be first structure member for "compatibility"
 	 */
 	struct snddev_info	info;
 	device_t		dev;
@@ -408,8 +408,6 @@ audio_soc_init(void *arg)
 		return;
 	}
 
-	pcm_getbuffersize(sc->dev, AUDIO_BUFFER_SIZE, AUDIO_BUFFER_SIZE,
-	    AUDIO_BUFFER_SIZE);
 	sc->play_channel.sc = sc;
 	sc->rec_channel.sc = sc;
 

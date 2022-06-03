@@ -109,8 +109,9 @@ struct sysentvec {
 					/* stack fixup function */
 	void		(*sv_sendsig)(void (*)(int), struct ksiginfo *, struct __sigset *);
 			    		/* send signal */
-	char 		*sv_sigcode;	/* start of sigtramp code */
+	const char 	*sv_sigcode;	/* start of sigtramp code */
 	int 		*sv_szsigcode;	/* size of sigtramp code */
+	int		sv_sigcodeoff;
 	char		*sv_name;	/* name of binary type */
 	int		(*sv_coredump)(struct thread *, struct vnode *, off_t, int);
 					/* function to dump core, or NULL */
@@ -119,7 +120,7 @@ struct sysentvec {
 	void		(*sv_elf_core_prepare_notes)(struct thread *,
 			    struct note_info_list *, size_t *);
 	int		(*sv_imgact_try)(struct image_params *);
-	void		(*sv_stackgap)(struct image_params *, uintptr_t *);
+	vm_size_t	(*sv_stackgap)(struct image_params *, uintptr_t *);
 	int		(*sv_copyout_auxargs)(struct image_params *,
 			    uintptr_t);
 	int		sv_minsigstksz;	/* minimum signal stack size */
@@ -143,6 +144,7 @@ struct sysentvec {
 	vm_offset_t	sv_shared_page_len;
 	vm_offset_t	sv_sigcode_base;
 	void		*sv_shared_page_obj;
+	vm_offset_t	sv_vdso_base;
 	void		(*sv_schedtail)(struct thread *);
 	void		(*sv_thread_detach)(struct thread *);
 	int		(*sv_trap)(struct thread *);
@@ -151,11 +153,13 @@ struct sysentvec {
 	const char	*(*sv_machine_arch)(struct proc *);
 	vm_offset_t	sv_fxrng_gen_base;
 	void		(*sv_onexec_old)(struct thread *td);
-	void		(*sv_onexec)(struct proc *, struct image_params *);
+	int		(*sv_onexec)(struct proc *, struct image_params *);
 	void		(*sv_onexit)(struct proc *);
 	void		(*sv_ontdexit)(struct thread *td);
 	int		(*sv_setid_allowed)(struct thread *td,
 			    struct image_params *imgp);
+	void		(*sv_set_fork_retval)(struct thread *);
+					/* Only used on x86 */
 };
 
 #define	SV_ILP32	0x000100	/* 32-bit executable. */
@@ -163,12 +167,13 @@ struct sysentvec {
 #define	SV_IA32		0x004000	/* Intel 32-bit executable. */
 #define	SV_AOUT		0x008000	/* a.out executable. */
 #define	SV_SHP		0x010000	/* Shared page. */
-#define	SV_CAPSICUM	0x020000	/* Force cap_enter() on startup. */
+#define	SV_AVAIL1	0x020000	/* Unused */
 #define	SV_TIMEKEEP	0x040000	/* Shared page timehands. */
 #define	SV_ASLR		0x080000	/* ASLR allowed. */
 #define	SV_RNG_SEED_VER	0x100000	/* random(4) reseed generation. */
 #define	SV_SIG_DISCIGN	0x200000	/* Do not discard ignored signals */
 #define	SV_SIG_WAITNDQ	0x400000	/* Wait does not dequeue SIGCHLD */
+#define	SV_DSO_SIG	0x800000	/* Signal trampoline packed in dso */
 
 #define	SV_ABI_MASK	0xff
 #define	SV_PROC_FLAG(p, x)	((p)->p_sysent->sv_flags & (x))
@@ -178,7 +183,6 @@ struct sysentvec {
 /* same as ELFOSABI_XXX, to prevent header pollution */
 #define	SV_ABI_LINUX	3
 #define	SV_ABI_FREEBSD 	9
-#define	SV_ABI_CLOUDABI	17
 #define	SV_ABI_UNDEF	255
 
 /* sv_coredump flags */
@@ -190,6 +194,12 @@ struct sysentvec {
 extern struct sysentvec aout_sysvec;
 extern struct sysent sysent[];
 extern const char *syscallnames[];
+
+struct nosys_args {
+	register_t dummy;
+};
+
+int	nosys(struct thread *, struct nosys_args *);
 
 #define	NO_SYSCALL (-1)
 
@@ -323,6 +333,7 @@ void exec_sysvec_init_secondary(struct sysentvec *sv, struct sysentvec *sv2);
 void exec_inittk(void);
 
 void exit_onexit(struct proc *p);
+void exec_free_abi_mappings(struct proc *p);
 void exec_onexec_old(struct thread *td);
 
 #define INIT_SYSENTVEC(name, sv)					\

@@ -414,7 +414,7 @@ user_trctrap_out:
 #endif
 			if (time_second - lastalert > 10) {
 				log(LOG_WARNING, "NMI: power fail\n");
-				sysbeep(880, hz);
+				sysbeep(880, SBT_1S);
 				lastalert = time_second;
 			}
 			return;
@@ -671,7 +671,7 @@ kernel_trctrap:
 #ifdef POWERFAIL_NMI
 			if (time_second - lastalert > 10) {
 				log(LOG_WARNING, "NMI: power fail\n");
-				sysbeep(880, hz);
+				sysbeep(880, SBT_1S);
 				lastalert = time_second;
 			}
 			return;
@@ -1052,6 +1052,7 @@ cpu_fetch_syscall_args(struct thread *td)
 #endif
 
 	sa->code = frame->tf_eax;
+	sa->original_code = sa->code;
 	params = (caddr_t)frame->tf_esp + sizeof(uint32_t);
 
 	/*

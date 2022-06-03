@@ -103,20 +103,17 @@
     something significant changes or if ssh_namespace.h is out of
     whack.
 
-12) Commit, and hunker down for the inevitable storm of complaints.
+12) Update nanobsd's copies of the ssh config files:
+
+    tools/tools/nanobsd/rescue/Files/etc/ssh/ssh_config
+    tools/tools/nanobsd/rescue/Files/etc/ssh/sshd_config
+
+13) Commit, and hunker down for the inevitable storm of complaints.
 
 
 
 	  An overview of FreeBSD changes to OpenSSH-portable
 	  ==================================================
-
-* don't free string returned by login_getcapstr(3)
-
-  Committed upstream as f060c2bc85d59d111fa18a12eb3872ee4b9f7e97
-
-* Use login_getpwclass() instead of login_getclass()
-
-  Committed upstream as 3d05e5881ceb2e48e1948ba14292216b56ed792e
 
 0) VersionAddendum
 
@@ -176,10 +173,12 @@
    counting; the agent will automatically exit when the last client
    disconnects.
 
-7) Class-based login restrictions
+7) Class-based login restrictions (27ceebbc2402)
 
-   We've added code to auth2.c to enforce the host.allow, host.deny,
-   times.allow and times.deny login class capabilities.
+   We've added code to auth.c to enforce the host.allow, host.deny,
+   times.allow and times.deny login class capabilities, based on an
+   upstream submission from
+   https://github.com/openssh/openssh-portable/pull/262.
 
 8) HPN
 

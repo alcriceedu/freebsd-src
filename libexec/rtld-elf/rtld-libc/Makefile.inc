@@ -27,7 +27,7 @@ SRCS+=	rtld_libc.c
 
 # Now build the remaining files from libc:
 .PATH: ${LIBC_SRCTOP}/stdlib
-SRCS+=	reallocf.c realpath.c getenv.c merge.c reallocarray.c
+SRCS+=	reallocf.c realpath.c merge.c reallocarray.c
 # TODO: fix merge.c to build with WARNS=6
 .if ${COMPILER_TYPE} == "clang"
 CFLAGS.merge.c+=-Wno-error=null-pointer-arithmetic
@@ -66,8 +66,6 @@ _libc_other_objects+=syncicache abs
 # ppc64 needs __syncicache for reloc.c
 _libc_other_objects+=syncicache
 .endif
-
-_libc_other_objects+=_get_tp
 
 # Extract all the .o files from libc_nossp_pic.a. This ensures that
 # we don't accidentally pull in the interposing table or similar by linking
