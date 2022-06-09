@@ -198,7 +198,7 @@ struct vm_reserv {
 	uint8_t		domain;			/* (c) NUMA domain. */
 	char		inpartpopq;		/* (d, r) */
 	int		lasttick;		/* (r) last pop update tick. */
-	popmap_t	popmap[NPOPMAP_MAX];	/* (r) bit vector, used pages */
+	popmap_t	*popmap;		/* (r) bit vector, used pages */
 };
 
 TAILQ_HEAD(vm_reserv_queue, vm_reserv);
@@ -232,6 +232,17 @@ TAILQ_HEAD(vm_reserv_queue, vm_reserv);
  * reservation has an entry in the containing object's list of reservations.  
  */
 static vm_reserv_t vm_reserv_array;
+
+/*
+ * The reservation popmap array.
+ */
+static popmap_t *vm_reserv_popmap_array;
+
+/*
+ * A single popmap that will be initialized to be completely full, to be used
+ * in the marker field of a struct vm_reserv_domain.
+ */
+static popmap_t vm_reserv_popmap_full[NPOPMAP_MAX];
 
 /*
  * The per-domain partially populated reservation queues
@@ -1070,7 +1081,7 @@ vm_reserv_init(void)
 #ifdef VM_PHYSSEG_SPARSE
 	vm_pindex_t used;
 #endif
-	int i, j, segind;
+	int i, segind;
 
 	/*
 	 * Initialize the reservation array.  Specifically, initialize the
@@ -1112,8 +1123,7 @@ vm_reserv_init(void)
 		 * partially populated reservation queues.
 		 */
 		rvd->marker.popcnt = VM_LEVEL_0_NPAGES;
-		for (j = 0; j < VM_LEVEL_0_NPAGES; j++)
-			popmap_set(rvd->marker.popmap, j);
+		rvd->marker.popmap = vm_reserv_popmap_full;
 	}
 
 	for (i = 0; i < VM_RESERV_OBJ_LOCK_COUNT; i++)
@@ -1522,6 +1532,31 @@ vm_reserv_startup(vm_offset_t *vaddr, vm_paddr_t end)
 	vm_reserv_array = (void *)(uintptr_t)pmap_map(vaddr, new_end, end,
 	    VM_PROT_READ | VM_PROT_WRITE);
 	bzero(vm_reserv_array, size);
+
+	/*
+	 * Allocate and map the physical memory for the reservation popmap.
+	 */
+	size = count * NPOPMAP_MAX * sizeof(popmap_t);
+	end = new_end;
+	new_end = end - round_page(size);
+	vm_reserv_popmap_array = (void *)(uintptr_t)pmap_map(vaddr, new_end, end,
+            VM_PROT_READ | VM_PROT_WRITE);
+        bzero(vm_reserv_popmap_array, size);
+
+        /*
+         * XXX Add a full popmap to be used for the domain marker(s). (Seems like
+         * the marker could give us trouble in the future when we eliminate the
+         * popmap field...)
+         */
+        for (i = 0; i < VM_LEVEL_0_NPAGES; i++)
+		popmap_set(vm_reserv_popmap_full, i);
+
+	/*
+	 * XXX Initialize the popmap pointers within each reservation struct.
+	 */
+	for (i = 0; i < count; i++) {
+		vm_reserv_array[i].popmap = &vm_reserv_popmap_array[i * NPOPMAP_MAX];
+	}
 
 	/*
 	 * Return the next available physical address.
