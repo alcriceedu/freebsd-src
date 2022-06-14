@@ -99,11 +99,29 @@ __FBSDID("$FreeBSD$");
 #define	VM_LEVEL_0_SIZE		(1 << VM_LEVEL_0_SHIFT)
 
 /*
+ * XXX We choose to call these constants "level 1" for now, but this should probably
+ * be reindexed at some point.
+ */
+#define VM_LEVEL_1_ORDER 	4
+#define VM_LEVEL_1_ORDER_MAX 	VM_LEVEL_1_ORDER
+#define VM_LEVEL_1_NPAGES 	(1 << VM_LEVEL_1_ORDER)
+#define VM_LEVEL_1_NPAGES_MAX 	(1 << VM_LEVEL_1_ORDER_MAX)
+#define VM_LEVEL_1_SHIFT 	(VM_LEVEL_1_ORDER + PAGE_SHIFT)
+#define VM_LEVEL_1_SIZE 	(1 << VM_LEVEL_1_SHIFT)
+
+#define MAXRESERVSIZES 2
+
+static size_t reserv_orders[MAXRESERVSIZES] = {VM_LEVEL_0_ORDER, VM_LEVEL_1_ORDER};
+static size_t reserv_pages[MAXRESERVSIZES] = {VM_LEVEL_0_NPAGES, VM_LEVEL_1_NPAGES};
+static size_t reserv_shifts[MAXRESERVSIZES] = {VM_LEVEL_0_SHIFT, VM_LEVEL_1_SHIFT};
+static size_t reserv_sizes[MAXRESERVSIZES] = {VM_LEVEL_0_SIZE, VM_LEVEL_1_SIZE};
+
+/*
  * Computes the index of the small page underlying the given (object, pindex)
  * within the reservation's array of small pages.
  */
-#define	VM_RESERV_INDEX(object, pindex)	\
-    (((object)->pg_color + (pindex)) & (VM_LEVEL_0_NPAGES - 1))
+#define	VM_RESERV_INDEX(object, pindex, npages)	\
+    (((object)->pg_color + (pindex)) & (npages - 1))
 
 /*
  * The size of a population map entry
@@ -120,6 +138,11 @@ typedef	u_long		popmap_t;
  */
 #define	NPOPMAP		howmany(VM_LEVEL_0_NPAGES, NBPOPMAP)
 #define	NPOPMAP_MAX	howmany(VM_LEVEL_0_NPAGES_MAX, NBPOPMAP)
+
+/*
+ * XXX
+ */
+static size_t reserv_npopmaps[MAXRESERVSIZES] = {howmany(VM_LEVEL_0_NPAGES, NBPOPMAP), howmany(VM_LEVEL_1_NPAGES, NBPOPMAP)};
 
 /*
  * Number of elapsed ticks before we update the LRU queue position.  Used
@@ -197,6 +220,7 @@ struct vm_reserv {
 	uint16_t	popcnt;			/* (r) # of pages in use */
 	uint8_t		domain;			/* (c) NUMA domain. */
 	char		inpartpopq;		/* (d, r) */
+	uint8_t		rsind;			/* XXX Reservation size index */
 	int		lasttick;		/* (r) last pop update tick. */
 	popmap_t	*popmap;		/* (r) bit vector, used pages */
 };
@@ -242,7 +266,7 @@ static popmap_t *vm_reserv_popmap_array;
  * A single popmap that will be initialized to be completely full, to be used
  * in the marker field of a struct vm_reserv_domain.
  */
-static popmap_t vm_reserv_popmap_full[NPOPMAP_MAX];
+static popmap_t vm_reserv_popmap_full[NPOPMAP_MAX]; // Level 0 size
 
 /*
  * The per-domain partially populated reservation queues
@@ -257,8 +281,8 @@ static popmap_t vm_reserv_popmap_full[NPOPMAP_MAX];
  */
 struct vm_reserv_domain {
 	struct mtx 		lock;
-	struct vm_reserv_queue	partpop;	/* (d) */
-	struct vm_reserv	marker;		/* (d, s) scan marker/lock */
+	struct vm_reserv_queue	partpop[MAXRESERVSIZES];	/* (d) */
+	struct vm_reserv	marker[MAXRESERVSIZES];		/* (d, s) scan marker/lock */
 } __aligned(CACHE_LINE_SIZE);
 
 static struct vm_reserv_domain vm_rvd[MAXMEMDOM];
@@ -269,8 +293,8 @@ static struct vm_reserv_domain vm_rvd[MAXMEMDOM];
 #define	vm_reserv_domain_lock(d)	mtx_lock(vm_reserv_domain_lockptr(d))
 #define	vm_reserv_domain_unlock(d)	mtx_unlock(vm_reserv_domain_lockptr(d))
 
-#define	vm_reserv_domain_scan_lock(d)	mtx_lock(&vm_rvd[(d)].marker.lock)
-#define	vm_reserv_domain_scan_unlock(d)	mtx_unlock(&vm_rvd[(d)].marker.lock)
+#define	vm_reserv_domain_scan_lock(d, s)	mtx_lock(&vm_rvd[(d)].marker[(s)].lock)
+#define	vm_reserv_domain_scan_unlock(d, s)	mtx_unlock(&vm_rvd[(d)].marker[(s)].lock)
 
 static SYSCTL_NODE(_vm, OID_AUTO, reserv, CTLFLAG_RD | CTLFLAG_MPSAFE, 0,
     "Reservation Info");
@@ -380,7 +404,7 @@ sysctl_vm_reserv_partpopq(SYSCTL_HANDLER_ARGS)
 			counter = 0;
 			unused_pages = 0;
 			vm_reserv_domain_lock(domain);
-			TAILQ_FOREACH(rv, &vm_rvd[domain].partpop, partpopq) {
+			TAILQ_FOREACH(rv, &vm_rvd[domain].partpop, partpopq) { // XXX Needs to work with both lists
 				if (rv == &vm_rvd[domain].marker)
 					continue;
 				counter++;
@@ -485,12 +509,12 @@ vm_reserv_depopulate(vm_reserv_t rv, int index)
 	    rv->popcnt == 0) {
 		vm_reserv_domain_lock(rv->domain);
 		if (rv->inpartpopq) {
-			TAILQ_REMOVE(&vm_rvd[rv->domain].partpop, rv, partpopq);
+			TAILQ_REMOVE(&vm_rvd[rv->domain].partpop[rv->rsind], rv, partpopq);
 			rv->inpartpopq = FALSE;
 		}
 		if (rv->popcnt != 0) {
 			rv->inpartpopq = TRUE;
-			TAILQ_INSERT_TAIL(&vm_rvd[rv->domain].partpop, rv,
+			TAILQ_INSERT_TAIL(&vm_rvd[rv->domain].partpop[rv->rsind], rv,
 			    partpopq);
 		}
 		vm_reserv_domain_unlock(rv->domain);
@@ -517,10 +541,10 @@ vm_reserv_from_page(vm_page_t m)
 	struct vm_phys_seg *seg;
 
 	seg = &vm_phys_segs[m->segind];
-	return (seg->first_reserv + (VM_PAGE_TO_PHYS(m) >> VM_LEVEL_0_SHIFT) -
+	return (seg->first_reserv + 32 * (VM_PAGE_TO_PHYS(m) >> VM_LEVEL_0_SHIFT) -
 	    (seg->start >> VM_LEVEL_0_SHIFT));
 #else
-	return (&vm_reserv_array[VM_PAGE_TO_PHYS(m) >> VM_LEVEL_0_SHIFT]);
+	return (&vm_reserv_array[32 * (VM_PAGE_TO_PHYS(m) >> VM_LEVEL_0_SHIFT)]); // XXX Fudge to use appropriate 2MB aligned reservation for now
 #endif
 }
 
@@ -603,12 +627,12 @@ vm_reserv_populate(vm_reserv_t rv, int index)
 	rv->lasttick = ticks;
 	vm_reserv_domain_lock(rv->domain);
 	if (rv->inpartpopq) {
-		TAILQ_REMOVE(&vm_rvd[rv->domain].partpop, rv, partpopq);
+		TAILQ_REMOVE(&vm_rvd[rv->domain].partpop[rv->rsind], rv, partpopq);
 		rv->inpartpopq = FALSE;
 	}
 	if (rv->popcnt < VM_LEVEL_0_NPAGES) {
 		rv->inpartpopq = TRUE;
-		TAILQ_INSERT_TAIL(&vm_rvd[rv->domain].partpop, rv, partpopq);
+		TAILQ_INSERT_TAIL(&vm_rvd[rv->domain].partpop[rv->rsind], rv, partpopq);
 	} else {
 		KASSERT(rv->pages->psind == 0,
 		    ("vm_reserv_populate: reserv %p is already promoted",
@@ -1031,7 +1055,7 @@ vm_reserv_break_all(vm_object_t object)
 		}
 		vm_reserv_domain_lock(rv->domain);
 		if (rv->inpartpopq) {
-			TAILQ_REMOVE(&vm_rvd[rv->domain].partpop, rv, partpopq);
+			TAILQ_REMOVE(&vm_rvd[rv->domain].partpop[rv->rsind], rv, partpopq);
 			rv->inpartpopq = FALSE;
 		}
 		vm_reserv_domain_unlock(rv->domain);
@@ -1081,7 +1105,7 @@ vm_reserv_init(void)
 #ifdef VM_PHYSSEG_SPARSE
 	vm_pindex_t used;
 #endif
-	int i, segind;
+	int i, j, segind;
 
 	/*
 	 * Initialize the reservation array.  Specifically, initialize the
@@ -1094,36 +1118,38 @@ vm_reserv_init(void)
 		seg = &vm_phys_segs[segind];
 #ifdef VM_PHYSSEG_SPARSE
 		seg->first_reserv = &vm_reserv_array[used];
-		used += howmany(seg->end, VM_LEVEL_0_SIZE) -
-		    seg->start / VM_LEVEL_0_SIZE;
+		used += howmany(seg->end, VM_LEVEL_1_SIZE) -
+		    seg->start / VM_LEVEL_1_SIZE;
 #else
 		seg->first_reserv =
-		    &vm_reserv_array[seg->start >> VM_LEVEL_0_SHIFT];
+		    &vm_reserv_array[seg->start >> VM_LEVEL_1_SHIFT];
 #endif
-		paddr = roundup2(seg->start, VM_LEVEL_0_SIZE);
-		rv = seg->first_reserv + (paddr >> VM_LEVEL_0_SHIFT) -
-		    (seg->start >> VM_LEVEL_0_SHIFT);
-		while (paddr + VM_LEVEL_0_SIZE > paddr && paddr +
-		    VM_LEVEL_0_SIZE <= seg->end) {
+		paddr = roundup2(seg->start, VM_LEVEL_1_SIZE);
+		rv = seg->first_reserv + (paddr >> VM_LEVEL_1_SHIFT) -
+		    (seg->start >> VM_LEVEL_1_SHIFT);
+		while (paddr + VM_LEVEL_1_SIZE > paddr && paddr +
+		    VM_LEVEL_1_SIZE <= seg->end) {
 			rv->pages = PHYS_TO_VM_PAGE(paddr);
 			rv->domain = seg->domain;
+			rv->rsind = paddr & (VM_LEVEL_0_SIZE - 1) == 0 ? 0 : 1; // XXX Only for testing
 			mtx_init(&rv->lock, "vm reserv", NULL, MTX_DEF);
-			paddr += VM_LEVEL_0_SIZE;
+			paddr += VM_LEVEL_1_SIZE;
 			rv++;
 		}
 	}
 	for (i = 0; i < MAXMEMDOM; i++) {
 		rvd = &vm_rvd[i];
 		mtx_init(&rvd->lock, "vm reserv domain", NULL, MTX_DEF);
-		TAILQ_INIT(&rvd->partpop);
-		mtx_init(&rvd->marker.lock, "vm reserv marker", NULL, MTX_DEF);
-
-		/*
-		 * Fully populated reservations should never be present in the
-		 * partially populated reservation queues.
-		 */
-		rvd->marker.popcnt = VM_LEVEL_0_NPAGES;
-		rvd->marker.popmap = vm_reserv_popmap_full;
+		for (j = 0; j < MAXRESERVSIZES; j++) {
+			TAILQ_INIT(&rvd->partpop[j]);
+			mtx_init(&rvd.marker[j].lock, "vm reserv marker", NULL, MTX_DEF);
+			/*
+		 	 * Fully populated reservations should never be present in the
+			 * partially populated reservation queues.
+			 */
+			rvd->marker[j].popcnt = reserv_pages[j];
+                	rvd->marker[j].popmap = vm_reserv_popmap_full;
+		}
 	}
 
 	for (i = 0; i < VM_RESERV_OBJ_LOCK_COUNT; i++)
@@ -1199,7 +1225,7 @@ vm_reserv_dequeue(vm_reserv_t rv)
 	KASSERT(rv->inpartpopq,
 	    ("vm_reserv_reclaim: reserv %p's inpartpopq is FALSE", rv));
 
-	TAILQ_REMOVE(&vm_rvd[rv->domain].partpop, rv, partpopq);
+	TAILQ_REMOVE(&vm_rvd[rv->domain].partpop[rv->rvsind], rv, partpopq);
 	rv->inpartpopq = FALSE;
 }
 
@@ -1234,7 +1260,7 @@ vm_reserv_reclaim_inactive(int domain)
 	vm_reserv_t rv;
 
 	vm_reserv_domain_lock(domain);
-	TAILQ_FOREACH(rv, &vm_rvd[domain].partpop, partpopq) {
+	TAILQ_FOREACH(rv, &vm_rvd[domain].partpop, partpopq) { // XXX Needs to work with both lists
 		/*
 		 * A locked reservation is likely being updated or reclaimed,
 		 * so just skip ahead.
@@ -1357,7 +1383,7 @@ vm_reserv_reclaim_contig(int domain, u_long npages, vm_paddr_t low,
 	 */
 	if (size > boundary)
 		return (false);
-	marker = &vm_rvd[domain].marker;
+	marker = &vm_rvd[domain].marker; // XXX Needs to work with both lists
 	queue = &vm_rvd[domain].partpop;
 	/*
 	 * Compute shifted alignment, boundary values for page-based
@@ -1497,21 +1523,21 @@ vm_reserv_startup(vm_offset_t *vaddr, vm_paddr_t end)
 	count = 0;
 	for (i = 0; i < vm_phys_nsegs; i++) {
 #ifdef VM_PHYSSEG_SPARSE
-		count += howmany(vm_phys_segs[i].end, VM_LEVEL_0_SIZE) -
-		    vm_phys_segs[i].start / VM_LEVEL_0_SIZE;
+		count += howmany(vm_phys_segs[i].end, VM_LEVEL_1_SIZE) -
+		    vm_phys_segs[i].start / VM_LEVEL_1_SIZE;
 #else
 		count = MAX(count,
-		    howmany(vm_phys_segs[i].end, VM_LEVEL_0_SIZE));
+		    howmany(vm_phys_segs[i].end, VM_LEVEL_1_SIZE));
 #endif
 	}
 
 	for (i = 0; phys_avail[i + 1] != 0; i += 2) {
 #ifdef VM_PHYSSEG_SPARSE
-		count += howmany(phys_avail[i + 1], VM_LEVEL_0_SIZE) -
-		    phys_avail[i] / VM_LEVEL_0_SIZE;
+		count += howmany(phys_avail[i + 1], VM_LEVEL_1_SIZE) -
+		    phys_avail[i] / VM_LEVEL_1_SIZE;
 #else
 		count = MAX(count,
-		    howmany(phys_avail[i + 1], VM_LEVEL_0_SIZE));
+		    howmany(phys_avail[i + 1], VM_LEVEL_1_SIZE));
 #endif
 	}
 
@@ -1536,7 +1562,7 @@ vm_reserv_startup(vm_offset_t *vaddr, vm_paddr_t end)
 	/*
 	 * Allocate and map the physical memory for the reservation popmap.
 	 */
-	size = count * NPOPMAP_MAX * sizeof(popmap_t);
+	size = count * reserv_npopmaps[1] * sizeof(popmap_t);
 	end = new_end;
 	new_end = end - round_page(size);
 	vm_reserv_popmap_array = (void *)(uintptr_t)pmap_map(vaddr, new_end, end,
@@ -1544,9 +1570,7 @@ vm_reserv_startup(vm_offset_t *vaddr, vm_paddr_t end)
         bzero(vm_reserv_popmap_array, size);
 
         /*
-         * XXX Add a full popmap to be used for the domain marker(s). (Seems like
-         * the marker could give us trouble in the future when we eliminate the
-         * popmap field...)
+         * XXX Add a full popmap to be used for the domain marker(s).
          */
         for (i = 0; i < VM_LEVEL_0_NPAGES; i++)
 		popmap_set(vm_reserv_popmap_full, i);
@@ -1555,7 +1579,7 @@ vm_reserv_startup(vm_offset_t *vaddr, vm_paddr_t end)
 	 * XXX Initialize the popmap pointers within each reservation struct.
 	 */
 	for (i = 0; i < count; i++) {
-		vm_reserv_array[i].popmap = &vm_reserv_popmap_array[i * NPOPMAP_MAX];
+		vm_reserv_array[i].popmap = &vm_reserv_popmap_array[i * reserv_npopmaps[1]];
 	}
 
 	/*
