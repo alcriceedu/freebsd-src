@@ -367,17 +367,18 @@ sysctl_vm_reserv_fullpop(SYSCTL_HANDLER_ARGS)
 	fullpop = 0;
 	for (segind = 0; segind < vm_phys_nsegs; segind++) {
 		seg = &vm_phys_segs[segind];
-		paddr = roundup2(seg->start, VM_LEVEL_0_SIZE);
+		paddr = roundup2(seg->start, VM_LEVEL_1_SIZE);
 #ifdef VM_PHYSSEG_SPARSE
-		rv = seg->first_reserv + (paddr >> VM_LEVEL_0_SHIFT) -
-		    (seg->start >> VM_LEVEL_0_SHIFT);
+		rv = seg->first_reserv + (paddr >> VM_LEVEL_1_SHIFT) -
+		    (seg->start >> VM_LEVEL_1_SHIFT);
 #else
-		rv = &vm_reserv_array[paddr >> VM_LEVEL_0_SHIFT];
+		rv = &vm_reserv_array[paddr >> VM_LEVEL_1_SHIFT];
 #endif
-		while (paddr + VM_LEVEL_0_SIZE > paddr && paddr +
-		    VM_LEVEL_0_SIZE <= seg->end) {
-			fullpop += rv->popcnt == VM_LEVEL_0_NPAGES;
-			paddr += VM_LEVEL_0_SIZE;
+		while (paddr + VM_LEVEL_1_SIZE > paddr && paddr +
+		    VM_LEVEL_1_SIZE <= seg->end) {
+			// XXX Only count 2MB reservations, for testing purposes
+			fullpop += (rv->rsind == 0) && (rv->popcnt == VM_LEVEL_0_NPAGES);
+			paddr += VM_LEVEL_1_SIZE;
 			rv++;
 		}
 	}
@@ -404,11 +405,11 @@ sysctl_vm_reserv_partpopq(SYSCTL_HANDLER_ARGS)
 			counter = 0;
 			unused_pages = 0;
 			vm_reserv_domain_lock(domain);
-			TAILQ_FOREACH(rv, &vm_rvd[domain].partpop, partpopq) { // XXX Needs to work with both lists
-				if (rv == &vm_rvd[domain].marker)
+			TAILQ_FOREACH(rv, &vm_rvd[domain].partpop[level + 1], partpopq) {
+				if (rv == &vm_rvd[domain].marker[level + 1])
 					continue;
 				counter++;
-				unused_pages += VM_LEVEL_0_NPAGES - rv->popcnt;
+				unused_pages += reserv_pages[level + 1] - rv->popcnt;
 			}
 			vm_reserv_domain_unlock(domain);
 			sbuf_printf(&sbuf, "%6d, %7d, %6dK, %6d\n",
