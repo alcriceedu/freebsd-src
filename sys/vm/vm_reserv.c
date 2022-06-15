@@ -266,7 +266,7 @@ static popmap_t *vm_reserv_popmap_array;
  * A single popmap that will be initialized to be completely full, to be used
  * in the marker field of a struct vm_reserv_domain.
  */
-static popmap_t vm_reserv_popmap_full[NPOPMAP_MAX]; // Level 0 size
+static popmap_t vm_reserv_popmap_full[NPOPMAP_MAX]; // XXX Level 0 size
 
 /*
  * The per-domain partially populated reservation queues
@@ -447,7 +447,7 @@ vm_reserv_remove(vm_reserv_t rv)
  * Insert a new reservation into the object's objq.
  */
 static void
-vm_reserv_insert(vm_reserv_t rv, vm_object_t object, vm_pindex_t pindex)
+vm_reserv_insert(vm_reserv_t rv, vm_object_t object, vm_pindex_t pindex, uint8_t rsind)
 {
 	int i;
 
@@ -469,6 +469,7 @@ vm_reserv_insert(vm_reserv_t rv, vm_object_t object, vm_pindex_t pindex)
 	rv->pindex = pindex;
 	rv->object = object;
 	rv->lasttick = ticks;
+	rv->rsind = rsind;
 	LIST_INSERT_HEAD(&object->rvq, rv, objq);
 	vm_reserv_object_unlock(object);
 }
@@ -497,11 +498,11 @@ vm_reserv_depopulate(vm_reserv_t rv, int index)
 	KASSERT(rv->domain < vm_ndomains,
 	    ("vm_reserv_depopulate: reserv %p's domain is corrupted %d",
 	    rv, rv->domain));
-	if (rv->popcnt == VM_LEVEL_0_NPAGES) {
-		KASSERT(rv->pages->psind == 1,
+	if (rv->popcnt == reserv_pages[rv->rsind]) {
+		KASSERT(rv->pages->psind == rv->rsind + 1, // XXX Won't be correct until reindexing
 		    ("vm_reserv_depopulate: reserv %p is already demoted",
 		    rv));
-		rv->pages->psind = 0;
+		rv->pages->psind = 0; // YYY Not quite sure what this should be set to, since we might have a mix of 4K and 64K pages
 	}
 	popmap_clear(rv->popmap, index);
 	rv->popcnt--;
@@ -524,7 +525,7 @@ vm_reserv_depopulate(vm_reserv_t rv, int index)
 	if (rv->popcnt == 0) {
 		vm_reserv_remove(rv);
 		vm_domain_free_lock(vmd);
-		vm_phys_free_pages(rv->pages, VM_LEVEL_0_ORDER);
+		vm_phys_free_pages(rv->pages, reserv_pages[rv->rsind]);
 		vm_domain_free_unlock(vmd);
 		counter_u64_add(vm_reserv_freed, 1);
 	}
@@ -593,7 +594,7 @@ static __inline boolean_t
 vm_reserv_has_pindex(vm_reserv_t rv, vm_pindex_t pindex)
 {
 
-	return (((pindex - rv->pindex) & ~(VM_LEVEL_0_NPAGES - 1)) == 0);
+	return (((pindex - rv->pindex) & ~(reserv_pages[rv->rsind] - 1)) == 0);
 }
 
 /*
@@ -612,9 +613,9 @@ vm_reserv_populate(vm_reserv_t rv, int index)
 	KASSERT(popmap_is_clear(rv->popmap, index),
 	    ("vm_reserv_populate: reserv %p's popmap[%d] is set", rv,
 	    index));
-	KASSERT(rv->popcnt < VM_LEVEL_0_NPAGES,
+	KASSERT(rv->popcnt < reserv_pages[rv->rsind],
 	    ("vm_reserv_populate: reserv %p is already full", rv));
-	KASSERT(rv->pages->psind == 0,
+	KASSERT(rv->pages->psind != rv->rsind + 1, // XXX Also won't be correct until reindexing
 	    ("vm_reserv_populate: reserv %p is already promoted", rv));
 	KASSERT(rv->domain < vm_ndomains,
 	    ("vm_reserv_populate: reserv %p's domain is corrupted %d",
@@ -622,7 +623,7 @@ vm_reserv_populate(vm_reserv_t rv, int index)
 	popmap_set(rv->popmap, index);
 	rv->popcnt++;
 	if ((unsigned)(ticks - rv->lasttick) < PARTPOPSLOP &&
-	    rv->inpartpopq && rv->popcnt != VM_LEVEL_0_NPAGES)
+	    rv->inpartpopq && rv->popcnt != reserv_pages[rv->rsind])
 		return;
 	rv->lasttick = ticks;
 	vm_reserv_domain_lock(rv->domain);
@@ -630,14 +631,14 @@ vm_reserv_populate(vm_reserv_t rv, int index)
 		TAILQ_REMOVE(&vm_rvd[rv->domain].partpop[rv->rsind], rv, partpopq);
 		rv->inpartpopq = FALSE;
 	}
-	if (rv->popcnt < VM_LEVEL_0_NPAGES) {
+	if (rv->popcnt < reserv_pages[rv->rsind]) {
 		rv->inpartpopq = TRUE;
 		TAILQ_INSERT_TAIL(&vm_rvd[rv->domain].partpop[rv->rsind], rv, partpopq);
 	} else {
-		KASSERT(rv->pages->psind == 0,
+		KASSERT(rv->pages->psind == 0, // YYY Also not sure what this should be, given multiple possible pages sizes
 		    ("vm_reserv_populate: reserv %p is already promoted",
 		    rv));
-		rv->pages->psind = 1;
+		rv->pages->psind = rv->rsind;
 	}
 	vm_reserv_domain_unlock(rv->domain);
 }
@@ -1182,7 +1183,7 @@ vm_reserv_level(vm_page_t m)
 	vm_reserv_t rv;
 
 	rv = vm_reserv_from_page(m);
-	return (rv->object != NULL ? 0 : -1);
+	return (rv->object != NULL ? rv->rsind : -1);
 }
 
 /*
@@ -1195,7 +1196,7 @@ vm_reserv_level_iffullpop(vm_page_t m)
 	vm_reserv_t rv;
 
 	rv = vm_reserv_from_page(m);
-	return (rv->popcnt == VM_LEVEL_0_NPAGES ? 0 : -1);
+	return (rv->popcnt == reserv_pages[rv->rsind] ? 0 : -1);
 }
 
 /*
@@ -1293,9 +1294,9 @@ vm_reserv_find_contig(vm_reserv_t rv, int npages, int lo,
 	int bitpos, bits_left, i, n;
 
 	vm_reserv_assert_locked(rv);
-	KASSERT(npages <= VM_LEVEL_0_NPAGES - 1,
+	KASSERT(npages <= reserv_pages[rv->rsind] - 1,
 	    ("%s: Too many pages", __func__));
-	KASSERT(ppn_bound <= VM_LEVEL_0_NPAGES,
+	KASSERT(ppn_bound <= reserv_pages[rv->rsind],
 	    ("%s: Too big a boundary for reservation size", __func__));
 	KASSERT(npages <= ppn_bound,
 	    ("%s: Too many pages for given boundary", __func__));
@@ -1332,13 +1333,13 @@ vm_reserv_find_contig(vm_reserv_t rv, int npages, int lo,
 			if (lo < roundup2(lo, ppn_align)) {
 				/* Skip to next aligned page. */
 				lo = roundup2(lo, ppn_align);
-				if (lo >= VM_LEVEL_0_NPAGES)
+				if (lo >= reserv_pages[rv->rsind])
 					return (-1);
 			}
 			if (lo + npages > roundup2(lo, ppn_bound)) {
 				/* Skip to next boundary-matching page. */
 				lo = roundup2(lo, ppn_bound);
-				if (lo >= VM_LEVEL_0_NPAGES)
+				if (lo >= reserv_pages[rv->rsind])
 					return (-1);
 			}
 			if (lo + npages <= hi)
@@ -1499,6 +1500,8 @@ vm_reserv_size(int level)
 {
 
 	switch (level) {
+	case 1:
+		return (VM_LEVEL_1_SIZE);
 	case 0:
 		return (VM_LEVEL_0_SIZE);
 	case -1:
@@ -1598,7 +1601,11 @@ vm_reserv_to_superpage(vm_page_t m)
 
 	VM_OBJECT_ASSERT_LOCKED(m->object);
 	rv = vm_reserv_from_page(m);
-	if (rv->object == m->object && rv->popcnt == VM_LEVEL_0_NPAGES)
+	/*
+	 * XXX The following will need to be adjusted if we want to return, say,
+	 * a component 64KB page of a 2MB reservation that is not yet fully populated.
+	 */
+	if (rv->object == m->object && rv->popcnt == reserv_pages[rv->rsind])
 		m = rv->pages;
 	else
 		m = NULL;
