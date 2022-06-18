@@ -500,10 +500,10 @@ vm_reserv_depopulate(vm_reserv_t rv, int index)
 	    ("vm_reserv_depopulate: reserv %p's domain is corrupted %d",
 	    rv, rv->domain));
 	if (rv->popcnt == reserv_pages[rv->rsind]) {
-		KASSERT(rv->pages->psind == rv->rsind + 1, // XXX Won't be correct until reindexing
+		KASSERT(rv->pages->psind == 1, // XXX Fixed value for now
 		    ("vm_reserv_depopulate: reserv %p is already demoted",
 		    rv));
-		rv->pages->psind = 0; // YYY Not quite sure what this should be set to, since we might have a mix of 4K and 64K pages
+		rv->pages->psind = 0; // XXX Fixed value for now (eventually will be more sophisticated)
 	}
 	popmap_clear(rv->popmap, index);
 	rv->popcnt--;
@@ -616,7 +616,7 @@ vm_reserv_populate(vm_reserv_t rv, int index)
 	    index));
 	KASSERT(rv->popcnt < reserv_pages[rv->rsind],
 	    ("vm_reserv_populate: reserv %p is already full", rv));
-	KASSERT(rv->pages->psind != rv->rsind + 1, // XXX Also won't be correct until reindexing
+	KASSERT(rv->pages->psind == 0, // XXX Fixed for now
 	    ("vm_reserv_populate: reserv %p is already promoted", rv));
 	KASSERT(rv->domain < vm_ndomains,
 	    ("vm_reserv_populate: reserv %p's domain is corrupted %d",
@@ -636,7 +636,7 @@ vm_reserv_populate(vm_reserv_t rv, int index)
 		rv->inpartpopq = TRUE;
 		TAILQ_INSERT_TAIL(&vm_rvd[rv->domain].partpop[rv->rsind], rv, partpopq);
 	} else {
-		KASSERT(rv->pages->psind == 0, // YYY Also not sure what this should be, given multiple possible pages sizes
+		KASSERT(rv->pages->psind == 0, // XXX Fixed for now
 		    ("vm_reserv_populate: reserv %p is already promoted",
 		    rv));
 		rv->pages->psind = rv->rsind;
@@ -1197,7 +1197,7 @@ vm_reserv_level_iffullpop(vm_page_t m)
 	vm_reserv_t rv;
 
 	rv = vm_reserv_from_page(m);
-	return (rv->popcnt == reserv_pages[rv->rsind] ? 0 : -1);
+	return (rv->popcnt == reserv_pages[rv->rsind] ? rv->rsind : -1);
 }
 
 /*
@@ -1227,7 +1227,7 @@ vm_reserv_dequeue(vm_reserv_t rv)
 	KASSERT(rv->inpartpopq,
 	    ("vm_reserv_reclaim: reserv %p's inpartpopq is FALSE", rv));
 
-	TAILQ_REMOVE(&vm_rvd[rv->domain].partpop[rv->rvsind], rv, partpopq);
+	TAILQ_REMOVE(&vm_rvd[rv->domain].partpop[rv->rsind], rv, partpopq);
 	rv->inpartpopq = FALSE;
 }
 
