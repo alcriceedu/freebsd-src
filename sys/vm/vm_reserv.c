@@ -111,7 +111,7 @@ __FBSDID("$FreeBSD$");
 
 #define MAXRESERVSIZES 2
 
-// static size_t reserv_orders[MAXRESERVSIZES] = {VM_LEVEL_0_ORDER, VM_LEVEL_1_ORDER};
+static size_t reserv_orders[MAXRESERVSIZES] = {VM_LEVEL_0_ORDER, VM_LEVEL_1_ORDER};
 static size_t reserv_pages[MAXRESERVSIZES] = {VM_LEVEL_0_NPAGES, VM_LEVEL_1_NPAGES};
 // static size_t reserv_shifts[MAXRESERVSIZES] = {VM_LEVEL_0_SHIFT, VM_LEVEL_1_SHIFT};
 // static size_t reserv_sizes[MAXRESERVSIZES] = {VM_LEVEL_0_SIZE, VM_LEVEL_1_SIZE};
@@ -526,7 +526,7 @@ vm_reserv_depopulate(vm_reserv_t rv, int index)
 	if (rv->popcnt == 0) {
 		vm_reserv_remove(rv);
 		vm_domain_free_lock(vmd);
-		vm_phys_free_pages(rv->pages, reserv_pages[rv->rsind]);
+		vm_phys_free_pages(rv->pages, reserv_orders[rv->rsind]);
 		vm_domain_free_unlock(vmd);
 		counter_u64_add(vm_reserv_freed, 1);
 	}
@@ -543,10 +543,10 @@ vm_reserv_from_page(vm_page_t m)
 	struct vm_phys_seg *seg;
 
 	seg = &vm_phys_segs[m->segind];
-	return (seg->first_reserv + 32 * (VM_PAGE_TO_PHYS(m) >> VM_LEVEL_0_SHIFT) -
-	    (seg->start >> VM_LEVEL_0_SHIFT));
+	return (seg->first_reserv + ((VM_PAGE_TO_PHYS(m) & ~(VM_LEVEL_0_SIZE - 1))
+	    >> VM_LEVEL_1_SHIFT) - (seg->start >> VM_LEVEL_1_SHIFT)); // XXX Fudge to use appropriate 2MB aligned reservation for now
 #else
-	return (&vm_reserv_array[32 * (VM_PAGE_TO_PHYS(m) >> VM_LEVEL_0_SHIFT)]); // XXX Fudge to use appropriate 2MB aligned reservation for now
+	return (&vm_reserv_array[(VM_PAGE_TO_PHYS(m) & ~(VM_LEVEL_0_SIZE - 1)) >> VM_LEVEL_1_SHIFT]);
 #endif
 }
 
@@ -639,7 +639,7 @@ vm_reserv_populate(vm_reserv_t rv, int index)
 		KASSERT(rv->pages->psind == 0, // XXX Fixed for now
 		    ("vm_reserv_populate: reserv %p is already promoted",
 		    rv));
-		rv->pages->psind = rv->rsind;
+		rv->pages->psind = 1; // XXX Fixed for now (rv->rsind + 1)
 	}
 	vm_reserv_domain_unlock(rv->domain);
 }
