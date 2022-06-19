@@ -1089,10 +1089,13 @@ pmap_init(void)
 	if (superpages_enabled) {
 		KASSERT(MAXPAGESIZES > 1 && pagesizes[1] == 0,
 		    ("pmap_init: can't assign to pagesizes[1]"));
-		pagesizes[1] = L2_SIZE;
+		pagesizes[1] = L3C_SIZE;
 		KASSERT(MAXPAGESIZES > 2 && pagesizes[2] == 0,
 		    ("pmap_init: can't assign to pagesizes[2]"));
-		pagesizes[2] = L1_SIZE;
+		pagesizes[2] = L2_SIZE;
+		KASSERT(MAXPAGESIZES > 3 && pagesizes[3] == 0,
+		    ("pmap_init: can't assign to pagesizes[3]"));
+		pagesizes[3] = L1_SIZE;
 	}
 
 	/*
@@ -3981,7 +3984,7 @@ pmap_enter_largepage(pmap_t pmap, vm_offset_t va, pt_entry_t newpte, int flags,
 	    (newpte & ~ATTR_MASK), newpte, psind));
 
 restart:
-	if (psind == 2) {
+	if (psind == 3) {
 		l0p = pmap_l0(pmap, va);
 		if ((pmap_load(l0p) & ATTR_DESCR_VALID) == 0) {
 			mp = _pmap_alloc_l3(pmap, pmap_l0_pindex(va), NULL);
@@ -4012,7 +4015,7 @@ restart:
 		    ("va %#lx changing 1G phys page l1 %#lx newpte %#lx",
 		    va, origpte, newpte));
 		pmap_store(l1p, newpte);
-	} else /* (psind == 1) */ {
+	} else { /* (psind == 2) */
 		l2p = pmap_l2(pmap, va);
 		if (l2p == NULL) {
 			mp = _pmap_alloc_l3(pmap, pmap_l1_pindex(va), NULL);
@@ -4042,7 +4045,7 @@ restart:
 		    ("va %#lx changing 2M phys page l2 %#lx newpte %#lx",
 		    va, origpte, newpte));
 		pmap_store(l2p, newpte);
-	}
+	} // XXX Need a psind == 1 case here
 	dsb(ishst);
 
 	if ((origpte & ATTR_DESCR_VALID) == 0)
@@ -4138,14 +4141,17 @@ pmap_enter(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 		KASSERT((m->oflags & VPO_UNMANAGED) != 0,
 		    ("managed largepage va %#lx flags %#x", va, flags));
 		new_l3 &= ~L3_PAGE;
-		if (psind == 2)
+		if (psind == 3)
 			new_l3 |= L1_BLOCK;
-		else /* (psind == 1) */
+		else if (psind == 2)
 			new_l3 |= L2_BLOCK;
+		else { /* (psind == 1) */
+			// XXX
+		}
 		rv = pmap_enter_largepage(pmap, va, new_l3, flags, psind);
 		goto out;
 	}
-	if (psind == 1) {
+	if (psind == 2) {
 		/* Assert the required virtual and physical alignment. */
 		KASSERT((va & L2_OFFSET) == 0, ("pmap_enter: va unaligned"));
 		KASSERT(m->psind > 0, ("pmap_enter: m->psind < psind"));
@@ -4638,7 +4644,7 @@ pmap_enter_object(pmap_t pmap, vm_offset_t start, vm_offset_t end,
 	while (m != NULL && (diff = m->pindex - m_start->pindex) < psize) {
 		va = start + ptoa(diff);
 		if ((va & L2_OFFSET) == 0 && va + L2_SIZE <= end &&
-		    m->psind == 1 && pmap_ps_enabled(pmap) &&
+		    m->psind == 2 && pmap_ps_enabled(pmap) &&
 		    pmap_enter_2mpage(pmap, va, m, prot, &lock))
 			m = &m[L2_SIZE / PAGE_SIZE - 1];
 		else if ((va & L3C_OFFSET) == 0 && va + L3C_SIZE <= end &&
