@@ -506,7 +506,7 @@ vm_reserv_depopulate(vm_reserv_t rv, int index)
 		rv->pages->psind = 1; // XXX Fixed at 64 KB for now
 	}
 	// XXX
-        if ((uint16_t *)rv->popmap)[index / 16] != 65535) {
+        if (((uint16_t *)rv->popmap)[index / 16] != 65535) {
 		rv->pages[16 * (index / 16)].psind = 0;
         }
 	popmap_clear(rv->popmap, index);
@@ -620,12 +620,16 @@ vm_reserv_populate(vm_reserv_t rv, int index)
 	    index));
 	KASSERT(rv->popcnt < reserv_pages[rv->rsind],
 	    ("vm_reserv_populate: reserv %p is already full", rv));
-	KASSERT(rv->pages->psind == 0, // XXX Fixed at 4 KB for now
+	KASSERT(rv->pages->psind < 2, // XXX Fixed at 4 KB and 64 KB for now
 	    ("vm_reserv_populate: reserv %p is already promoted", rv));
 	KASSERT(rv->domain < vm_ndomains,
 	    ("vm_reserv_populate: reserv %p's domain is corrupted %d",
 	    rv, rv->domain));
 	popmap_set(rv->popmap, index);
+	// XXX
+	if (((uint16_t *)rv->popmap)[index / 16] == 65535) {
+		rv->pages[16 * (index / 16)].psind = 1;
+	}
 	rv->popcnt++;
 	if ((unsigned)(ticks - rv->lasttick) < PARTPOPSLOP &&
 	    rv->inpartpopq && rv->popcnt != reserv_pages[rv->rsind])
@@ -635,10 +639,6 @@ vm_reserv_populate(vm_reserv_t rv, int index)
 	if (rv->inpartpopq) {
 		TAILQ_REMOVE(&vm_rvd[rv->domain].partpop[rv->rsind], rv, partpopq);
 		rv->inpartpopq = FALSE;
-	}
-	// XXX
-	if ((uint16_t *)rv->popmap)[index / 16] == 65535) {
-		rv->pages[16 * (index / 16)].psind = 1;
 	}
 	if (rv->popcnt < reserv_pages[rv->rsind]) {
 		rv->inpartpopq = TRUE;

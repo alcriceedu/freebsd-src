@@ -4015,7 +4015,7 @@ restart:
 		    ("va %#lx changing 1G phys page l1 %#lx newpte %#lx",
 		    va, origpte, newpte));
 		pmap_store(l1p, newpte);
-	} else { /* (psind == 2) */
+	} else if (psind == 2) {
 		l2p = pmap_l2(pmap, va);
 		if (l2p == NULL) {
 			mp = _pmap_alloc_l3(pmap, pmap_l1_pindex(va), NULL);
@@ -4045,7 +4045,9 @@ restart:
 		    ("va %#lx changing 2M phys page l2 %#lx newpte %#lx",
 		    va, origpte, newpte));
 		pmap_store(l2p, newpte);
-	} // XXX Need a psind == 1 case here
+	} else { /* (psind == 1) */
+		return (KERN_FAILURE); // XXX
+	}
 	dsb(ishst);
 
 	if ((origpte & ATTR_DESCR_VALID) == 0)
