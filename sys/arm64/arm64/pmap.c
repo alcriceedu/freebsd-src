@@ -4590,32 +4590,6 @@ pmap_enter_l2(pmap_t pmap, vm_offset_t va, pd_entry_t new_l2, u_int flags,
 }
 
 /*
- * Returns true if "m" is the start of a 64KB superpage.
- * XXX Explain why we iterate over the listq instead of vm_page_array.
- */
-static bool
-pmap_test_xxx(vm_page_t m)
-{
-	vm_paddr_t pa;
-	int i;
-
-	VM_OBJECT_ASSERT_LOCKED(m->object);
-	pa = VM_PAGE_TO_PHYS(m);
-	if ((pa & L3C_OFFSET) != 0)
-		return (false);
-	m = vm_page_next(m);
-	for (i = 1; i < L3C_ENTRIES; i++) {
-		if (m == NULL)
-			return (false);
-		pa += PAGE_SIZE;
-		if (pa != VM_PAGE_TO_PHYS(m))
-			return (false);
-		m = vm_page_next(m);
-	}
-	return (true);
-}
-
-/*
  * Maps a sequence of resident pages belonging to the same object.
  * The sequence begins with the given page m_start.  This page is
  * mapped at the given virtual address start.  Each subsequent page is
@@ -4650,7 +4624,7 @@ pmap_enter_object(pmap_t pmap, vm_offset_t start, vm_offset_t end,
 		    pmap_enter_2mpage(pmap, va, m, prot, &lock))
 			m = &m[L2_SIZE / PAGE_SIZE - 1];
 		else if ((va & L3C_OFFSET) == 0 && va + L3C_SIZE <= end &&
-		    pmap_test_xxx(m) && pmap_ps_enabled(pmap) && (mpte =
+		    m->psind == 1 && pmap_ps_enabled(pmap) && (mpte =
 		    pmap_enter_l3c(pmap, va, m, prot, mpte, &lock)) != NULL)
 			m = &m[L3C_ENTRIES - 1];
 		else
