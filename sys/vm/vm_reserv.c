@@ -547,10 +547,11 @@ vm_reserv_from_page(vm_page_t m)
 	struct vm_phys_seg *seg;
 
 	seg = &vm_phys_segs[m->segind];
-	return (seg->first_reserv + ((VM_PAGE_TO_PHYS(m) & ~(VM_LEVEL_0_SIZE - 1))
-	    >> VM_LEVEL_1_SHIFT) - (seg->start >> VM_LEVEL_1_SHIFT)); // XXX Fudge to use appropriate 2 MB aligned reservation for now
+	/* XXX Fudge to use appropriate 2 MB aligned reservation for now (start will need to be rounded down later) */
+	return (seg->first_reserv + 32 * ((VM_PAGE_TO_PHYS(m) >> VM_LEVEL_0_SHIFT)
+	    - (seg->start >> VM_LEVEL_0_SHIFT)));
 #else
-	return (&vm_reserv_array[(VM_PAGE_TO_PHYS(m) & ~(VM_LEVEL_0_SIZE - 1)) >> VM_LEVEL_1_SHIFT]);
+	return (&vm_reserv_array[32 * (VM_PAGE_TO_PHYS(m) >> VM_LEVEL_0_SHIFT)]);
 #endif
 }
 
@@ -1128,15 +1129,15 @@ vm_reserv_init(void)
 		seg = &vm_phys_segs[segind];
 #ifdef VM_PHYSSEG_SPARSE
 		seg->first_reserv = &vm_reserv_array[used];
-		used += howmany(seg->end, VM_LEVEL_1_SIZE) -
-		    seg->start / VM_LEVEL_1_SIZE;
+		used += roundup2(seg->end, VM_LEVEL_0_SIZE) / VM_LEVEL_1_SIZE -
+		    rounddown2(seg->start, VM_LEVEL_0_SIZE) / VM_LEVEL_1_SIZE;
 #else
 		seg->first_reserv =
-		    &vm_reserv_array[seg->start >> VM_LEVEL_1_SHIFT];
+		    &vm_reserv_array[rounddown2(seg->start, VM_LEVEL_0_SIZE) >> VM_LEVEL_1_SHIFT];
 #endif
 		paddr = roundup2(seg->start, VM_LEVEL_1_SIZE);
 		rv = seg->first_reserv + (paddr >> VM_LEVEL_1_SHIFT) -
-		    (seg->start >> VM_LEVEL_1_SHIFT);
+		    (rounddown2(seg->start, VM_LEVEL_0_SIZE) >> VM_LEVEL_1_SHIFT);
 		while (paddr + VM_LEVEL_1_SIZE > paddr && paddr +
 		    VM_LEVEL_1_SIZE <= seg->end) {
 			rv->pages = PHYS_TO_VM_PAGE(paddr);
@@ -1535,21 +1536,21 @@ vm_reserv_startup(vm_offset_t *vaddr, vm_paddr_t end)
 	count = 0;
 	for (i = 0; i < vm_phys_nsegs; i++) {
 #ifdef VM_PHYSSEG_SPARSE
-		count += howmany(vm_phys_segs[i].end, VM_LEVEL_1_SIZE) -
-		    vm_phys_segs[i].start / VM_LEVEL_1_SIZE;
+		count += roundup2(vm_phys_segs[i].end, VM_LEVEL_0_SIZE) / VM_LEVEL_1_SIZE
+		    - rounddown2(vm_phys_segs[i].start, VM_LEVEL_0_SIZE) / VM_LEVEL_1_SIZE;
 #else
 		count = MAX(count,
-		    howmany(vm_phys_segs[i].end, VM_LEVEL_1_SIZE));
+		    roundup2(vm_phys_segs[i].end, VM_LEVEL_0_SIZE) / VM_LEVEL_1_SIZE);
 #endif
 	}
 
 	for (i = 0; phys_avail[i + 1] != 0; i += 2) {
 #ifdef VM_PHYSSEG_SPARSE
-		count += howmany(phys_avail[i + 1], VM_LEVEL_1_SIZE) -
-		    phys_avail[i] / VM_LEVEL_1_SIZE;
+		count += roundup2(phys_avail[i + 1], VM_LEVEL_0_SIZE) / VM_LEVEL_1_SIZE -
+		    rounddown2(phys_avail[i], VM_LEVEL_0_SIZE) / VM_LEVEL_1_SIZE;
 #else
 		count = MAX(count,
-		    howmany(phys_avail[i + 1], VM_LEVEL_1_SIZE));
+		    roundup2(phys_avail[i + 1], VM_LEVEL_0_SIZE) / VM_LEVEL_1_SIZE);
 #endif
 	}
 
