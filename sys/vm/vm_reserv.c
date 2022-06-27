@@ -1212,19 +1212,6 @@ vm_reserv_level_iffullpop(vm_page_t m)
 }
 
 /*
- * XXX
- */
-bool
-vm_reserv_xxx(vm_page_t m)
-{
-	vm_reserv_t rv;
-
-	rv = vm_reserv_from_page(m);
-	return (rv->object != NULL &&
-	    ((uint16_t *)rv->popmap)[(m - rv->pages) / 16] == 65535);
-}
-
-/*
  * Remove a partially populated reservation from the queue.
  */
 static void

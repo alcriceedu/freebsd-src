@@ -4085,7 +4085,7 @@ pmap_enter(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 	vm_paddr_t opa, pa;
 	vm_page_t mpte, om;
 	boolean_t nosleep;
-	int lvl, rv;
+	int lvl, rv, rvlvl;
 
 	KASSERT(ADDR_IS_CANONICAL(va),
 	    ("%s: Address not in canonical form: %lx", __func__, va));
@@ -4383,24 +4383,20 @@ validate:
 
 #if VM_NRESERVLEVEL > 0
 	/*
-	 * XXX
+	 * Try to promote from level 3 pages to a level 3 contiguous superpage, and then to
+	 * a level 2 superpage. This currently only works on stage 1 pmaps as pmap_promote_l2
+	 * looks at stage 1 specific fields and performs a break-before-make sequence that is
+	 * incorrect for a stage 2 pmap.
 	 */
-	if ((mpte == NULL || mpte->ref_count >= L3C_ENTRIES) &&
-	    (m->flags & PG_FICTITIOUS) == 0 && vm_reserv_xxx(m) &&
-	    pmap_ps_enabled(pmap))
-		pmap_promote_l3c(pmap, l3, va);
-
-	/*
-	 * Try to promote from level 3 pages to a level 2 superpage. This
-	 * currently only works on stage 1 pmaps as pmap_promote_l2 looks at
-	 * stage 1 specific fields and performs a break-before-make sequence
-	 * that is incorrect a stage 2 pmap.
-	 */
-	if ((mpte == NULL || mpte->ref_count == NL3PG) &&
-	    pmap_ps_enabled(pmap) && pmap->pm_stage == PM_STAGE1 &&
-	    (m->flags & PG_FICTITIOUS) == 0 &&
-	    vm_reserv_level_iffullpop(m) == 1) {
-		pmap_promote_l2(pmap, pde, va, &lock);
+	if ((mpte == NULL || mpte->ref_count >= L3C_ENTRIES) && pmap_ps_enabled(pmap) &&
+	    pmap->pm_stage == PM_STAGE1 && (m->flags & PG_FICTITIOUS) == 0) {
+		rvlvl = vm_reserv_level_iffullpop(m);
+		if (rvlvl >= 0) {
+			pmap_promote_l3c(pmap, l3, va);
+		}
+		if (rvlvl >= 1) {
+			pmap_promote_l2(pmap, pde, va, &lock);
+		}
 	}
 #endif
 
