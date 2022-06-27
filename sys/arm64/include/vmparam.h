@@ -99,17 +99,24 @@
 #define	VM_NFREEORDER		12
 
 /*
- * Enable superpage reservations: 1 level.
+ * Enable superpage reservations: 2 levels.
  */
 #ifndef	VM_NRESERVLEVEL
-#define	VM_NRESERVLEVEL		1
+#define	VM_NRESERVLEVEL		2
 #endif
 
 /*
- * Level 0 reservations consist of 512 pages.
+ * Level 0 reservations consist of 16 pages.
  */
 #ifndef	VM_LEVEL_0_ORDER
-#define	VM_LEVEL_0_ORDER	9
+#define	VM_LEVEL_0_ORDER	4
+#endif
+
+/*
+ * Level 1 reservations consist of 512 pages.
+ */
+#ifndef	VM_LEVEL_1_ORDER
+#define	VM_LEVEL_1_ORDER	9
 #endif
 
 /**

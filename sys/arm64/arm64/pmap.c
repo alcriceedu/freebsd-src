@@ -4399,7 +4399,7 @@ validate:
 	if ((mpte == NULL || mpte->ref_count == NL3PG) &&
 	    pmap_ps_enabled(pmap) && pmap->pm_stage == PM_STAGE1 &&
 	    (m->flags & PG_FICTITIOUS) == 0 &&
-	    vm_reserv_level_iffullpop(m) == 0) {
+	    vm_reserv_level_iffullpop(m) == 1) {
 		pmap_promote_l2(pmap, pde, va, &lock);
 	}
 #endif
