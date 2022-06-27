@@ -78,7 +78,7 @@ vm_domainset_iter_init(struct vm_domainset_iter *di, struct domainset *ds,
 			 * reservation boundary.
 			 */
 			pindex += obj->pg_color;
-			pindex >>= VM_LEVEL_0_ORDER;
+			pindex >>= VM_LEVEL_1_ORDER; // XXX
 		} else
 #endif
 			pindex /= vm_domainset_default_stride;
