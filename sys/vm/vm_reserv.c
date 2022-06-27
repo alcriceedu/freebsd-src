@@ -540,16 +540,22 @@ vm_reserv_depopulate(vm_reserv_t rv, int index)
 static __inline vm_reserv_t
 vm_reserv_from_page(vm_page_t m)
 {
+	vm_reserv_t rv;
 #ifdef VM_PHYSSEG_SPARSE
 	struct vm_phys_seg *seg;
 
 	seg = &vm_phys_segs[m->segind];
-	/* XXX Fudge to use appropriate 2 MB aligned reservation for now (start will need to be rounded down later) */
-	return (seg->first_reserv + 32 * ((VM_PAGE_TO_PHYS(m) >> VM_LEVEL_1_SHIFT)
+	rv = (seg->first_reserv + 32 * ((VM_PAGE_TO_PHYS(m) >> VM_LEVEL_1_SHIFT)
 	    - (seg->start >> VM_LEVEL_1_SHIFT)));
 #else
-	return (&vm_reserv_array[32 * (VM_PAGE_TO_PHYS(m) >> VM_LEVEL_1_SHIFT)]);
+	rv = (&vm_reserv_array[32 * (VM_PAGE_TO_PHYS(m) >> VM_LEVEL_1_SHIFT)]);
 #endif
+	if (rv->object != NULL) { /* Level 1 reservation */
+		return (rv);
+	} else { /* Level 0 reservation */
+		return (rv + ((VM_PAGE_TO_PHYS(m) >> VM_LEVEL_0_SHIFT) &
+		    ((1 << (VM_LEVEL_1_SHIFT - VM_LEVEL_0_SHIFT)) - 1)));
+	}
 }
 
 /*
