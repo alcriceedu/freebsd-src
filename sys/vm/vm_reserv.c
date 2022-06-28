@@ -554,7 +554,7 @@ vm_reserv_from_page(vm_page_t m)
 		return (rv);
 	} else { /* Level 0 reservation */
 		return (rv + ((VM_PAGE_TO_PHYS(m) >> VM_LEVEL_0_SHIFT) &
-		    ((1 << (VM_LEVEL_1_SHIFT - VM_LEVEL_0_SHIFT)) - 1)));
+		    ((1UL << (VM_LEVEL_1_SHIFT - VM_LEVEL_0_SHIFT)) - 1)));
 	}
 }
 
