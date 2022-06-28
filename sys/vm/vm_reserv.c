@@ -1138,8 +1138,9 @@ vm_reserv_init(void)
 		seg->first_reserv =
 		    &vm_reserv_array[rounddown2(seg->start, VM_LEVEL_1_SIZE) >> VM_LEVEL_0_SHIFT];
 #endif
-		paddr = rounddown2(seg->start, VM_LEVEL_1_SIZE);
-		rv = seg->first_reserv;
+		paddr = roundup2(seg->start, VM_LEVEL_0_SIZE);
+		rv = seg->first_reserv + (paddr >> VM_LEVEL_0_SHIFT) -
+		    (rounddown2(seg->start, VM_LEVEL_1_SIZE) >> VM_LEVEL_0_SHIFT);
 		while (paddr + VM_LEVEL_0_SIZE > paddr && paddr +
 		    VM_LEVEL_0_SIZE <= seg->end) {
 			rv->pages = PHYS_TO_VM_PAGE(paddr);
