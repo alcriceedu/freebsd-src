@@ -879,14 +879,14 @@ vm_reserv_alloc_page(vm_object_t object, vm_pindex_t pindex, int domain,
 	vm_page_t m, msucc;
 	vm_pindex_t first, leftcap, rightcap;
 	vm_reserv_t rv;
-	int index;
+	int index, rsind;
 
 	VM_OBJECT_ASSERT_WLOCKED(object);
 
 	/*
 	 * Is a reservation fundamentally impossible?
 	 */
-	if (pindex < VM_RESERV_INDEX(object, pindex, VM_LEVEL_1_NPAGES) || // XXX Fixed at 2 MB for now
+	if (pindex < VM_RESERV_INDEX(object, pindex, VM_LEVEL_0_NPAGES) ||
 	    pindex >= object->size)
 		return (NULL);
 
@@ -899,7 +899,7 @@ vm_reserv_alloc_page(vm_object_t object, vm_pindex_t pindex, int domain,
 		    ("vm_reserv_alloc_page: domain mismatch"));
 		domain = rv->domain;
 		vmd = VM_DOMAIN(domain);
-		index = VM_RESERV_INDEX(object, pindex, VM_LEVEL_1_NPAGES);
+		index = VM_RESERV_INDEX(object, pindex, reserv_pages[rv->rsind]);
 		m = &rv->pages[index];
 		vm_reserv_lock(rv);
 		/* Handle reclaim race. */
@@ -918,74 +918,78 @@ out:
 		return (m);
 	}
 
-	/*
-	 * Could a reservation fit between the first index to the left that
-	 * can be used and the first index to the right that cannot be used?
-	 *
-	 * We must synchronize with the reserv object lock to protect the
-	 * pindex/object of the resulting reservations against rename while
-	 * we are inspecting.
-	 */
-	first = pindex - VM_RESERV_INDEX(object, pindex, VM_LEVEL_1_NPAGES);
-	vm_reserv_object_lock(object);
-	if (mpred != NULL) {
-		if ((rv = vm_reserv_from_page(mpred))->object != object)
-			leftcap = mpred->pindex + 1;
-		else
-			leftcap = rv->pindex + VM_LEVEL_1_NPAGES;
-		if (leftcap > first) {
-			vm_reserv_object_unlock(object);
-			return (NULL);
+	for (rsind = VM_NRESERVLEVEL - 1; rsind >= 0; rsind--) {
+		/*
+		 * Could a reservation fit between the first index to the left that
+		 * can be used and the first index to the right that cannot be used?
+		 *
+		 * We must synchronize with the reserv object lock to protect the
+		 * pindex/object of the resulting reservations against rename while
+		 * we are inspecting.
+		 */
+		first = pindex - VM_RESERV_INDEX(object, pindex, reserv_pages[rsind]);
+		vm_reserv_object_lock(object);
+		if (mpred != NULL) {
+			if ((rv = vm_reserv_from_page(mpred))->object != object)
+				leftcap = mpred->pindex + 1;
+			else
+				leftcap = rv->pindex + reserv_pages[rv->rsind];
+			if (leftcap > first) {
+				vm_reserv_object_unlock(object);
+				continue;
+			}
 		}
+		if (msucc != NULL) {
+			if ((rv = vm_reserv_from_page(msucc))->object != object)
+				rightcap = msucc->pindex;
+			else
+				rightcap = rv->pindex;
+			if (first + reserv_pages[rsind] > rightcap) {
+				vm_reserv_object_unlock(object);
+				continue;
+			}
+		}
+		vm_reserv_object_unlock(object);
+
+		/*
+		 * Would the last new reservation extend past the end of the object?
+		 *
+		 * If the object is unlikely to grow don't allocate a reservation for
+		 * the tail.
+		 */
+		if ((object->flags & OBJ_ANON) == 0 &&
+		    first + reserv_pages[rsind] > object->size)
+			continue;
+
+		/*
+		 * Allocate and populate the new reservation.
+		 */
+		m = NULL;
+		vmd = VM_DOMAIN(domain);
+		if (vm_domain_allocate(vmd, req, 1)) {
+			vm_domain_free_lock(vmd);
+			m = vm_phys_alloc_pages(domain, VM_FREEPOOL_DEFAULT,
+			    reserv_orders[rsind]);
+			vm_domain_free_unlock(vmd);
+			if (m == NULL) {
+				vm_domain_freecnt_inc(vmd, 1);
+				continue;
+			}
+		} else
+			continue;
+		rv = vm_reserv_from_page(m);
+		vm_reserv_lock(rv);
+		KASSERT(rv->pages == m,
+		    ("vm_reserv_alloc_page: reserv %p's pages is corrupted", rv));
+		vm_reserv_insert(rv, object, first, rsind);
+		index = VM_RESERV_INDEX(object, pindex, reserv_pages[rsind]);
+		vm_reserv_populate(rv, index);
+		vm_reserv_unlock(rv);
+
+		return (&rv->pages[index]);
 	}
-	if (msucc != NULL) {
-		if ((rv = vm_reserv_from_page(msucc))->object != object)
-			rightcap = msucc->pindex;
-		else
-			rightcap = rv->pindex;
-		if (first + VM_LEVEL_1_NPAGES > rightcap) {
-			vm_reserv_object_unlock(object);
-			return (NULL);
-		}
-	}
-	vm_reserv_object_unlock(object);
 
-	/*
-	 * Would the last new reservation extend past the end of the object?
-	 *
-	 * If the object is unlikely to grow don't allocate a reservation for
-	 * the tail.
-	 */
-	if ((object->flags & OBJ_ANON) == 0 &&
-	    first + VM_LEVEL_1_NPAGES > object->size)
-		return (NULL);
-
-	/*
-	 * Allocate and populate the new reservation.
-	 */
-	m = NULL;
-	vmd = VM_DOMAIN(domain);
-	if (vm_domain_allocate(vmd, req, 1)) {
-		vm_domain_free_lock(vmd);
-		m = vm_phys_alloc_pages(domain, VM_FREEPOOL_DEFAULT,
-		    VM_LEVEL_1_ORDER);
-		vm_domain_free_unlock(vmd);
-		if (m == NULL) {
-			vm_domain_freecnt_inc(vmd, 1);
-			return (NULL);
-		}
-	} else
-		return (NULL);
-	rv = vm_reserv_from_page(m);
-	vm_reserv_lock(rv);
-	KASSERT(rv->pages == m,
-	    ("vm_reserv_alloc_page: reserv %p's pages is corrupted", rv));
-	vm_reserv_insert(rv, object, first, 1); // XXX Fixed rsind at 2 MB for now
-	index = VM_RESERV_INDEX(object, pindex, VM_LEVEL_1_NPAGES); // XXX Fixed at 2 MB for now
-	vm_reserv_populate(rv, index);
-	vm_reserv_unlock(rv);
-
-	return (&rv->pages[index]);
+	return (NULL);
 }
 
 /*
