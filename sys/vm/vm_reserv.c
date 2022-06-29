@@ -367,7 +367,7 @@ sysctl_vm_reserv_fullpop(SYSCTL_HANDLER_ARGS)
 		paddr = roundup2(seg->start, VM_LEVEL_0_SIZE);
 #ifdef VM_PHYSSEG_SPARSE
 		rv = seg->first_reserv + (paddr >> VM_LEVEL_0_SHIFT) -
-		    (seg->start >> VM_LEVEL_0_SHIFT);
+		    (rounddown2(seg->start, VM_LEVEL_1_SIZE) >> VM_LEVEL_0_SHIFT);
 #else
 		rv = &vm_reserv_array[paddr >> VM_LEVEL_0_SHIFT];
 #endif
@@ -398,7 +398,7 @@ sysctl_vm_reserv_partpopq(SYSCTL_HANDLER_ARGS)
 	sbuf_new_for_sysctl(&sbuf, NULL, 128, req);
 	sbuf_printf(&sbuf, "\nDOMAIN    LEVEL     SIZE  NUMBER\n\n");
 	for (domain = 0; domain < vm_ndomains; domain++) {
-		for (level = -1; level <= VM_NRESERVLEVEL - 2; level++) { // XXX Weird indexing...
+		for (level = -1; level <= VM_NRESERVLEVEL - 2; level++) {
 			counter = 0;
 			unused_pages = 0;
 			vm_reserv_domain_lock(domain);
@@ -460,7 +460,7 @@ vm_reserv_insert(vm_reserv_t rv, vm_object_t object, vm_pindex_t pindex, uint8_t
 	    ("vm_reserv_insert: reserv %p's popcnt is corrupted", rv));
 	KASSERT(!rv->inpartpopq,
 	    ("vm_reserv_insert: reserv %p's inpartpopq is TRUE", rv));
-	for (i = 0; i < NPOPMAP; i++)
+	for (i = 0; i < reserv_npopmaps[rv->rsind]; i++)
 		KASSERT(rv->popmap[i] == 0,
 		    ("vm_reserv_insert: reserv %p's popmap is corrupted", rv));
 	vm_reserv_object_lock(object);
@@ -496,7 +496,7 @@ vm_reserv_depopulate(vm_reserv_t rv, int index)
 	KASSERT(rv->domain < vm_ndomains,
 	    ("vm_reserv_depopulate: reserv %p's domain is corrupted %d",
 	    rv, rv->domain));
-	if (rv->popcnt == reserv_pages[rv->rsind]) {
+	if ((rv->rsind == 1) && (rv->popcnt == reserv_pages[rv->rsind])) {
 		KASSERT(rv->pages->psind == 2, // XXX Fixed at 2 MB for now
 		    ("vm_reserv_depopulate: reserv %p is already demoted",
 		    rv));
@@ -1145,7 +1145,6 @@ vm_reserv_init(void)
 		    VM_LEVEL_0_SIZE <= seg->end) {
 			rv->pages = PHYS_TO_VM_PAGE(paddr);
 			rv->domain = seg->domain;
-			rv->rsind = ((paddr & (VM_LEVEL_1_SIZE - 1)) == 0) ? 1 : 0; // XXX Only for testing
 			mtx_init(&rv->lock, "vm reserv", NULL, MTX_DEF);
 			paddr += VM_LEVEL_0_SIZE;
 			rv++;
