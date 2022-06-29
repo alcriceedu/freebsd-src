@@ -1200,8 +1200,8 @@ vm_reserv_level(vm_page_t m)
 }
 
 /*
- * Returns a reservation level if the given page belongs to a fully populated
- * reservation and -1 otherwise.
+ * Returns the level of the largest fully-populated (sub)reservation that a
+ * given page belongs to or -1 if none exists.
  */
 int
 vm_reserv_level_iffullpop(vm_page_t m)
@@ -1209,7 +1209,14 @@ vm_reserv_level_iffullpop(vm_page_t m)
 	vm_reserv_t rv;
 
 	rv = vm_reserv_from_page(m);
-	return (rv->popcnt == reserv_pages[rv->rsind] ? rv->rsind : -1);
+	if (rv->popcnt == reserv_pages[rv->rsind]) {
+		return (rv->rsind);
+	} else if ((rv->rsind == 1) && (((uint16_t *)rv->popmap)[(m - rv->pages)
+	    / 16] == 65535)) {
+		return (0);
+	} else {
+		return (-1);
+	}
 }
 
 /*
