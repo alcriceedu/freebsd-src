@@ -550,7 +550,7 @@ vm_reserv_from_page(vm_page_t m)
 #else
 	rv = (&vm_reserv_array[32 * (VM_PAGE_TO_PHYS(m) >> VM_LEVEL_1_SHIFT)]);
 #endif
-	if (rv->object != NULL) { /* Level 1 reservation */
+	if ((rv->rsind == 1) && (rv->object != NULL)) { /* Level 1 reservation */
 		return (rv);
 	} else { /* Level 0 reservation */
 		return (rv + ((VM_PAGE_TO_PHYS(m) >> VM_LEVEL_0_SHIFT) &
