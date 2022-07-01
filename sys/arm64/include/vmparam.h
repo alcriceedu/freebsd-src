@@ -209,7 +209,7 @@
 
 #define	KERNBASE		(VM_MIN_KERNEL_ADDRESS)
 #define	SHAREDPAGE		(VM_MAXUSER_ADDRESS - PAGE_SIZE)
-#define	USRSTACK		SHAREDPAGE
+#define	USRSTACK		(SHAREDPAGE & ~((1UL << (VM_LEVEL_1_ORDER + PAGE_SHIFT)) - 1))
 
 /*
  * How many physical pages per kmem arena virtual page.
