@@ -750,6 +750,10 @@ out:
 	}
 
 	for (rsind = VM_NRESERVLEVEL - 1; rsind >= 0; rsind--) {
+		if (npages > reserv_pages[rsind]) {
+			continue;
+		}
+
 		/*
 		 * Could at least one reservation fit between the first index to the
 		 * left that can be used ("leftcap") and the first index to the right
