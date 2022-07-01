@@ -7153,7 +7153,7 @@ pmap_mincore(pmap_t pmap, vm_offset_t addr, vm_paddr_t *pap)
 {
 	pt_entry_t *pte, tpte;
 	vm_paddr_t mask, pa;
-	int lvl, val;
+	int lvl, val, psind;
 	bool managed;
 
 	PMAP_ASSERT_STAGE1(pmap);
@@ -7165,12 +7165,15 @@ pmap_mincore(pmap_t pmap, vm_offset_t addr, vm_paddr_t *pap)
 		switch (lvl) {
 		case 3:
 			mask = L3_OFFSET;
+			psind = (tpte & ATTR_CONTIGUOUS) >> 52; // XXX
 			break;
 		case 2:
 			mask = L2_OFFSET;
+			psind = 2;
 			break;
 		case 1:
 			mask = L1_OFFSET;
+			psind = 3;
 			break;
 		default:
 			panic("pmap_mincore: invalid level %d", lvl);
@@ -7178,11 +7181,8 @@ pmap_mincore(pmap_t pmap, vm_offset_t addr, vm_paddr_t *pap)
 
 		managed = (tpte & ATTR_SW_MANAGED) != 0;
 		val = MINCORE_INCORE;
-		if (lvl != 3) {
-			/*
-			 * XXX 64KB pages?
-			 */
-			val |= MINCORE_PSIND(3 - lvl);
+		if (psind != 0) {
+			val |= MINCORE_PSIND(psind);
 		}
 		if ((managed && pmap_pte_dirty(pmap, tpte)) || (!managed &&
 		    (tpte & ATTR_S1_AP_RW_BIT) == ATTR_S1_AP(ATTR_S1_AP_RW)))

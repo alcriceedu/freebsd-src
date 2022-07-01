@@ -2548,11 +2548,11 @@ kern_proc_vmmap_resident(vm_map_t map, vm_map_entry_t entry,
 			}
 		}
 		m_adv = NULL;
-		if (m->psind != 0 && addr + pagesizes[1] <= entry->end &&
-		    (addr & (pagesizes[1] - 1)) == 0 &&
+		if (m->psind != 0 && addr + pagesizes[m->psind] <= entry->end &&
+		    (addr & (pagesizes[m->psind] - 1)) == 0 &&
 		    (pmap_mincore(map->pmap, addr, &pa) & MINCORE_SUPER) != 0) {
 			*super = true;
-			pi_adv = atop(pagesizes[1]);
+			pi_adv = atop(pagesizes[m->psind]);
 		} else {
 			/*
 			 * We do not test the found page on validity.
