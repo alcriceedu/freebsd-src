@@ -682,7 +682,7 @@ vm_reserv_alloc_contig(vm_object_t object, vm_pindex_t pindex, int domain,
 	vm_pindex_t first, leftcap, rightcap;
 	vm_reserv_t rv;
 	u_long allocpages, maxpages, minpages;
-	int i, index, n;
+	int i, index, n, rsind;
 
 	VM_OBJECT_ASSERT_WLOCKED(object);
 	KASSERT(npages != 0, ("vm_reserv_alloc_contig: npages is 0"));
@@ -690,7 +690,7 @@ vm_reserv_alloc_contig(vm_object_t object, vm_pindex_t pindex, int domain,
 	/*
 	 * Is a reservation fundamentally impossible?
 	 */
-	if (pindex < VM_RESERV_INDEX(object, pindex, VM_LEVEL_1_NPAGES) || // XXX Fixed at 2 MB for now
+	if (pindex < VM_RESERV_INDEX(object, pindex, VM_LEVEL_0_NPAGES) ||
 	    pindex + npages > object->size)
 		return (NULL);
 
@@ -704,7 +704,7 @@ vm_reserv_alloc_contig(vm_object_t object, vm_pindex_t pindex, int domain,
 	 * Could the specified index within a reservation of the smallest
 	 * possible size satisfy the alignment and boundary requirements?
 	 */
-	pa = VM_RESERV_INDEX(object, pindex, VM_LEVEL_1_NPAGES) << PAGE_SHIFT; // XXX Fixed at 2 MB for now
+	pa = VM_RESERV_INDEX(object, pindex, VM_LEVEL_0_NPAGES) << PAGE_SHIFT;
 	if ((pa & (alignment - 1)) != 0)
 		return (NULL);
 	size = npages << PAGE_SHIFT;
@@ -718,9 +718,9 @@ vm_reserv_alloc_contig(vm_object_t object, vm_pindex_t pindex, int domain,
 	if (rv != NULL) {
 		KASSERT(object != kernel_object || rv->domain == domain,
 		    ("vm_reserv_alloc_contig: domain mismatch"));
-		index = VM_RESERV_INDEX(object, pindex, VM_LEVEL_1_NPAGES); // XXX Fixed at 2 MB for now
+		index = VM_RESERV_INDEX(object, pindex, reserv_pages[rv->rsind]);
 		/* Does the allocation fit within the reservation? */
-		if (index + npages > VM_LEVEL_1_NPAGES)
+		if (index + npages > reserv_pages[rv->rsind])
 			return (NULL);
 		domain = rv->domain;
 		vmd = VM_DOMAIN(domain);
@@ -749,118 +749,122 @@ out:
 		return (NULL);
 	}
 
-	/*
-	 * Could at least one reservation fit between the first index to the
-	 * left that can be used ("leftcap") and the first index to the right
-	 * that cannot be used ("rightcap")?
-	 *
-	 * We must synchronize with the reserv object lock to protect the
-	 * pindex/object of the resulting reservations against rename while
-	 * we are inspecting.
-	 */
-	first = pindex - VM_RESERV_INDEX(object, pindex, VM_LEVEL_1_NPAGES); // XXX Fixed at 2 MB for now
-	minpages = VM_RESERV_INDEX(object, pindex, VM_LEVEL_1_NPAGES) + npages; // XXX Fixed at 2 MB for now
-	maxpages = roundup2(minpages, VM_LEVEL_1_NPAGES);
-	allocpages = maxpages;
-	vm_reserv_object_lock(object);
-	if (mpred != NULL) {
-		if ((rv = vm_reserv_from_page(mpred))->object != object)
-			leftcap = mpred->pindex + 1;
-		else
-			leftcap = rv->pindex + VM_LEVEL_1_NPAGES;
-		if (leftcap > first) {
-			vm_reserv_object_unlock(object);
-			return (NULL);
-		}
-	}
-	if (msucc != NULL) {
-		if ((rv = vm_reserv_from_page(msucc))->object != object)
-			rightcap = msucc->pindex;
-		else
-			rightcap = rv->pindex;
-		if (first + maxpages > rightcap) {
-			if (maxpages == VM_LEVEL_1_NPAGES) {
+	for (rsind = VM_NRESERVLEVEL - 1; rsind >= 0; rsind--) {
+		/*
+		 * Could at least one reservation fit between the first index to the
+		 * left that can be used ("leftcap") and the first index to the right
+		 * that cannot be used ("rightcap")?
+		 *
+		 * We must synchronize with the reserv object lock to protect the
+		 * pindex/object of the resulting reservations against rename while
+		 * we are inspecting.
+		 */
+		first = pindex - VM_RESERV_INDEX(object, pindex, reserv_pages[rsind]);
+		minpages = VM_RESERV_INDEX(object, pindex, reserv_pages[rsind]) + npages;
+		maxpages = roundup2(minpages, reserv_pages[rsind]);
+		allocpages = maxpages;
+		vm_reserv_object_lock(object);
+		if (mpred != NULL) {
+			if ((rv = vm_reserv_from_page(mpred))->object != object)
+				leftcap = mpred->pindex + 1;
+			else
+				leftcap = rv->pindex + reserv_pages[rv->rsind];
+			if (leftcap > first) {
 				vm_reserv_object_unlock(object);
-				return (NULL);
+				continue;
 			}
+		}
+		if (msucc != NULL) {
+			if ((rv = vm_reserv_from_page(msucc))->object != object)
+				rightcap = msucc->pindex;
+			else
+				rightcap = rv->pindex;
+			if (first + maxpages > rightcap) {
+				if (maxpages == reserv_pages[rsind]) {
+					vm_reserv_object_unlock(object);
+					continue;
+				}
 
-			/*
-			 * At least one reservation will fit between "leftcap"
-			 * and "rightcap".  However, a reservation for the
-			 * last of the requested pages will not fit.  Reduce
-			 * the size of the upcoming allocation accordingly.
-			 */
+				/*
+				 * At least one reservation will fit between "leftcap"
+				 * and "rightcap".  However, a reservation for the
+				 * last of the requested pages will not fit.  Reduce
+				 * the size of the upcoming allocation accordingly.
+				 */
+				allocpages = minpages;
+			}
+		}
+		vm_reserv_object_unlock(object);
+
+		/*
+		 * Would the last new reservation extend past the end of the object?
+		 *
+		 * If the object is unlikely to grow don't allocate a reservation for
+		 * the tail.
+		 */
+		if ((object->flags & OBJ_ANON) == 0 &&
+		    first + maxpages > object->size) {
+			if (maxpages == reserv_pages[rsind])
+				continue;
 			allocpages = minpages;
 		}
+
+		/*
+		 * Allocate the physical pages.  The alignment and boundary specified
+		 * for this allocation may be different from the alignment and
+		 * boundary specified for the requested pages.  For instance, the
+		 * specified index may not be the first page within the first new
+		 * reservation.
+		 */
+		m = NULL;
+		vmd = VM_DOMAIN(domain);
+		if (vm_domain_allocate(vmd, req, npages)) {
+			vm_domain_free_lock(vmd);
+			m = vm_phys_alloc_contig(domain, allocpages, low, high,
+			    ulmax(alignment, reserv_pages[rsind]),
+			    boundary > reserv_pages[rsind] ? boundary : 0);
+			vm_domain_free_unlock(vmd);
+			if (m == NULL) {
+				vm_domain_freecnt_inc(vmd, npages);
+				continue;
+			}
+		} else
+			continue;
+		KASSERT(vm_page_domain(m) == domain,
+		    ("vm_reserv_alloc_contig: Page domain does not match requested."));
+
+		/*
+		 * The allocated physical pages always begin at a reservation
+		 * boundary, but they do not always end at a reservation boundary.
+		 * Initialize every reservation that is completely covered by the
+		 * allocated physical pages.
+		 */
+		m_ret = NULL;
+		index = VM_RESERV_INDEX(object, pindex, reserv_pages[rsind]);
+		do {
+			rv = vm_reserv_from_page(m);
+			KASSERT(rv->pages == m,
+			    ("vm_reserv_alloc_contig: reserv %p's pages is corrupted",
+			    rv));
+			vm_reserv_lock(rv);
+			vm_reserv_insert(rv, object, first, rsind);
+			n = ulmin(reserv_pages[rsind] - index, npages);
+			for (i = 0; i < n; i++)
+				vm_reserv_populate(rv, index + i);
+			npages -= n;
+			if (m_ret == NULL) {
+				m_ret = &rv->pages[index];
+				index = 0;
+			}
+			vm_reserv_unlock(rv);
+			m += reserv_pages[rsind];
+			first += reserv_pages[rsind];
+			allocpages -= reserv_pages[rsind];
+		} while (allocpages >= reserv_pages[rsind]);
+		return (m_ret);
 	}
-	vm_reserv_object_unlock(object);
 
-	/*
-	 * Would the last new reservation extend past the end of the object?
-	 *
-	 * If the object is unlikely to grow don't allocate a reservation for
-	 * the tail.
-	 */
-	if ((object->flags & OBJ_ANON) == 0 &&
-	    first + maxpages > object->size) {
-		if (maxpages == VM_LEVEL_1_NPAGES)
-			return (NULL);
-		allocpages = minpages;
-	}
-
-	/*
-	 * Allocate the physical pages.  The alignment and boundary specified
-	 * for this allocation may be different from the alignment and
-	 * boundary specified for the requested pages.  For instance, the
-	 * specified index may not be the first page within the first new
-	 * reservation.
-	 */
-	m = NULL;
-	vmd = VM_DOMAIN(domain);
-	if (vm_domain_allocate(vmd, req, npages)) {
-		vm_domain_free_lock(vmd);
-		m = vm_phys_alloc_contig(domain, allocpages, low, high,
-		    ulmax(alignment, VM_LEVEL_1_SIZE),
-		    boundary > VM_LEVEL_1_SIZE ? boundary : 0);
-		vm_domain_free_unlock(vmd);
-		if (m == NULL) {
-			vm_domain_freecnt_inc(vmd, npages);
-			return (NULL);
-		}
-	} else
-		return (NULL);
-	KASSERT(vm_page_domain(m) == domain,
-	    ("vm_reserv_alloc_contig: Page domain does not match requested."));
-
-	/*
-	 * The allocated physical pages always begin at a reservation
-	 * boundary, but they do not always end at a reservation boundary.
-	 * Initialize every reservation that is completely covered by the
-	 * allocated physical pages.
-	 */
-	m_ret = NULL;
-	index = VM_RESERV_INDEX(object, pindex, VM_LEVEL_1_NPAGES); // XXX Fixed at 2 MB for now
-	do {
-		rv = vm_reserv_from_page(m);
-		KASSERT(rv->pages == m,
-		    ("vm_reserv_alloc_contig: reserv %p's pages is corrupted",
-		    rv));
-		vm_reserv_lock(rv);
-		vm_reserv_insert(rv, object, first, 1); // XXX Fixed rsind at 2 MB for now
-		n = ulmin(VM_LEVEL_1_NPAGES - index, npages);
-		for (i = 0; i < n; i++)
-			vm_reserv_populate(rv, index + i);
-		npages -= n;
-		if (m_ret == NULL) {
-			m_ret = &rv->pages[index];
-			index = 0;
-		}
-		vm_reserv_unlock(rv);
-		m += VM_LEVEL_1_NPAGES;
-		first += VM_LEVEL_1_NPAGES;
-		allocpages -= VM_LEVEL_1_NPAGES;
-	} while (allocpages >= VM_LEVEL_1_NPAGES);
-	return (m_ret);
+	return (NULL);
 }
 
 /*
