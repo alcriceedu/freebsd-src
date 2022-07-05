@@ -751,7 +751,7 @@ out:
 
 	for (rsind = VM_NRESERVLEVEL - 1; rsind >= 0; rsind--) {
 		if (npages > reserv_pages[rsind]) {
-			continue;
+			break;
 		}
 
 		/*
