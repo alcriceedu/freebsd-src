@@ -2003,6 +2003,7 @@ _pmap_alloc_l3(pmap_t pmap, vm_pindex_t ptepindex, struct rwlock **lockp)
 				}
 			} else {
 				l2pg = PHYS_TO_VM_PAGE(tl1 & ~ATTR_MASK);
+				KASSERT(l2pg != NULL, ("_pmap_alloc_l3: l2pg is NULL"));
 				l2pg->ref_count++;
 			}
 		}
