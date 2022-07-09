@@ -461,7 +461,7 @@ vm_reserv_insert(vm_reserv_t rv, vm_object_t object, vm_pindex_t pindex, uint8_t
 	    ("vm_reserv_insert: reserv %p's popcnt is corrupted", rv));
 	KASSERT(!rv->inpartpopq,
 	    ("vm_reserv_insert: reserv %p's inpartpopq is TRUE", rv));
-	for (i = 0; i < reserv_npopmaps[rv->rsind]; i++)
+	for (i = 0; i < reserv_npopmaps[rsind]; i++)
 		KASSERT(rv->popmap[i] == 0,
 		    ("vm_reserv_insert: reserv %p's popmap is corrupted", rv));
 	vm_reserv_object_lock(object);
