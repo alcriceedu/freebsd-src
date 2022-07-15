@@ -6278,10 +6278,12 @@ pmap_advise(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, int advice)
 					 */
 					oldl3 = pmap_load(l3);
 				}
-				while (!atomic_fcmpset_long(l3, &oldl3,
-				    (oldl3 & ~ATTR_AF) |
-				    ATTR_S1_AP(ATTR_S1_AP_RO)))
-					cpu_spinwait();
+				if (oldl3 != 0) {
+					while (!atomic_fcmpset_long(l3, &oldl3,
+					    (oldl3 & ~ATTR_AF) |
+					    ATTR_S1_AP(ATTR_S1_AP_RO)))
+						cpu_spinwait();
+				}
 			} else if ((oldl3 & ATTR_AF) != 0) {
 				/*
 				 * Clear the accessed bit in this L3 entry
