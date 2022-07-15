@@ -6145,10 +6145,10 @@ void
 pmap_advise(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, int advice)
 {
 	struct rwlock *lock;
-	vm_offset_t va, va_next;
+	vm_offset_t va, va_next, dva;
 	vm_page_t m;
 	pd_entry_t *l0, *l1, *l2, oldl2;
-	pt_entry_t *l3, oldl3;
+	pt_entry_t *l3, *dl3, oldl3;
 
 	PMAP_ASSERT_STAGE1(pmap);
 
@@ -6255,17 +6255,23 @@ pmap_advise(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, int advice)
 					pmap_demote_l3c(pmap, l3, sva);
 
 					/*
-                                         * Destroy a 4KB mapping so that a
-                                         * subsequent access may act as a
-                                         * repromotion trigger.
+                                         * Destroy the final mapping before the
+                                         * next 64KB boundary or va_next, whichever
+                                         * comes first, so that a subsequent access
+                                         * may act as a repromotion trigger.
                                         */
                                         if ((oldl3 & ATTR_SW_WIRED) == 0) {
-                                        	KASSERT(pmap_load(l3) != 0,
+						dva = MIN((sva & ~L3C_OFFSET) +
+						    L3C_SIZE - PAGE_SIZE, va_next
+						    - PAGE_SIZE);
+						dl3 = pmap_l2_to_l3(l2, dva);
+
+                                                KASSERT(pmap_load(dl3) != 0,
                                         	    ("pmap_advise: invalid PTE"));
 
 						lock = NULL;
 
-						pmap_remove_l3(pmap, l3, sva,
+						pmap_remove_l3(pmap, dl3, dva,
 						    pmap_load(l2), NULL, &lock);
 
 						if (lock != NULL)
@@ -6278,6 +6284,10 @@ pmap_advise(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, int advice)
 					 */
 					oldl3 = pmap_load(l3);
 				}
+				/*
+				 * Check that we did not just destroy this entry so
+				 * we avoid corrupting the page able.
+				 */
 				if (oldl3 != 0) {
 					while (!atomic_fcmpset_long(l3, &oldl3,
 					    (oldl3 & ~ATTR_AF) |
