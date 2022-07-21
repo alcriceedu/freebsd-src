@@ -4162,6 +4162,10 @@ pmap_enter(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 		    flags, m, &lock);
 		goto out;
 	}
+	if (psind == 1) { // XXX
+		rv = KERN_FAILURE;
+		goto out;
+	}
 	mpte = NULL;
 
 	/*
