@@ -503,11 +503,11 @@ vm_reserv_depopulate(vm_reserv_t rv, int index)
 		    rv));
 		rv->pages->psind = 1; // XXX Fixed at 64 KB for now
 	}
+	popmap_clear(rv->popmap, index);
 	// XXX
         if (((uint16_t *)rv->popmap)[index / 16] != 65535) {
 		rv->pages[16 * (index / 16)].psind = 0;
         }
-	popmap_clear(rv->popmap, index);
 	rv->popcnt--;
 	if ((unsigned)(ticks - rv->lasttick) >= PARTPOPSLOP ||
 	    rv->popcnt == 0) {
@@ -648,7 +648,7 @@ vm_reserv_populate(vm_reserv_t rv, int index)
 	if (rv->popcnt < reserv_pages[rv->rsind]) {
 		rv->inpartpopq = TRUE;
 		TAILQ_INSERT_TAIL(&vm_rvd[rv->domain].partpop[rv->rsind], rv, partpopq);
-	} else {
+	} else if (rv->rsind == 1) {
 		KASSERT(rv->pages->psind == 1, // XXX Fixed at 64 KB for now
 		    ("vm_reserv_populate: reserv %p is already promoted",
 		    rv));
