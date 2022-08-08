@@ -305,10 +305,16 @@ static COUNTER_U64_DEFINE_EARLY(vm_reserv_freed);
 SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, freed, CTLFLAG_RD,
     &vm_reserv_freed, "Cumulative number of freed reservations");
 
-static int sysctl_vm_reserv_fullpop(SYSCTL_HANDLER_ARGS);
+static int sysctl_vm_reserv_fullpop1r(SYSCTL_HANDLER_ARGS);
+static int sysctl_vm_reserv_fullpop0c(SYSCTL_HANDLER_ARGS);
+static int sysctl_vm_reserv_fullpop0r(SYSCTL_HANDLER_ARGS);
 
-SYSCTL_PROC(_vm_reserv, OID_AUTO, fullpop, CTLTYPE_INT | CTLFLAG_MPSAFE | CTLFLAG_RD,
-    NULL, 0, sysctl_vm_reserv_fullpop, "I", "Current number of full reservations");
+SYSCTL_PROC(_vm_reserv, OID_AUTO, fullpop1r, CTLTYPE_INT | CTLFLAG_MPSAFE | CTLFLAG_RD,
+    NULL, 0, sysctl_vm_reserv_fullpop1r, "I", "Current number of full L1 reservations");
+SYSCTL_PROC(_vm_reserv, OID_AUTO, fullpop0c, CTLTYPE_INT | CTLFLAG_MPSAFE | CTLFLAG_RD,
+    NULL, 0, sysctl_vm_reserv_fullpop0c, "I", "Current number of full L0 chunks within L1 reservations");
+SYSCTL_PROC(_vm_reserv, OID_AUTO, fullpop0r, CTLTYPE_INT | CTLFLAG_MPSAFE | CTLFLAG_RD,
+    NULL, 0, sysctl_vm_reserv_fullpop0r, "I", "Current number of full L0 reservations");
 
 static int sysctl_vm_reserv_partpopq(SYSCTL_HANDLER_ARGS);
 
@@ -349,13 +355,47 @@ static void		vm_reserv_populate(vm_reserv_t rv, int index);
 static void		vm_reserv_reclaim(vm_reserv_t rv);
 
 /*
- * Returns the current number of full reservations.
+ * Returns the current number of full L1 reservations.
  *
  * Since the number of full reservations is computed without acquiring any
  * locks, the returned value is inexact.
  */
 static int
-sysctl_vm_reserv_fullpop(SYSCTL_HANDLER_ARGS)
+sysctl_vm_reserv_fullpop1r(SYSCTL_HANDLER_ARGS)
+{
+	vm_paddr_t paddr;
+	struct vm_phys_seg *seg;
+	vm_reserv_t rv;
+	int fullpop, segind;
+
+	fullpop = 0;
+	for (segind = 0; segind < vm_phys_nsegs; segind++) {
+		seg = &vm_phys_segs[segind];
+		paddr = roundup2(seg->start, VM_LEVEL_0_SIZE);
+#ifdef VM_PHYSSEG_SPARSE
+		rv = seg->first_reserv + (paddr >> VM_LEVEL_0_SHIFT) -
+		    (rounddown2(seg->start, VM_LEVEL_1_SIZE) >> VM_LEVEL_0_SHIFT);
+#else
+		rv = &vm_reserv_array[paddr >> VM_LEVEL_0_SHIFT];
+#endif
+		while (paddr + VM_LEVEL_1_SIZE > paddr && paddr +
+		    VM_LEVEL_1_SIZE <= seg->end) {
+			fullpop += (rv->rsind == 1) && (rv->popcnt == VM_LEVEL_1_NPAGES);
+			paddr += VM_LEVEL_1_SIZE;
+			rv += VM_LEVEL_1_NPAGES / VM_LEVEL_0_NPAGES;
+		}
+	}
+	return (sysctl_handle_int(oidp, &fullpop, 0, req));
+}
+
+/*
+ * Returns the current number of full L0 reservations.
+ *
+ * Since the number of full reservations is computed without acquiring any
+ * locks, the returned value is inexact.
+ */
+static int
+sysctl_vm_reserv_fullpop0r(SYSCTL_HANDLER_ARGS)
 {
 	vm_paddr_t paddr;
 	struct vm_phys_seg *seg;
@@ -374,10 +414,50 @@ sysctl_vm_reserv_fullpop(SYSCTL_HANDLER_ARGS)
 #endif
 		while (paddr + VM_LEVEL_0_SIZE > paddr && paddr +
 		    VM_LEVEL_0_SIZE <= seg->end) {
-			// XXX Only count 2 MB reservations, for testing purposes
-			fullpop += (rv->rsind == 1) && (rv->popcnt == VM_LEVEL_1_NPAGES);
+			fullpop += (rv->rsind == 0) && (rv->popcnt == VM_LEVEL_0_NPAGES);
 			paddr += VM_LEVEL_0_SIZE;
 			rv++;
+		}
+	}
+	return (sysctl_handle_int(oidp, &fullpop, 0, req));
+}
+
+/*
+ * Returns the current number of full L0 chunks within L1 reservations.
+ *
+ * Since the number of full reservations is computed without acquiring any
+ * locks, the returned value is inexact.
+ */
+static int
+sysctl_vm_reserv_fullpop0c(SYSCTL_HANDLER_ARGS)
+{
+	vm_paddr_t paddr;
+	struct vm_phys_seg *seg;
+	vm_reserv_t rv;
+	int fullpop, segind;
+	uint16_t *p;
+
+	fullpop = 0;
+	for (segind = 0; segind < vm_phys_nsegs; segind++) {
+		seg = &vm_phys_segs[segind];
+		paddr = roundup2(seg->start, VM_LEVEL_0_SIZE);
+#ifdef VM_PHYSSEG_SPARSE
+		rv = seg->first_reserv + (paddr >> VM_LEVEL_0_SHIFT) -
+		    (rounddown2(seg->start, VM_LEVEL_1_SIZE) >> VM_LEVEL_0_SHIFT);
+#else
+		rv = &vm_reserv_array[paddr >> VM_LEVEL_0_SHIFT];
+#endif
+		while (paddr + VM_LEVEL_1_SIZE > paddr && paddr +
+		    VM_LEVEL_1_SIZE <= seg->end) {
+		    	if ((rv->rsind == 1) && (rv->popcnt != VM_LEVEL_1_NPAGES)) {
+				for (p = (uint16_t *)rv->popmap;
+				    p - (uint16_t *)rv->popmap <
+				    VM_LEVEL_1_NPAGES / VM_LEVEL_0_NPAGES; p++) {
+					fullpop += (*p == 65535);
+				}
+		    	}
+			paddr += VM_LEVEL_1_SIZE;
+                        rv += VM_LEVEL_1_NPAGES / VM_LEVEL_0_NPAGES;
 		}
 	}
 	return (sysctl_handle_int(oidp, &fullpop, 0, req));
@@ -1645,6 +1725,27 @@ vm_reserv_to_superpage(vm_page_t m)
 		m = NULL;
 
 	return (m);
+}
+
+void
+vm_reserv_count_xxx(vm_object_t object, unsigned int *count, unsigned int *full, unsigned int *full_psind)
+{
+	vm_reserv_t rv;
+
+	*count = 0;
+	*full = 0;
+	*full_psind = 0;
+	LIST_FOREACH(rv, &object->rvq, objq) {
+		*count += 1;
+		if (rv->popcnt == reserv_pages[rv->rsind]) {
+			*full += 1;
+			if (rv->pages->psind == 1) {
+				*full_psind += 1;
+			}
+		}
+		CTR4(KTR_PMAP, "vm_reserv_count_xxx: rsind %u, psind %u, %u/%u resident",
+		    rv->rsind, rv->pages->psind, rv->popcnt, reserv_pages[rv->rsind]);
+	}
 }
 
 #endif	/* VM_NRESERVLEVEL > 0 */
