@@ -4792,6 +4792,154 @@ pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va, vm_page_t m,
 	return (mpte);
 }
 
+static int
+pmap_enter_l3c_new(pmap_t pmap, vm_offset_t va, pd_entry_t new_l3, u_int flags,
+    vm_page_t m, vm_page_t ml3, struct rwlock **lockp)
+{
+	pd_entry_t *l2p, *pde;
+	pt_entry_t old_l3, *l3p, *tl3p;
+	vm_page_t mt;
+	vm_paddr_t pa;
+	vm_pindex_t l2pindex;
+	int lvl;
+
+	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
+	KASSERT((va & L3C_OFFSET) == 0,
+	    ("pmap_enter_l3c: va is not aligned"));
+	KASSERT(!VA_IS_CLEANMAP(va) ||
+	    (new_l3 & ATTR_SW_MANAGED) == 0,
+	    ("pmap_enter_l3c: managed mapping within the clean submap"));
+
+	/*
+	 * In the case that a page table page is not
+	 * resident, we are creating it here.
+	 */
+	if (va < VM_MAXUSER_ADDRESS) {
+		/*
+		 * Calculate the page table page index.
+		 */
+		l2pindex = pmap_l2_pindex(va);
+		if (ml3 != NULL && ml3->pindex == l2pindex) {
+			ml3->ref_count += L3C_ENTRIES;
+		} else {
+			/*
+			 * Get the L2 entry.
+			 */
+			pde = pmap_pde(pmap, va, &lvl);
+
+			/*
+			 * If the page table page is mapped, we just increment
+			 * the ref count.  Otherwise, we
+			 * attempt to allocate a page table page.  If this
+			 * attempt fails, we don't retry.  Instead, we give up.
+			 */
+			if (lvl == 1) {
+				l2p = pmap_l1_to_l2(pde, va);
+				if ((pmap_load(l2p) & ATTR_DESCR_MASK) ==
+				    L2_BLOCK)
+					return (KERN_FAILURE);
+			}
+			if (lvl == 2 && pmap_load(pde) != 0) {
+				ml3 = PHYS_TO_VM_PAGE(pmap_load(pde) &
+				    ~ATTR_MASK);
+				ml3->ref_count += L3C_ENTRIES;
+			} else {
+				/*
+				 * Pass NULL instead of the PV list lock
+				 * pointer, because we don't intend to sleep.
+				 */
+				ml3 = _pmap_alloc_l3(pmap, l2pindex, NULL);
+				if (ml3 == NULL)
+					return (KERN_FAILURE);
+				ml3->ref_count += L3C_ENTRIES - 1;
+			}
+		}
+		l3p = (pt_entry_t *)PHYS_TO_DMAP(VM_PAGE_TO_PHYS(ml3));
+		l3p = &l3p[pmap_l3_index(va)];
+	} else {
+		ml3 = NULL;
+		pde = pmap_pde(kernel_pmap, va, &lvl);
+		KASSERT(pde != NULL,
+		    ("pmap_enter_l3c: Invalid page entry, va: 0x%lx",
+		     va));
+		KASSERT(lvl == 2,
+		    ("pmap_enter_l3c: Invalid level %d", lvl));
+		l3p = pmap_l2_to_l3(pde, va);
+	}
+
+	/*
+	 * If there are existing mappings, either abort or remove them.
+	 */
+	for (tl3p = l3p; tl3p < &l3p[L3C_ENTRIES]; tl3p++) {
+		if ((old_l3 = pmap_load(tl3p)) != 0) {
+			if ((flags & PMAP_ENTER_NOREPLACE) != 0) {
+				if (ml3 != NULL)
+					ml3->ref_count -= L3C_ENTRIES;
+				return (KERN_FAILURE);
+			} else {
+				/*
+				 * How exactly do we want to remove the 
+				 * existing entries? YYY
+				 */
+			}
+		}
+	}
+
+	/*
+	 * Enter on the PV list if part of our managed memory.
+	 */
+	if ((new_l3 & ATTR_SW_MANAGED) != 0) {
+		if (!pmap_pv_insert_l3c(pmap, va, m, lockp)) {
+			if (ml3 != NULL) {
+				ml3->ref_count -= L3C_ENTRIES - 1;
+				pmap_abort_ptp(pmap, va, ml3);
+			}
+			return (KERN_RESOURCE_SHORTAGE);
+		}
+		if ((new_l3 & ATTR_SW_DBM) != 0)
+			for (mt = m; mt < &m[L3C_ENTRIES]; mt++)
+				vm_page_aflag_set(mt, PGA_WRITEABLE);
+	}
+
+	/*
+	 * Increment counters.
+	 */
+	pmap_resident_count_inc(pmap, L3C_ENTRIES);
+
+	pa = VM_PAGE_TO_PHYS(m);
+	KASSERT((pa & L3C_OFFSET) == 0,
+	    ("pmap_enter_l3c: pa is not aligned"));
+
+	/*
+	 * Sync the icache before the mapping is stored.
+	 */
+	if ((new_l3 & ATTR_S1_XN) == 0 && pmap != kernel_pmap &&
+	    m->md.pv_memattr == VM_MEMATTR_WRITE_BACK)
+		cpu_icache_sync_range(PHYS_TO_DMAP(pa), L3C_SIZE);
+
+	/*
+	 * Map the superpage.
+	 */
+	for (tl3p = l3p; tl3p < &l3p[L3C_ENTRIES]; tl3p++) {
+		pmap_store(tl3p, new_l3);
+		new_l3 += L3_SIZE;
+	}
+	dsb(ishst);
+
+	atomic_add_long(&pmap_l3c_mappings, 1);
+	CTR2(KTR_PMAP, "pmap_enter_l3c: success for va %#lx in pmap %p",
+	    va, pmap);
+	
+	return (KERN_SUCCESS);
+}
+
+static bool
+pmap_enter_64kpage(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
+    struct rwlock **lockp)
+{
+	return (FALSE);
+}
+
 /*
  * XXX
  */
