@@ -1098,6 +1098,7 @@ pmap_bootstrap_l2_block(struct pmap_bootstrap_state *state, int i)
 static void
 pmap_bootstrap_l3_page(struct pmap_bootstrap_state *state, int i)
 {
+	vm_paddr_t contig;
 	u_int l3_slot;
 	bool first;
 
@@ -1108,7 +1109,7 @@ pmap_bootstrap_l3_page(struct pmap_bootstrap_state *state, int i)
 	pmap_bootstrap_l2_table(state);
 
 	MPASS((state->va & L3_OFFSET) == 0);
-	for (first = true;
+	for (first = true, contig = 0;
 	    state->va < DMAP_MAX_ADDRESS &&
 	    (physmap[i + 1] - state->pa) >= L3_SIZE;
 	    state->va += L3_SIZE, state->pa += L3_SIZE) {
@@ -1119,13 +1120,22 @@ pmap_bootstrap_l3_page(struct pmap_bootstrap_state *state, int i)
 		if (!first && (state->pa & L2_OFFSET) == 0)
 			break;
 
+		if ((state->pa & L3C_OFFSET) == 0 && (state->va & L3C_OFFSET) == 0) {
+			if (state->va + L3C_SIZE < DMAP_MAX_ADDRESS &&
+			    (physmap[i + 1] - state->pa) >= L3C_SIZE) {
+				contig = ATTR_CONTIGUOUS;
+			} else {
+				contig = 0;
+			}
+		}
+
 		first = false;
 		l3_slot = pmap_l3_index(state->va);
 		MPASS((state->pa & L3_OFFSET) == 0);
 		MPASS(state->l3[l3_slot] == 0);
 		pmap_store(&state->l3[l3_slot], PHYS_TO_PTE(state->pa) |
 		    ATTR_DEFAULT | ATTR_S1_XN |
-		    ATTR_S1_IDX(VM_MEMATTR_WRITE_BACK) | L3_PAGE);
+		    ATTR_S1_IDX(VM_MEMATTR_WRITE_BACK) | contig | L3_PAGE);
 	}
 	MPASS(state->va == (state->pa - dmap_phys_base + DMAP_MIN_ADDRESS));
 }
@@ -6753,6 +6763,10 @@ pmap_change_props_locked(vm_offset_t va, vm_size_t size, vm_prot_t prot,
 			pte = pmap_load(ptep);
 			pte &= ~mask;
 			pte |= bits;
+
+			if ((pte & ATTR_CONTIGUOUS) != 0) {
+				printf("WARNING: Updated contiguous PTE for direct map with va %lx\n", tmpva);
+			}
 
 			pmap_update_entry(kernel_pmap, ptep, pte, tmpva,
 			    pte_size);
