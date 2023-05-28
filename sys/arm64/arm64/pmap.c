@@ -4053,6 +4053,7 @@ static void
 pmap_update_entry(pmap_t pmap, pd_entry_t *pte, pd_entry_t newpte,
     vm_offset_t va, vm_size_t size)
 {
+	pd_entry_t *l3, newl3;
 	register_t intr;
 
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
@@ -4072,7 +4073,13 @@ pmap_update_entry(pmap_t pmap, pd_entry_t *pte, pd_entry_t newpte,
 	 * unchanged, so that a lockless, concurrent pmap_kextract() can still
 	 * lookup the physical address.
 	 */
-	pmap_clear_bits(pte, ATTR_DESCR_VALID);
+	if (size == L3C_SIZE) {
+		for (l3 = pte; l3 - pte < L3C_ENTRIES; l3++) {
+			pmap_clear_bits(l3, ATTR_DESCR_VALID);
+		}
+	} else {
+		pmap_clear_bits(pte, ATTR_DESCR_VALID);
+	}
 
 	/*
 	 * When promoting, the L{1,2}_TABLE entry that is being replaced might
@@ -4082,7 +4089,13 @@ pmap_update_entry(pmap_t pmap, pd_entry_t *pte, pd_entry_t newpte,
 	pmap_s1_invalidate_range(pmap, va, va + size, false);
 
 	/* Create the new mapping */
-	pmap_store(pte, newpte);
+	if (size == L3C_SIZE) {
+		for (l3 = pte, newl3 = newpte; l3 - pte < L3C_ENTRIES; l3++, newl3 += PAGE_SIZE) {
+			pmap_store(l3, newl3);
+		}
+	} else {
+		pmap_store(pte, newpte);
+	}
 	dsb(ishst);
 
 	intr_restore(intr);
@@ -6756,6 +6769,14 @@ pmap_change_props_locked(vm_offset_t va, vm_size_t size, vm_prot_t prot,
 				ptep = pmap_l2_to_l3(ptep, tmpva);
 				/* FALLTHROUGH */
 			case 3:
+				if (VIRT_IN_DMAP(tmpva)) {
+					if ((tmpva & L3C_OFFSET) == 0 &&
+                                	    (base + size - tmpva) >= L3C_SIZE) {
+                                        	pte_size = L3C_SIZE;
+                                        	break;
+                                	}
+                                	pmap_demote_l3c(kernel_pmap, ptep, tmpva);
+				}
 				pte_size = PAGE_SIZE;
 				break;
 			}
