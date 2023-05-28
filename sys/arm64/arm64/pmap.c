@@ -1098,7 +1098,7 @@ pmap_bootstrap_l2_block(struct pmap_bootstrap_state *state, int i)
 static void
 pmap_bootstrap_l3_page(struct pmap_bootstrap_state *state, int i)
 {
-	vm_paddr_t contig;
+	pt_entry_t contig;
 	u_int l3_slot;
 	bool first;
 
@@ -1120,7 +1120,7 @@ pmap_bootstrap_l3_page(struct pmap_bootstrap_state *state, int i)
 		if (!first && (state->pa & L2_OFFSET) == 0)
 			break;
 
-		if ((state->pa & L3C_OFFSET) == 0 && (state->va & L3C_OFFSET) == 0) {
+		if ((state->pa & L3C_OFFSET) == 0) {
 			if (state->va + L3C_SIZE < DMAP_MAX_ADDRESS &&
 			    (physmap[i + 1] - state->pa) >= L3C_SIZE) {
 				contig = ATTR_CONTIGUOUS;
