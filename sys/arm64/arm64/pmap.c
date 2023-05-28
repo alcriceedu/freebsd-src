@@ -463,6 +463,7 @@ static pt_entry_t *pmap_demote_l1(pmap_t pmap, pt_entry_t *l1, vm_offset_t va);
 static pt_entry_t *pmap_demote_l2_locked(pmap_t pmap, pt_entry_t *l2,
     vm_offset_t va, struct rwlock **lockp);
 static pt_entry_t *pmap_demote_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t va);
+static void pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va);
 static vm_page_t pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va,
     vm_page_t m, vm_prot_t prot, vm_page_t mpte, struct rwlock **lockp);
 static int pmap_enter_l2(pmap_t pmap, vm_offset_t va, pd_entry_t new_l2,
@@ -7060,6 +7061,68 @@ pmap_demote_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t va)
 	if (lock != NULL)
 		rw_wunlock(lock);
 	return (l3);
+}
+
+/*
+ * Demote a 64KB contiguous mapping to 16 4KB page mappings.
+ */
+static void
+pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
+{
+	pt_entry_t *end_l3, *l3, mask, nbits, old_l3, *start_l3;
+	register_t intr;
+
+	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
+	start_l3 = (pt_entry_t *)((uintptr_t)l3p & ~((L3C_ENTRIES *
+	    sizeof(pt_entry_t)) - 1));
+	end_l3 = start_l3 + L3C_ENTRIES;
+	mask = 0;
+	nbits = ATTR_DESCR_VALID;
+	intr = intr_disable();
+	/* Break the mappings. */
+	for (l3 = start_l3; l3 < end_l3; l3++) {
+		/*
+		 * Clear the mapping's contiguous and valid bits, but leave
+		 * the rest of the entry unchanged, so that a lockless,
+		 * concurrent pmap_kextract() can still lookup the physical
+		 * address.
+		 */
+		old_l3 = pmap_load(l3);
+		KASSERT((old_l3 & ATTR_CONTIGUOUS) != 0,
+		    ("pmap_demote_l3c: missing ATTR_CONTIGUOUS"));
+		KASSERT((old_l3 & (ATTR_SW_DBM | ATTR_S1_AP_RW_BIT)) !=
+		    (ATTR_SW_DBM | ATTR_S1_AP(ATTR_S1_AP_RO)),
+		    ("pmap_demote_l3c: XXX"));
+		while (!atomic_fcmpset_64(l3, &old_l3, old_l3 &
+		    ~(ATTR_CONTIGUOUS | ATTR_DESCR_VALID)))
+			cpu_spinwait();
+
+		/*
+		 * Hardware accessed and dirty bit maintenance might only
+		 * update a single L3 entry, so we must combine the accessed
+		 * and dirty bits from this entire set of contiguous L3
+		 * entries.
+		 */
+		if ((old_l3 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
+		    (ATTR_S1_AP(ATTR_S1_AP_RW) | ATTR_SW_DBM))
+			mask = ATTR_S1_AP_RW_BIT;
+		nbits |= old_l3 & ATTR_AF;
+	}
+	/* XXX Optimization: Skip if not ATTR_AF? */
+	pmap_invalidate_range(pmap, va & ~L3C_OFFSET, (va + L3C_SIZE) &
+	    ~L3C_OFFSET, true);
+	/* Remake the mappings, updating the accessed and dirty bits. */
+	for (l3 = start_l3; l3 < end_l3; l3++) {
+		old_l3 = pmap_load(l3);
+		while (!atomic_fcmpset_64(l3, &old_l3, (old_l3 & ~mask) |
+		    nbits))
+			cpu_spinwait();
+	}
+	dsb(ishst);
+	intr_restore(intr);
+	// atomic_add_long(&pmap_l3c_demotions, 1);
+	CTR2(KTR_PMAP, "pmap_demote_l3c: success for va %#lx in pmap %p",
+	    va, pmap);
 }
 
 /*
