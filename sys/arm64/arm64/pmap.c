@@ -1629,6 +1629,13 @@ static u_long pmap_l2_promotions;
 SYSCTL_ULONG(_vm_pmap_l2, OID_AUTO, promotions, CTLFLAG_RD,
     &pmap_l2_promotions, 0, "2MB page promotions");
 
+static SYSCTL_NODE(_vm_pmap, OID_AUTO, l3c, CTLFLAG_RD | CTLFLAG_MPSAFE, 0,
+    "64KB page mapping counters");
+
+static u_long pmap_l3c_demotions;
+SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, demotions, CTLFLAG_RD,
+    &pmap_l3c_demotions, 0, "64KB page demotions");
+
 /*
  * If the given value for "final_only" is false, then any cached intermediate-
  * level entries, i.e., L{0,1,2}_TABLE entries, are invalidated in addition to
@@ -7141,7 +7148,7 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 	}
 	dsb(ishst);
 	intr_restore(intr);
-	// atomic_add_long(&pmap_l3c_demotions, 1);
+	atomic_add_long(&pmap_l3c_demotions, 1);
 	CTR2(KTR_PMAP, "pmap_demote_l3c: success for va %#lx in pmap %p",
 	    va, pmap);
 }
