@@ -6769,7 +6769,7 @@ pmap_change_props_locked(vm_offset_t va, vm_size_t size, vm_prot_t prot,
 				ptep = pmap_l2_to_l3(ptep, tmpva);
 				/* FALLTHROUGH */
 			case 3:
-				if (VIRT_IN_DMAP(tmpva)) {
+				if (VIRT_IN_DMAP(tmpva) && (pmap_load(ptep) & ATTR_CONTIGUOUS) != 0) {
 					if ((tmpva & L3C_OFFSET) == 0 &&
                                 	    (base + size - tmpva) >= L3C_SIZE) {
                                         	pte_size = L3C_SIZE;
