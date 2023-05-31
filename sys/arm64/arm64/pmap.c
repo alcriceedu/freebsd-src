@@ -7020,6 +7020,10 @@ pmap_demote_l2_locked(pmap_t pmap, pt_entry_t *l2, vm_offset_t va,
 	    (ATTR_S1_AP(ATTR_S1_AP_RO) | ATTR_SW_DBM),
 	    ("pmap_demote_l2: L2 entry is writeable but not dirty"));
 
+	if (VIRT_IN_DMAP(va)) {
+		newl3 |= ATTR_CONTIGUOUS;
+	}
+
 	/*
 	 * If the page table page is not leftover from an earlier promotion,
 	 * or the mapping attributes have changed, (re)initialize the L3 table.
