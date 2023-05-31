@@ -6822,10 +6822,9 @@ pmap_promote_pde(pmap_t pmap, pd_entry_t *pde, vm_offset_t va, vm_page_t mpte,
 {
 	pd_entry_t newpde;
 	pt_entry_t *firstpte, oldpte, pa, *pte;
-	pt_entry_t PG_G, PG_A, PG_M, PG_RW, PG_V, PG_PKU_MASK;
+	pt_entry_t PG_G, PG_M, PG_RW, PG_V, PG_PKU_MASK;
 	int PG_PTE_CACHE;
 
-	PG_A = pmap_accessed_bit(pmap);
 	PG_G = pmap_global_bit(pmap);
 	PG_M = pmap_modified_bit(pmap);
 	PG_V = pmap_valid_bit(pmap);
@@ -6876,12 +6875,6 @@ setpde:
 		if (!atomic_fcmpset_long(firstpte, &newpde, newpde & ~PG_RW))
 			goto setpde;
 		newpde &= ~PG_RW;
-	}
-	if ((newpde & PG_A) == 0) {
-		counter_u64_add(pmap_pde_p_failures, 1);
-		CTR2(KTR_PMAP, "pmap_promote_pde: failure for va %#lx"
-		    " in pmap %p", va, pmap);
-		return;
 	}
 
 	/*
@@ -7629,6 +7622,7 @@ static vm_page_t
 pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va, vm_page_t m,
     vm_prot_t prot, vm_page_t mpte, struct rwlock **lockp)
 {
+	pd_entry_t *pde;
 	pt_entry_t newpte, *pte, PG_V;
 
 	KASSERT(!VA_IS_CLEANMAP(va) ||
@@ -7636,6 +7630,7 @@ pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va, vm_page_t m,
 	    ("pmap_enter_quick_locked: managed mapping within the clean submap"));
 	PG_V = pmap_valid_bit(pmap);
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
+	pde = NULL;
 
 	/*
 	 * In the case that a page table page is not
@@ -7643,7 +7638,6 @@ pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va, vm_page_t m,
 	 */
 	if (va < VM_MAXUSER_ADDRESS) {
 		pdp_entry_t *pdpe;
-		pd_entry_t *pde;
 		vm_pindex_t ptepindex;
 
 		/*
@@ -7720,6 +7714,22 @@ pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va, vm_page_t m,
 	if (va < VM_MAXUSER_ADDRESS)
 		newpte |= PG_U | pmap_pkru_get(pmap, va);
 	pte_store(pte, newpte);
+
+#if VM_NRESERVLEVEL > 0
+	/*
+	 * If both the page table page and the reservation are fully
+	 * populated, then attempt promotion.
+	 */
+	if ((mpte == NULL || mpte->ref_count == NPTEPG) &&
+	    pmap_ps_enabled(pmap) &&
+	    (m->flags & PG_FICTITIOUS) == 0 &&
+	    vm_reserv_level_iffullpop(m) == 0) {
+		if (pde == NULL)
+			pde = pmap_pde(pmap, va);
+		pmap_promote_pde(pmap, pde, va, mpte, lockp);
+	}
+#endif
+
 	return (mpte);
 }
 
