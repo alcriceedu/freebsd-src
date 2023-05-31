@@ -6776,7 +6776,11 @@ pmap_change_props_locked(vm_offset_t va, vm_size_t size, vm_prot_t prot,
 				ptep = pmap_l2_to_l3(ptep, tmpva);
 				/* FALLTHROUGH */
 			case 3:
-				if (VIRT_IN_DMAP(tmpva) && (pmap_load(ptep) & ATTR_CONTIGUOUS) != 0) {
+				if ((pmap_load(ptep) & ATTR_CONTIGUOUS) != 0) {
+					KASSERT(VIRT_IN_DMAP(tmpva),
+					    ("pmap_change_props_locked: "
+					    "Contiguous bit set outside of "
+					    "direct map"));
 					if ((tmpva & L3C_OFFSET) == 0 &&
                                 	    (base + size - tmpva) >= L3C_SIZE) {
                                         	pte_size = L3C_SIZE;
@@ -6792,10 +6796,6 @@ pmap_change_props_locked(vm_offset_t va, vm_size_t size, vm_prot_t prot,
 			pte = pmap_load(ptep);
 			pte &= ~mask;
 			pte |= bits;
-
-			if ((pte & ATTR_CONTIGUOUS) != 0) {
-				printf("WARNING: Updated contiguous PTE for direct map with va %lx\n", tmpva);
-			}
 
 			pmap_update_entry(kernel_pmap, ptep, pte, tmpva,
 			    pte_size);
