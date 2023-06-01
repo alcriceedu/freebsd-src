@@ -4185,6 +4185,8 @@ setl2:
 		if (!atomic_fcmpset_64(firstl3, &newl2, newl2 & ~ATTR_SW_DBM))
 			goto setl2;
 		newl2 &= ~ATTR_SW_DBM;
+		CTR2(KTR_PMAP, "pmap_promote_l2: protect for va %#lx"
+		    " in pmap %p", va & ~L2_OFFSET, pmap);
 	}
 	if ((newl2 & ATTR_AF) == 0) {
 		atomic_add_long(&pmap_l2_p_failures, 1);

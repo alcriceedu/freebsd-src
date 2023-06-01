@@ -6875,6 +6875,8 @@ setpde:
 		if (!atomic_fcmpset_long(firstpte, &newpde, newpde & ~PG_RW))
 			goto setpde;
 		newpde &= ~PG_RW;
+		CTR2(KTR_PMAP, "pmap_promote_pde: protect for va %#lx"
+		    " in pmap %p", va & ~PDRMASK, pmap);
 	}
 
 	/*
