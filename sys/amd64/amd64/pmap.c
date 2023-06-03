@@ -6055,8 +6055,9 @@ pmap_demote_pde_locked(pmap_t pmap, pd_entry_t *pde, vm_offset_t va,
 	newpte = pmap_swap_pat(pmap, newpte);
 
 	/*
-	 * If the page table page is not leftover from an earlier promotion,
-	 * initialize it.
+	 * If the page table page is not leftover from an earlier promotion
+	 * or it does not have PG_A set in every PTE, then fill it.  The new
+	 * PTEs will have PG_A set.
 	 */
 	if (!vm_page_all_valid(mpte))
 		pmap_fill_ptp(firstpte, newpte);
@@ -6067,8 +6068,7 @@ pmap_demote_pde_locked(pmap_t pmap, pd_entry_t *pde, vm_offset_t va,
 	 * If the mapping has changed attributes, update the page table
 	 * entries.
 	 */
-	if ((*firstpte & (PG_A | PG_PTE_PROMOTE)) != (newpte & (PG_A |
-	    PG_PTE_PROMOTE)))
+	if ((*firstpte & PG_PTE_PROMOTE) != (newpte & PG_PTE_PROMOTE))
 		pmap_fill_ptp(firstpte, newpte);
 
 	/*
