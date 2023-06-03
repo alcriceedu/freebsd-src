@@ -6065,7 +6065,8 @@ pmap_demote_pde_locked(pmap_t pmap, pd_entry_t *pde, vm_offset_t va,
 	 * If the mapping has changed attributes, update the page table
 	 * entries.
 	 */
-	if ((*firstpte & PG_PTE_PROMOTE) != (newpte & PG_PTE_PROMOTE))
+	if ((*firstpte & (PG_A | PG_PTE_PROMOTE)) != (newpte & (PG_A |
+	    PG_PTE_PROMOTE)))
 		pmap_fill_ptp(firstpte, newpte);
 
 	/*
@@ -6822,9 +6823,10 @@ pmap_promote_pde(pmap_t pmap, pd_entry_t *pde, vm_offset_t va, vm_page_t mpte,
 {
 	pd_entry_t newpde;
 	pt_entry_t *firstpte, oldpte, pa, *pte;
-	pt_entry_t PG_G, PG_M, PG_RW, PG_V, PG_PKU_MASK;
+	pt_entry_t allpte_PG_A, PG_A, PG_G, PG_M, PG_PKU_MASK, PG_RW, PG_V;
 	int PG_PTE_CACHE;
 
+	PG_A = pmap_accessed_bit(pmap);
 	PG_G = pmap_global_bit(pmap);
 	PG_M = pmap_modified_bit(pmap);
 	PG_V = pmap_valid_bit(pmap);
@@ -6884,6 +6886,7 @@ setpde:
 	 * PTE maps an unexpected 4KB physical page or does not have identical
 	 * characteristics to the first PTE.
 	 */
+	allpte_PG_A = newpde & PG_A;
 	pa = (newpde & (PG_PS_FRAME | PG_V)) + NBPDR - PAGE_SIZE;
 	for (pte = firstpte + NPTEPG - 1; pte > firstpte; pte--) {
 		oldpte = *pte;
@@ -6912,8 +6915,11 @@ setpte:
 			    " in pmap %p", va, pmap);
 			return;
 		}
+		allpte_PG_A &= oldpte;
 		pa -= PAGE_SIZE;
 	}
+	if (allpte_PG_A == 0)
+		newpde |= PG_A;
 
 	/*
 	 * Save the page table page in its current state until the PDE
