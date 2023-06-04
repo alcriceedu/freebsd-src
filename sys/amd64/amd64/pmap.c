@@ -6055,9 +6055,9 @@ pmap_demote_pde_locked(pmap_t pmap, pd_entry_t *pde, vm_offset_t va,
 	newpte = pmap_swap_pat(pmap, newpte);
 
 	/*
-	 * If the page table page is not leftover from an earlier promotion
-	 * or it does not have PG_A set in every PTE, then fill it.  The new
-	 * PTEs will have PG_A set.
+	 * If the PTP is not leftover from an earlier promotion or it does not
+	 * have PG_A set in every PTE, then fill it.  The new PTEs will all
+	 * have PG_A set.
 	 */
 	if (!vm_page_all_valid(mpte))
 		pmap_fill_ptp(firstpte, newpte);
@@ -7728,8 +7728,8 @@ pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va, vm_page_t m,
 
 #if VM_NRESERVLEVEL > 0
 	/*
-	 * If both the page table page and the reservation are fully
-	 * populated, then attempt promotion.
+	 * If both the PTP and the reservation are fully populated, then
+	 * attempt promotion.
 	 */
 	if ((mpte == NULL || mpte->ref_count == NPTEPG) &&
 	    pmap_ps_enabled(pmap) &&
