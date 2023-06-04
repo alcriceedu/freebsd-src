@@ -6889,8 +6889,6 @@ setpde:
 	 * characteristics to the first PTE.
 	 */
 	allpte_PG_A = newpde & PG_A;
-	if (allpte_PG_A == 0)
-		newpde |= PG_A;
 	pa = (newpde & (PG_PS_FRAME | PG_V)) + NBPDR - PAGE_SIZE;
 	for (pte = firstpte + NPTEPG - 1; pte > firstpte; pte--) {
 		oldpte = *pte;
@@ -6922,12 +6920,14 @@ setpte:
 		allpte_PG_A &= oldpte;
 		pa -= PAGE_SIZE;
 	}
+	if (allpte_PG_A == 0)
+		newpde &= ~PG_A;
 
 	/*
-	 * Save the page table page in its current state until the PDE
-	 * mapping the superpage is demoted by pmap_demote_pde() or
-	 * destroyed by pmap_remove_pde().  If PG_A is not set in every PTE,
-	 * then request that the page table page be refilled on a demotion.
+	 * Save the PTP in its current state until the PDE mapping the
+	 * superpage is demoted by pmap_demote_pde() or destroyed by
+	 * pmap_remove_pde().  If PG_A is not set in every PTE, then request
+	 * that the PTP be refilled on demotion.
 	 */
 	if (mpte == NULL)
 		mpte = PHYS_TO_VM_PAGE(*pde & PG_FRAME);
