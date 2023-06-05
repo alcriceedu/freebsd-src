@@ -4063,6 +4063,9 @@ pmap_add_delayed_free_list(vm_page_t m, struct spglist *free,
  * ordered by this virtual address range.
  *
  * If "promoted" is false, then the page table page "mpte" must be zero filled.
+ *
+ * If "allpte_PG_A_set" is false, then "mpte" must contain valid mappings with
+ * identical attributes with the exception of PG_A.
  */
 static __inline int
 pmap_insert_pt_page(pmap_t pmap, vm_page_t mpte, bool promoted,
@@ -6065,8 +6068,7 @@ pmap_demote_pde_locked(pmap_t pmap, pd_entry_t *pde, vm_offset_t va,
 	pmap_demote_pde_check(firstpte, newpte);
 
 	/*
-	 * If the mapping has changed attributes, update the page table
-	 * entries.
+	 * If the mapping has changed attributes, update the PTEs.
 	 */
 	if ((*firstpte & PG_PTE_PROMOTE) != (newpte & PG_PTE_PROMOTE))
 		pmap_fill_ptp(firstpte, newpte);
