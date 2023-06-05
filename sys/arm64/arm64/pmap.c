@@ -4072,7 +4072,7 @@ static void
 pmap_update_entry(pmap_t pmap, pd_entry_t *pte, pd_entry_t newpte,
     vm_offset_t va, vm_size_t size)
 {
-	pd_entry_t *l3, newl3;
+	pd_entry_t *l3;
 	register_t intr;
 
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
@@ -4109,8 +4109,8 @@ pmap_update_entry(pmap_t pmap, pd_entry_t *pte, pd_entry_t newpte,
 
 	/* Create the new mapping */
 	if (size == L3C_SIZE) {
-		for (l3 = pte, newl3 = newpte; l3 - pte < L3C_ENTRIES; l3++, newl3 += PAGE_SIZE) {
-			pmap_store(l3, newl3);
+		for (l3 = pte; l3 - pte < L3C_ENTRIES; l3++, newpte += PAGE_SIZE) {
+			pmap_store(l3, newpte);
 		}
 	} else {
 		pmap_store(pte, newpte);
