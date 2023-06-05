@@ -7113,6 +7113,7 @@ static void
 pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 {
 	pt_entry_t *end_l3, *l3, mask, nbits, old_l3, *start_l3;
+	vm_offset_t tmpl3;
 	register_t intr;
 
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
@@ -7122,6 +7123,20 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 	mask = 0;
 	nbits = ATTR_DESCR_VALID;
 	intr = intr_disable();
+
+	tmpl3 = 0;
+	if (((va & ~L3C_OFFSET) < (vm_offset_t)end_l3) &&
+	    ((vm_offset_t)start_l3 < (va & ~L3C_OFFSET) + L3C_SIZE)) {
+		tmpl3 = kva_alloc(PAGE_SIZE);
+		pmap_kenter(tmpl3, PAGE_SIZE,
+		    DMAP_TO_PHYS((vm_offset_t)start_l3) & ~L3_OFFSET,
+		    VM_MEMATTR_WRITE_BACK);
+		start_l3 = (pt_entry_t *)(tmpl3 +
+		    ((vm_offset_t)start_l3 & PAGE_MASK));
+		end_l3 = (pt_entry_t *)(tmpl3 +
+                    ((vm_offset_t)end_l3 & PAGE_MASK));
+	}
+
 	/* Break the mappings. */
 	for (l3 = start_l3; l3 < end_l3; l3++) {
 		/*
@@ -7162,7 +7177,14 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 			cpu_spinwait();
 	}
 	dsb(ishst);
+
 	intr_restore(intr);
+
+	if (tmpl3 != 0) {
+		pmap_kremove(tmpl3);
+		kva_free(tmpl3, PAGE_SIZE);
+	}
+
 	atomic_add_long(&pmap_l3c_demotions, 1);
 	CTR2(KTR_PMAP, "pmap_demote_l3c: success for va %#lx in pmap %p",
 	    va, pmap);
