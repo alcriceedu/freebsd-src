@@ -184,7 +184,13 @@ typedef	uint64_t	pt_entry_t;		/* page table entry */
  * The number of contiguous Level 3 entries (with ATTR_CONTIGUOUS set) that
  * can be coalesced into a single TLB entry
  */
-#define	L3C_ENTRIES	16
+#if PAGE_SIZE == PAGE_SIZE_4K
+#define L3C_ENTRIES	16
+#elif PAGE_SIZE == PAGE_SIZE_16K
+#define L3C_ENTRIES	128
+#else
+#error Unsupported page size
+#endif
 
 #define	L3C_SIZE	(L3C_ENTRIES * L3_SIZE)
 #define	L3C_OFFSET	(L3C_SIZE - 1)

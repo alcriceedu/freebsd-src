@@ -39,6 +39,8 @@
 #ifndef	_MACHINE_VMPARAM_H_
 #define	_MACHINE_VMPARAM_H_
 
+#include <sys/param.h>
+
 /*
  * Virtual memory related constants, all in bytes
  */
@@ -106,10 +108,17 @@
 #endif
 
 /*
- * Level 0 reservations consist of 512 pages.
+ * Level 0 reservations consist of 512 pages when the page size is 4K,
+ * and 2048 pages when the page size is 16K.
  */
-#ifndef	VM_LEVEL_0_ORDER
-#define	VM_LEVEL_0_ORDER	9
+#ifndef VM_LEVEL_0_ORDER
+#if PAGE_SIZE == PAGE_SIZE_4K
+#define VM_LEVEL_0_ORDER	9
+#elif PAGE_SIZE == PAGE_SIZE_16K
+#define VM_LEVEL_0_ORDER	11
+#else
+#error Unsupported page size
+#endif
 #endif
 
 /**
