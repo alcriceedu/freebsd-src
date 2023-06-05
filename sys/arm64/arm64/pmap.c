@@ -4233,6 +4233,8 @@ setl3:
 		all_l3e_AF &= oldl3;
 		pa -= PAGE_SIZE;
 	}
+	if (all_l3e_AF == 0)
+		newl2 &= ~ATTR_AF;
 
 	/*
 	 * Save the page table page in its current state until the L2
