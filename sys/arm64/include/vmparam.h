@@ -39,8 +39,6 @@
 #ifndef	_MACHINE_VMPARAM_H_
 #define	_MACHINE_VMPARAM_H_
 
-#include <sys/param.h>
-
 /*
  * Virtual memory related constants, all in bytes
  */
