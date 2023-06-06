@@ -6922,8 +6922,14 @@ setpte:
 		allpte_PG_A &= oldpte;
 		pa -= PAGE_SIZE;
 	}
-	if (allpte_PG_A == 0)
-		newpde &= ~PG_A;
+
+	/*
+	 * Unless all PTEs have PG_A set, clear it from the superpage mapping,
+	 * so that promotions triggered by speculative mappings, such as
+	 * pmap_enter_quick(), don't automatically mark the underlying pages
+	 * as referenced.
+	 */
+	newpde &= ~PG_A | allpte_PG_A;
 
 	/*
 	 * Save the PTP in its current state until the PDE mapping the

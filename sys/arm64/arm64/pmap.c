@@ -4233,8 +4233,14 @@ setl3:
 		all_l3e_AF &= oldl3;
 		pa -= PAGE_SIZE;
 	}
-	if (all_l3e_AF == 0)
-		newl2 &= ~ATTR_AF;
+
+	/*
+	 * Unless all PTEs have ATTR_AF set, clear it from the superpage
+	 * mapping, so that promotions triggered by speculative mappings,
+	 * such as pmap_enter_quick(), don't automatically mark the
+	 * underlying pages as referenced.
+	 */
+	newl2 &= ~ATTR_AF | all_l3e_AF;
 
 	/*
 	 * Save the page table page in its current state until the L2
