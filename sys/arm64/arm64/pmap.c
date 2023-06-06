@@ -470,7 +470,7 @@ static pt_entry_t *pmap_demote_l1(pmap_t pmap, pt_entry_t *l1, vm_offset_t va);
 static pt_entry_t *pmap_demote_l2_locked(pmap_t pmap, pt_entry_t *l2,
     vm_offset_t va, struct rwlock **lockp);
 static pt_entry_t *pmap_demote_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t va);
-static void pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va);
+static bool pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va);
 static vm_page_t pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va,
     vm_page_t m, vm_prot_t prot, vm_page_t mpte, struct rwlock **lockp);
 static int pmap_enter_l2(pmap_t pmap, vm_offset_t va, pd_entry_t new_l2,
@@ -6797,7 +6797,9 @@ pmap_change_props_locked(vm_offset_t va, vm_size_t size, vm_prot_t prot,
                                         	pte_size = L3C_SIZE;
                                         	break;
                                 	}
-                                	pmap_demote_l3c(kernel_pmap, ptep, tmpva);
+					if (!pmap_demote_l3c(kernel_pmap, ptep, tmpva)) {
+						return (EINVAL);
+					}
 				}
 				pte_size = PAGE_SIZE;
 				break;
@@ -7109,7 +7111,7 @@ pmap_demote_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t va)
 /*
  * Demote a 64KB contiguous mapping to 16 4KB page mappings.
  */
-static void
+static bool
 pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 {
 	pt_entry_t *end_l3, *l3, mask, nbits, old_l3, *start_l3;
@@ -7128,6 +7130,9 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 	if (((va & ~L3C_OFFSET) < (vm_offset_t)end_l3) &&
 	    ((vm_offset_t)start_l3 < (va & ~L3C_OFFSET) + L3C_SIZE)) {
 		tmpl3 = kva_alloc(PAGE_SIZE);
+		if (tmpl3 == 0) {
+			return (false);
+		}
 		pmap_kenter(tmpl3, PAGE_SIZE,
 		    DMAP_TO_PHYS((vm_offset_t)start_l3) & ~L3_OFFSET,
 		    VM_MEMATTR_WRITE_BACK);
@@ -7191,6 +7196,8 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 	atomic_add_long(&pmap_l3c_demotions, 1);
 	CTR2(KTR_PMAP, "pmap_demote_l3c: success for va %#lx in pmap %p",
 	    va, pmap);
+
+	return (true);
 }
 
 /*
