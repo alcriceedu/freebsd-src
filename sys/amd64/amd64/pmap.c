@@ -4062,10 +4062,16 @@ pmap_add_delayed_free_list(vm_page_t m, struct spglist *free,
  * for mapping a distinct range of virtual addresses.  The pmap's collection is
  * ordered by this virtual address range.
  *
- * If "promoted" is false, then the page table page "mpte" must be zero filled.
+ * If "promoted" is false, then the page table page "mpte" must be zero filled;
+ * "mpte"'s valid field will be set to 0.
  *
- * If "allpte_PG_A_set" is false, then "mpte" must contain valid mappings with
- * identical attributes with the exception of PG_A.
+ * If "promoted" is true and "allpte_PG_A_set" is false, then "mpte" must
+ * contain valid mappings with identical attributes except for PG_A; "mpte"'s
+ * valid field will be set to 1.
+ *
+ * If "promoted" and "allpte_PG_A_set" are both true, then "mpte" must contain
+ * valid mappings with identical attributes including PG_A, "mpte"'s valid
+ * field will be set to VM_PAGE_BITS_ALL.
  */
 static __inline int
 pmap_insert_pt_page(pmap_t pmap, vm_page_t mpte, bool promoted,
