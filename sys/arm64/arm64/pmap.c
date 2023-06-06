@@ -7166,9 +7166,12 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 			mask = ATTR_S1_AP_RW_BIT;
 		nbits |= old_l3 & ATTR_AF;
 	}
-	/* XXX Optimization: Skip if not ATTR_AF? */
-	pmap_invalidate_range(pmap, va & ~L3C_OFFSET, (va + L3C_SIZE) &
-	    ~L3C_OFFSET, true);
+
+	if ((nbits & ATTR_AF) != 0) {
+		pmap_invalidate_range(pmap, va & ~L3C_OFFSET, (va + L3C_SIZE) &
+		    ~L3C_OFFSET, true);
+	}
+
 	/* Remake the mappings, updating the accessed and dirty bits. */
 	for (l3 = start_l3; l3 < end_l3; l3++) {
 		old_l3 = pmap_load(l3);
