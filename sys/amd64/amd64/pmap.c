@@ -4070,7 +4070,7 @@ pmap_add_delayed_free_list(vm_page_t m, struct spglist *free,
  * valid field will be set to 1.
  *
  * If "promoted" and "allpte_PG_A_set" are both true, then "mpte" must contain
- * valid mappings with identical attributes including PG_A, "mpte"'s valid
+ * valid mappings with identical attributes including PG_A; "mpte"'s valid
  * field will be set to VM_PAGE_BITS_ALL.
  */
 static __inline int
@@ -4079,6 +4079,8 @@ pmap_insert_pt_page(pmap_t pmap, vm_page_t mpte, bool promoted,
 {
 
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
+	KASSERT(promoted || !allpte_PG_A_set,
+	    ("a zero-filled PTP can't have PG_A set in every PTE"));
 	mpte->valid = promoted ? (allpte_PG_A_set ? VM_PAGE_BITS_ALL : 1) : 0;
 	return (vm_radix_insert(&pmap->pm_root, mpte));
 }

@@ -4023,7 +4023,7 @@ pmap_disable_promotion(vm_offset_t sva, vm_size_t size)
  * "mpte"'s valid field will be set to 1.
  *
  * If "promoted" and "all_l3e_AF_set" are both true, then "mpte" must contain
- * valid mappings with identical attributes including ATTR_AF, "mpte"'s valid
+ * valid mappings with identical attributes including ATTR_AF; "mpte"'s valid
  * field will be set to VM_PAGE_BITS_ALL.
  */
 static __inline int
@@ -4032,6 +4032,8 @@ pmap_insert_pt_page(pmap_t pmap, vm_page_t mpte, bool promoted,
 {
 
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
+	KASSERT(promoted || !all_l3e_AF_set,
+	    ("a zero-filled PTP can't have ATTR_AF set in every PTE"));
 	mpte->valid = promoted ? (all_l3e_AF_set ? VM_PAGE_BITS_ALL : 1) : 0;
 	return (vm_radix_insert(&pmap->pm_root, mpte));
 }
