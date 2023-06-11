@@ -2913,6 +2913,8 @@ reclaim_pv_chunk_domain(pmap_t locked_pmap, struct rwlock **lockp, int domain)
 				tpte = pmap_load(pte);
 				if ((tpte & ATTR_SW_WIRED) != 0)
 					continue;
+				if ((tpte & ATTR_CONTIGUOUS) != 0)
+					pmap_demote_l3c(pmap, pte, va);
 				tpte = pmap_load_clear(pte);
 				m = PHYS_TO_VM_PAGE(PTE_TO_PHYS(tpte));
 				if (pmap_pte_dirty(pmap, tpte))
@@ -3499,6 +3501,9 @@ pmap_remove_l3(pmap_t pmap, pt_entry_t *l3, vm_offset_t va,
 	vm_page_t m;
 
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
+	old_l3 = pmap_load(l3);
+	if ((old_l3 & ATTR_CONTIGUOUS) != 0)
+		pmap_demote_l3c(pmap, l3, va);
 	old_l3 = pmap_load_clear(l3);
 	pmap_s1_invalidate_page(pmap, va, true);
 	if (old_l3 & ATTR_SW_WIRED)
@@ -3547,13 +3552,17 @@ pmap_remove_l3_range(pmap_t pmap, pd_entry_t l2e, vm_offset_t sva,
 	l3pg = !ADDR_IS_KERNEL(sva) ? PHYS_TO_VM_PAGE(PTE_TO_PHYS(l2e)) : NULL;
 	va = eva;
 	for (l3 = pmap_l2_to_l3(&l2e, sva); sva != eva; l3++, sva += L3_SIZE) {
-		if (!pmap_l3_valid(pmap_load(l3))) {
+		old_l3 = pmap_load(l3);
+		if (!pmap_l3_valid(old_l3)) {
 			if (va != eva) {
 				pmap_invalidate_range(pmap, va, sva, true);
 				va = eva;
 			}
 			continue;
 		}
+		// XXX Reintroduce whole-superpage optimization
+		if ((old_l3 & ATTR_CONTIGUOUS) != 0)
+			pmap_demote_l3c(pmap, l3, sva);
 		old_l3 = pmap_load_clear(l3);
 		if ((old_l3 & ATTR_SW_WIRED) != 0)
 			pmap->pm_stats.wired_count--;
@@ -3801,6 +3810,9 @@ retry:
 		tpde = pmap_load(pde);
 
 		pte = pmap_l2_to_l3(pde, pv->pv_va);
+		tpte = pmap_load(pte);
+		if ((tpte & ATTR_CONTIGUOUS) != 0)
+			pmap_demote_l3c(pmap, pte, pv->pv_va);
 		tpte = pmap_load_clear(pte);
 		if (tpte & ATTR_SW_WIRED)
 			pmap->pm_stats.wired_count--;
@@ -3957,7 +3969,18 @@ pmap_mask_set_locked(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, pt_entry_t m
 						    va, sva, true);
 					va = va_next;
 				}
+				// XXX Reintroduce whole-superpage optimization
 				continue;
+			}
+			// XXX Reintroduce whole-superpage optimization
+			if ((l3 & ATTR_CONTIGUOUS) != 0) {
+				pmap_demote_l3c(pmap, l3p, sva);
+
+				/*
+				 * The L3 entry's accessed bit may have
+				 * changed.
+				 */
+				l3 = pmap_load(l3p);
 			}
 
 			while (!atomic_fcmpset_64(l3p, &l3, (l3 & ~mask) |
@@ -4585,6 +4608,8 @@ havel3:
 		 * The physical page has changed.  Temporarily invalidate
 		 * the mapping.
 		 */
+		if ((orig_l3 & ATTR_CONTIGUOUS) != 0)
+			pmap_demote_l3c(pmap, l3, va);
 		orig_l3 = pmap_load_clear(l3);
 		KASSERT(PTE_TO_PHYS(orig_l3) == opa,
 		    ("pmap_enter: unexpected pa update for %#lx", va));
@@ -4670,6 +4695,8 @@ validate:
 		KASSERT(opa == pa, ("pmap_enter: invalid update"));
 		if ((orig_l3 & ~ATTR_AF) != (new_l3 & ~ATTR_AF)) {
 			/* same PA, different attributes */
+			if ((orig_l3 & ATTR_CONTIGUOUS) != 0)
+				pmap_demote_l3c(pmap, l3, va);
 			orig_l3 = pmap_load_store(l3, new_l3);
 			pmap_invalidate_page(pmap, va, true);
 			if ((orig_l3 & ATTR_SW_MANAGED) != 0 &&
@@ -5140,6 +5167,7 @@ pmap_unwire(pmap_t pmap, vm_offset_t sva, vm_offset_t eva)
 	vm_offset_t va_next;
 	pd_entry_t *l0, *l1, *l2;
 	pt_entry_t *l3;
+	bool partial_l3c;
 
 	PMAP_LOCK(pmap);
 	for (; sva < eva; sva = va_next) {
@@ -5202,10 +5230,22 @@ pmap_unwire(pmap_t pmap, vm_offset_t sva, vm_offset_t eva)
 
 		if (va_next > eva)
 			va_next = eva;
+		partial_l3c = true;
 		for (l3 = pmap_l2_to_l3(l2, sva); sva != va_next; l3++,
 		    sva += L3_SIZE) {
 			if (pmap_load(l3) == 0)
 				continue;
+			if ((pmap_load(l3) & ATTR_CONTIGUOUS) != 0) {
+				/*
+				 * XXX Avoid demotion for whole page unwiring.
+				 */
+				if ((sva & L3C_OFFSET) == 0) {
+					partial_l3c = sva + L3C_SIZE > eva;
+				}
+				if (partial_l3c) {
+					pmap_demote_l3c(pmap, l3, sva);
+				}
+			}
 			if ((pmap_load(l3) & ATTR_SW_WIRED) == 0)
 				panic("pmap_unwire: l3 %#jx is missing "
 				    "ATTR_SW_WIRED", (uintmax_t)pmap_load(l3));
@@ -6034,6 +6074,15 @@ retry:
 		pte = pmap_pte_exists(pmap, pv->pv_va, 3, __func__);
 		oldpte = pmap_load(pte);
 		if ((oldpte & ATTR_SW_DBM) != 0) {
+			if ((oldpte & ATTR_CONTIGUOUS) != 0) {
+				pmap_demote_l3c(pmap, pte, pv->pv_va);
+
+				/*
+				 * The L3 entry's accessed bit may have
+				 * changed.
+				 */
+				oldpte = pmap_load(pte);
+			}
 			if (pmap->pm_stage == PM_STAGE1) {
 				set = ATTR_S1_AP_RW_BIT;
 				clear = 0;
@@ -6419,7 +6468,9 @@ restart:
 		l2 = pmap_l2(pmap, pv->pv_va);
 		l3 = pmap_l2_to_l3(l2, pv->pv_va);
 		oldl3 = pmap_load(l3);
-		if ((oldl3 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) == ATTR_SW_DBM){
+		if ((oldl3 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) == ATTR_SW_DBM) {
+			if ((oldl3 & ATTR_CONTIGUOUS) != 0)
+				pmap_demote_l3c(pmap, l3, pv->pv_va);
 			pmap_set_bits(l3, ATTR_S1_AP(ATTR_S1_AP_RO));
 			pmap_s1_invalidate_page(pmap, pv->pv_va, true);
 		}
