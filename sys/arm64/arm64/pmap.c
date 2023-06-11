@@ -5106,6 +5106,12 @@ pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va, vm_page_t m,
 		if (l2 == NULL)
 			l2 = pmap_pde(pmap, va, &lvl);
 		pmap_promote_l2(pmap, l2, va, mpte, lockp);
+
+		/*
+		 * If promotion succeeds, then the next call to this function
+		 * should not be given the unmapped PTP as a hint.
+		 */
+		mpte = NULL;
 	}
 #endif
 

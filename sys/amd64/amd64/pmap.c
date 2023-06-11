@@ -313,6 +313,33 @@ pmap_pku_mask_bit(pmap_t pmap)
 	return (pmap->pm_type == PT_X86 ? X86_PG_PKU_MASK : 0);
 }
 
+static __inline boolean_t
+safe_to_clear_referenced(pmap_t pmap, pt_entry_t pte)
+{
+
+	if (!pmap_emulate_ad_bits(pmap))
+		return (TRUE);
+
+	KASSERT(pmap->pm_type == PT_EPT, ("invalid pm_type %d", pmap->pm_type));
+
+	/*
+	 * XWR = 010 or 110 will cause an unconditional EPT misconfiguration
+	 * so we don't let the referenced (aka EPT_PG_READ) bit to be cleared
+	 * if the EPT_PG_WRITE bit is set.
+	 */
+	if ((pte & EPT_PG_WRITE) != 0)
+		return (FALSE);
+
+	/*
+	 * XWR = 100 is allowed only if the PMAP_SUPPORTS_EXEC_ONLY is set.
+	 */
+	if ((pte & EPT_PG_EXECUTE) == 0 ||
+	    ((pmap->pm_flags & PMAP_SUPPORTS_EXEC_ONLY) != 0))
+		return (TRUE);
+	else
+		return (FALSE);
+}
+
 #if !defined(DIAGNOSTIC)
 #ifdef __GNUC_GNU_INLINE__
 #define PMAP_INLINE	__attribute__((__gnu_inline__)) inline
@@ -6940,6 +6967,13 @@ setpte:
 	newpde &= ~PG_A | allpte_PG_A;
 
 	/*
+	 * EPT PTEs with PG_M set and PG_A clear are not supported by early
+	 * MMUs supporting EPT.
+	 */
+	KASSERT((newpde & PG_A) != 0 || safe_to_clear_referenced(pmap, newpde),
+	    ("unsupported EPT PTE"));
+
+	/*
 	 * Save the PTP in its current state until the PDE mapping the
 	 * superpage is demoted by pmap_demote_pde() or destroyed by
 	 * pmap_remove_pde().  If PG_A is not set in every PTE, then request
@@ -7754,6 +7788,12 @@ pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va, vm_page_t m,
 		if (pde == NULL)
 			pde = pmap_pde(pmap, va);
 		pmap_promote_pde(pmap, pde, va, mpte, lockp);
+
+		/*
+		 * If promotion succeeds, then the next call to this function
+		 * should not be given the unmapped PTP as a hint.
+		 */
+		mpte = NULL;
 	}
 #endif
 
@@ -8855,33 +8895,6 @@ retry:
 	rw_wunlock(lock);
 	vm_page_aflag_clear(m, PGA_WRITEABLE);
 	pmap_delayed_invl_wait(m);
-}
-
-static __inline boolean_t
-safe_to_clear_referenced(pmap_t pmap, pt_entry_t pte)
-{
-
-	if (!pmap_emulate_ad_bits(pmap))
-		return (TRUE);
-
-	KASSERT(pmap->pm_type == PT_EPT, ("invalid pm_type %d", pmap->pm_type));
-
-	/*
-	 * XWR = 010 or 110 will cause an unconditional EPT misconfiguration
-	 * so we don't let the referenced (aka EPT_PG_READ) bit to be cleared
-	 * if the EPT_PG_WRITE bit is set.
-	 */
-	if ((pte & EPT_PG_WRITE) != 0)
-		return (FALSE);
-
-	/*
-	 * XWR = 100 is allowed only if the PMAP_SUPPORTS_EXEC_ONLY is set.
-	 */
-	if ((pte & EPT_PG_EXECUTE) == 0 ||
-	    ((pmap->pm_flags & PMAP_SUPPORTS_EXEC_ONLY) != 0))
-		return (TRUE);
-	else
-		return (FALSE);
 }
 
 /*
