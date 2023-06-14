@@ -7218,10 +7218,6 @@ pmap_change_props_locked(vm_offset_t va, vm_size_t size, vm_prot_t prot,
 				/* FALLTHROUGH */
 			case 3:
 				if ((pmap_load(ptep) & ATTR_CONTIGUOUS) != 0) {
-					KASSERT(VIRT_IN_DMAP(tmpva),
-					    ("pmap_change_props_locked: "
-					    "Contiguous bit set outside of "
-					    "direct map"));
 					if ((tmpva & L3C_OFFSET) == 0 &&
                                 	    (base + size - tmpva) >= L3C_SIZE) {
                                         	pte_size = L3C_SIZE;
@@ -7460,14 +7456,10 @@ pmap_demote_l2_locked(pmap_t pmap, pt_entry_t *l2, vm_offset_t va,
 	}
 	l3phys = VM_PAGE_TO_PHYS(ml3);
 	l3 = (pt_entry_t *)PHYS_TO_DMAP(l3phys);
-	newl3 = (oldl2 & ~ATTR_DESCR_MASK) | L3_PAGE;
+	newl3 = (oldl2 & ~ATTR_DESCR_MASK) | L3_PAGE | ATTR_CONTIGUOUS;
 	KASSERT((oldl2 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) !=
 	    (ATTR_S1_AP(ATTR_S1_AP_RO) | ATTR_SW_DBM),
 	    ("pmap_demote_l2: L2 entry is writeable but not dirty"));
-
-	if (VIRT_IN_DMAP(va)) {
-		newl3 |= ATTR_CONTIGUOUS;
-	}
 
 	/*
 	 * If the page table page is not leftover from an earlier promotion,
