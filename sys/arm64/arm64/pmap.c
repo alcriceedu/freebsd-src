@@ -7633,7 +7633,8 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 }
 
 /*
- * XXX
+ * Accumulate the accessed and dirty bits within a contiguous superpage and
+ * return the specified PTE with them applied correctly.
  */
 static pt_entry_t
 pmap_load_l3c(pt_entry_t *l3p)
