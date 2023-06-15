@@ -3740,8 +3740,6 @@ pmap_remove_l3_range(pmap_t pmap, pd_entry_t l2e, vm_offset_t sva,
 				pmap_demote_l3c(pmap, l3, sva);
 			}
 		}
-		if ((old_l3 & ATTR_CONTIGUOUS) != 0)
-			pmap_demote_l3c(pmap, l3, sva);
 		old_l3 = pmap_load_clear(l3);
 		if ((old_l3 & ATTR_SW_WIRED) != 0)
 			pmap->pm_stats.wired_count--;
