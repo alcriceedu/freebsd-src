@@ -4552,7 +4552,7 @@ setl3:
 	if ((newl2 & ATTR_SW_MANAGED) != 0)
 		pmap_pv_promote_l2(pmap, va, PTE_TO_PHYS(newl2), lockp);
 
-	newl2 &= ~ATTR_DESCR_MASK;
+	newl2 &= ~(ATTR_DESCR_MASK | ATTR_CONTIGUOUS);
 	newl2 |= L2_BLOCK;
 
 	pmap_update_entry(pmap, l2, newl2, va & ~L2_OFFSET, L2_SIZE);
