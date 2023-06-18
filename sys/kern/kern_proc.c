@@ -2513,6 +2513,7 @@ kern_proc_vmmap_resident(vm_map_t map, vm_map_entry_t entry,
 	vm_offset_t addr;
 	vm_paddr_t pa;
 	vm_pindex_t pi, pi_adv, pindex;
+	int incore;
 
 	*super = false;
 	*resident_count = 0;
@@ -2547,11 +2548,16 @@ kern_proc_vmmap_resident(vm_map_t map, vm_map_entry_t entry,
 			}
 		}
 		m_adv = NULL;
-		if (m->psind != 0 && addr + pagesizes[1] <= entry->end &&
-		    (addr & (pagesizes[1] - 1)) == 0 &&
-		    (pmap_mincore(map->pmap, addr, &pa) & MINCORE_SUPER) != 0) {
+		if (m->psind != 0 && addr + pagesizes[m->psind] <= entry->end &&
+		    (addr & (pagesizes[m->psind] - 1)) == 0 && ((incore =
+		    pmap_mincore(map->pmap, addr, &pa)) & MINCORE_SUPER) != 0) {
 			*super = true;
-			pi_adv = atop(pagesizes[1]);
+			/*
+			 * The virtual page might be smaller than the physical
+			 * page, so we use the page size reported by the pmap
+			 * rather than m->psind.
+			 */
+			pi_adv = atop(pagesizes[incore >> MINCORE_SUPER_SHIFT]);
 		} else {
 			/*
 			 * We do not test the found page on validity.

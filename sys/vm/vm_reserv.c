@@ -408,7 +408,7 @@ vm_reserv_depopulate(vm_reserv_t rv, int index)
 	    ("vm_reserv_depopulate: reserv %p's domain is corrupted %d",
 	    rv, rv->domain));
 	if (rv->popcnt == VM_LEVEL_0_NPAGES) {
-		KASSERT(rv->pages->psind == 1,
+		KASSERT(rv->pages->psind == 2,
 		    ("vm_reserv_depopulate: reserv %p is already demoted",
 		    rv));
 		rv->pages->psind = 0;
@@ -547,7 +547,7 @@ vm_reserv_populate(vm_reserv_t rv, int index)
 		KASSERT(rv->pages->psind == 0,
 		    ("vm_reserv_populate: reserv %p is already promoted",
 		    rv));
-		rv->pages->psind = 1;
+		rv->pages->psind = 2;
 	}
 	vm_reserv_domain_unlock(rv->domain);
 }
