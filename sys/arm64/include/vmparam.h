@@ -271,6 +271,8 @@ extern vm_offset_t vm_max_kernel_address;
  */
 #define	PMAP_HAS_LARGEPAGES	1
 
+#define PMAP_LARGEPAGE_DEFAULT_PSIND	2
+
 /*
  * Need a page dump array for minidump.
  */

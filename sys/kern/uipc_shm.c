@@ -1588,7 +1588,7 @@ shm_mmap_large(struct shmfd *shmfd, vm_map_t map, vm_offset_t *addr,
 	} else if (align == MAP_ALIGNED_SUPER) {
 		if (shmfd->shm_lp_psind != 1)
 			return (EINVAL);
-		align = pagesizes[1];
+		align = pagesizes[PMAP_LARGEPAGE_DEFAULT_PSIND];
 	} else {
 		align >>= MAP_ALIGNMENT_SHIFT;
 		align = 1ULL << align;
