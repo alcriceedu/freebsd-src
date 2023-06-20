@@ -115,6 +115,8 @@
 #endif
 #endif
 
+#define VM_LEVEL_0_PSIND	2
+
 /**
  * Address space layout.
  *

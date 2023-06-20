@@ -408,7 +408,7 @@ vm_reserv_depopulate(vm_reserv_t rv, int index)
 	    ("vm_reserv_depopulate: reserv %p's domain is corrupted %d",
 	    rv, rv->domain));
 	if (rv->popcnt == VM_LEVEL_0_NPAGES) {
-		KASSERT(rv->pages->psind == 2,
+		KASSERT(rv->pages->psind == VM_LEVEL_0_PSIND,
 		    ("vm_reserv_depopulate: reserv %p is already demoted",
 		    rv));
 		rv->pages->psind = 0;
@@ -524,7 +524,7 @@ vm_reserv_populate(vm_reserv_t rv, int index)
 	    index));
 	KASSERT(rv->popcnt < VM_LEVEL_0_NPAGES,
 	    ("vm_reserv_populate: reserv %p is already full", rv));
-	KASSERT(rv->pages->psind == 0,
+	KASSERT(rv->pages->psind != VM_LEVEL_0_PSIND,
 	    ("vm_reserv_populate: reserv %p is already promoted", rv));
 	KASSERT(rv->domain < vm_ndomains,
 	    ("vm_reserv_populate: reserv %p's domain is corrupted %d",
@@ -544,10 +544,10 @@ vm_reserv_populate(vm_reserv_t rv, int index)
 		rv->inpartpopq = TRUE;
 		TAILQ_INSERT_TAIL(&vm_rvd[rv->domain].partpop, rv, partpopq);
 	} else {
-		KASSERT(rv->pages->psind == 0,
+		KASSERT(rv->pages->psind != VM_LEVEL_0_PSIND,
 		    ("vm_reserv_populate: reserv %p is already promoted",
 		    rv));
-		rv->pages->psind = 2;
+		rv->pages->psind = VM_LEVEL_0_PSIND;
 	}
 	vm_reserv_domain_unlock(rv->domain);
 }
