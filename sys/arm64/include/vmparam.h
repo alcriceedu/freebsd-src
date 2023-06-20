@@ -115,7 +115,9 @@
 #endif
 #endif
 
-#define VM_LEVEL_0_PSIND	2
+#define VM_LEVEL_0_FULL_PSIND	2
+
+#define VM_LEVEL_0_PART_PSIND	1
 
 /**
  * Address space layout.
