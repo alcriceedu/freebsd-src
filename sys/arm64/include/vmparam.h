@@ -119,6 +119,8 @@
 
 #define VM_LEVEL_0_PART_PSIND	1
 
+#define VM_LEVEL_0_PART_COUNT	L3C_ENTRIES
+
 /**
  * Address space layout.
  *

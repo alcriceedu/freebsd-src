@@ -383,6 +383,32 @@ vm_reserv_insert(vm_reserv_t rv, vm_object_t object, vm_pindex_t pindex)
 	vm_reserv_object_unlock(object);
 }
 
+#ifdef VM_LEVEL_0_PART_PSIND
+static __inline bool
+vm_reserv_part_full(vm_reserv_t rv, int index)
+{
+	KASSERT(powerof2(VM_LEVEL_0_PART_COUNT),
+            ("vm_reserv_part_full: size %ul is not a power of 2",
+	    VM_LEVEL_0_PART_COUNT));
+	switch (VM_LEVEL_0_PART_COUNT) {
+		case 8:
+			return (((uint8_t *)rv->popmap)[index / 8] == UINT8_MAX);
+		case 16:
+			return (((uint16_t *)rv->popmap)[index / 16] == UINT16_MAX);
+		case 32:
+			return (((uint32_t *)rv->popmap)[index / 32] == UINT32_MAX);
+		default: {
+			int s = rounddown2(index, VM_LEVEL_0_PART_COUNT) / 64;
+			for (int i = s; i < s + VM_LEVEL_0_PART_COUNT / 64; i++) {
+				if (((uint64_t *)rv->popmap)[i] != UINT64_MAX)
+					return false;
+			}
+			return true;
+		}
+	}
+}
+#endif
+
 /*
  * Reduces the given reservation's population count.  If the population count
  * becomes zero, the reservation is destroyed.  Additionally, moves the
@@ -411,8 +437,15 @@ vm_reserv_depopulate(vm_reserv_t rv, int index)
 		KASSERT(rv->pages->psind == VM_LEVEL_0_FULL_PSIND,
 		    ("vm_reserv_depopulate: reserv %p is already demoted",
 		    rv));
+		#ifdef VM_LEVEL_0_PART_PSIND
+		rv->pages->psind = VM_LEVEL_0_PART_PSIND;
+		#else
 		rv->pages->psind = 0;
+		#endif
 	}
+	#ifdef VM_LEVEL_0_PART_PSIND
+	rv->pages[rounddown2(index, VM_LEVEL_0_PART_COUNT)].psind = 0;
+	#endif
 	bit_clear(rv->popmap, index);
 	rv->popcnt--;
 	if ((unsigned)(ticks - rv->lasttick) >= PARTPOPSLOP ||
@@ -530,6 +563,10 @@ vm_reserv_populate(vm_reserv_t rv, int index)
 	    ("vm_reserv_populate: reserv %p's domain is corrupted %d",
 	    rv, rv->domain));
 	bit_set(rv->popmap, index);
+	#ifdef VM_LEVEL_0_PART_PSIND
+	if (vm_reserv_part_full(rv, index))
+		rv->pages[rounddown2(index, VM_LEVEL_0_PART_COUNT)].psind = 1;
+	#endif
 	rv->popcnt++;
 	if ((unsigned)(ticks - rv->lasttick) < PARTPOPSLOP &&
 	    rv->inpartpopq && rv->popcnt != VM_LEVEL_0_NPAGES)
