@@ -6830,10 +6830,10 @@ pmap_change_props_locked(vm_offset_t va, vm_size_t size, vm_prot_t prot,
 					    "Contiguous bit set outside of "
 					    "direct map"));
 					if ((tmpva & L3C_OFFSET) == 0 &&
-                                	    (base + size - tmpva) >= L3C_SIZE) {
-                                        	pte_size = L3C_SIZE;
-                                        	break;
-                                	}
+					    (base + size - tmpva) >= L3C_SIZE) {
+						pte_size = L3C_SIZE;
+						break;
+					}
 					if (!pmap_demote_l3c(kernel_pmap, ptep, tmpva)) {
 						return (EINVAL);
 					}
