@@ -4077,10 +4077,10 @@ pmap_remove_pt_page(pmap_t pmap, vm_offset_t va)
  * inconsistent state.
  */
 static void
-pmap_update_entry(pmap_t pmap, pd_entry_t *pte, pd_entry_t newpte,
+pmap_update_entry(pmap_t pmap, pd_entry_t *ptep, pd_entry_t newpte,
     vm_offset_t va, vm_size_t size)
 {
-	pd_entry_t *l3, *pte_end;
+	pd_entry_t *lip, *ptep_end;
 	register_t intr;
 
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
@@ -4089,9 +4089,9 @@ pmap_update_entry(pmap_t pmap, pd_entry_t *pte, pd_entry_t newpte,
 		panic("%s: Updating non-promote pte", __func__);
 
 	if (size == L3C_SIZE)
-		pte_end = pte + L3C_ENTRIES;
+		ptep_end = ptep + L3C_ENTRIES;
 	else
-		pte_end = pte + 1;
+		ptep_end = ptep + 1;
 
 	/*
 	 * Ensure we don't get switched out with the page table in an
@@ -4105,8 +4105,8 @@ pmap_update_entry(pmap_t pmap, pd_entry_t *pte, pd_entry_t newpte,
 	 * unchanged, so that a lockless, concurrent pmap_kextract() can still
 	 * lookup the physical address.
 	 */
-	for (l3 = pte; l3 < pte_end; l3++)
-		pmap_clear_bits(l3, ATTR_DESCR_VALID);
+	for (lip = ptep; lip < ptep_end; lip++)
+		pmap_clear_bits(lip, ATTR_DESCR_VALID);
 
 	/*
 	 * When promoting, the L{1,2}_TABLE entry that is being replaced might
@@ -4116,8 +4116,9 @@ pmap_update_entry(pmap_t pmap, pd_entry_t *pte, pd_entry_t newpte,
 	pmap_s1_invalidate_range(pmap, va, va + size, false);
 
 	/* Create the new mapping */
-	for (l3 = pte; l3 < pte_end; l3++, newpte += PAGE_SIZE) {
-		pmap_store(l3, newpte);
+	for (lip = ptep; lip < ptep_end; lip++) {
+		pmap_store(lip, newpte);
+		newpte += PAGE_SIZE;
 	}
 	dsb(ishst);
 
