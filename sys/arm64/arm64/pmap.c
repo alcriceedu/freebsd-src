@@ -6834,9 +6834,8 @@ pmap_change_props_locked(vm_offset_t va, vm_size_t size, vm_prot_t prot,
 						pte_size = L3C_SIZE;
 						break;
 					}
-					if (!pmap_demote_l3c(kernel_pmap, ptep, tmpva)) {
+					if (!pmap_demote_l3c(kernel_pmap, ptep, tmpva))
 						return (EINVAL);
-					}
 				}
 				pte_size = PAGE_SIZE;
 				break;
@@ -7100,9 +7099,8 @@ pmap_demote_l2_locked(pmap_t pmap, pt_entry_t *l2, vm_offset_t va,
 	    (ATTR_S1_AP(ATTR_S1_AP_RO) | ATTR_SW_DBM),
 	    ("pmap_demote_l2: L2 entry is writeable but not dirty"));
 
-	if (VIRT_IN_DMAP(va)) {
+	if (VIRT_IN_DMAP(va))
 		newl3 |= ATTR_CONTIGUOUS;
-	}
 
 	/*
 	 * If the PTP is not leftover from an earlier promotion or it does not
