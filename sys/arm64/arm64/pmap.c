@@ -7189,7 +7189,7 @@ pmap_demote_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t va)
 static bool
 pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 {
-	pt_entry_t *end_l3, *l3, mask, nbits, old_l3, *start_l3;
+	pt_entry_t *end_l3, *l3, l3e, mask, nbits, *start_l3;
 	vm_offset_t tmpl3;
 	register_t intr;
 
@@ -7227,14 +7227,14 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 		 * concurrent pmap_kextract() can still lookup the physical
 		 * address.
 		 */
-		old_l3 = pmap_load(l3);
-		KASSERT((old_l3 & ATTR_CONTIGUOUS) != 0,
+		l3e = pmap_load(l3);
+		KASSERT((l3e & ATTR_CONTIGUOUS) != 0,
 		    ("pmap_demote_l3c: missing ATTR_CONTIGUOUS"));
-		KASSERT((old_l3 & (ATTR_SW_DBM | ATTR_S1_AP_RW_BIT)) !=
+		KASSERT((l3e & (ATTR_SW_DBM | ATTR_S1_AP_RW_BIT)) !=
 		    (ATTR_SW_DBM | ATTR_S1_AP(ATTR_S1_AP_RO)),
 		    ("pmap_demote_l3c: XXX"));
-		while (!atomic_fcmpset_64(l3, &old_l3, old_l3 &
-		    ~(ATTR_CONTIGUOUS | ATTR_DESCR_VALID)))
+		while (!atomic_fcmpset_64(l3, &l3e, l3e & ~(ATTR_CONTIGUOUS |
+		    ATTR_DESCR_VALID)))
 			cpu_spinwait();
 
 		/*
@@ -7243,10 +7243,10 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 		 * and dirty bits from this entire set of contiguous L3
 		 * entries.
 		 */
-		if ((old_l3 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
+		if ((l3e & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
 		    (ATTR_S1_AP(ATTR_S1_AP_RW) | ATTR_SW_DBM))
 			mask = ATTR_S1_AP_RW_BIT;
-		nbits |= old_l3 & ATTR_AF;
+		nbits |= l3e & ATTR_AF;
 	}
 	if ((nbits & ATTR_AF) != 0) {
 		pmap_invalidate_range(pmap, va & ~L3C_OFFSET, (va + L3C_SIZE) &
@@ -7257,9 +7257,8 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 	 * Remake the mappings, updating the accessed and dirty bits.
 	 */
 	for (l3 = start_l3; l3 < end_l3; l3++) {
-		old_l3 = pmap_load(l3);
-		while (!atomic_fcmpset_64(l3, &old_l3, (old_l3 & ~mask) |
-		    nbits))
+		l3e = pmap_load(l3);
+		while (!atomic_fcmpset_64(l3, &l3e, (l3e & ~mask) | nbits))
 			cpu_spinwait();
 	}
 	dsb(ishst);
