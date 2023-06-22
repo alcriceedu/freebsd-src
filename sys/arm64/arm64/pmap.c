@@ -4810,6 +4810,7 @@ pmap_enter(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 	pv_entry_t pv;
 	vm_paddr_t opa, pa;
 	vm_page_t mpte, om;
+	struct vm_phys_seg *seg;
 	boolean_t nosleep;
 	int lvl, rv;
 
@@ -5107,22 +5108,23 @@ validate:
 
 #if VM_NRESERVLEVEL > 0
 	/*
-	 * XXX Try to promote from level 3 pages to a level 3 contiguous
-	 * superpage.
+	 * Try to promote from level 3 pages to a level 3 contiguous superpage,
+	 * and then to a level 2 superpage. This currently only works on
+	 * stage 1 pmaps as pmap_promote_l2 looks at stage 1 specific fields
+	 * and performs a break-before-make sequence that is incorrect for a
+	 * stage 2 pmap.
 	 */
-
-	/*
-	 * Try to promote from level 3 pages to a level 2 superpage. This
-	 * currently only works on stage 1 pmaps as pmap_promote_l2 looks at
-	 * stage 1 specific fields and performs a break-before-make sequence
-	 * that is incorrect a stage 2 pmap.
-	 */
-	if ((mpte == NULL || mpte->ref_count == NL3PG) &&
-	    pmap_ps_enabled(pmap) && pmap->pm_stage == PM_STAGE1 &&
-	    (m->flags & PG_FICTITIOUS) == 0 &&
-	    vm_reserv_level_iffullpop(m) == 0) {
-		pmap_promote_l2(pmap, pde, va, mpte, &lock);
-	}
+	if ((mpte == NULL || mpte->ref_count >= L3C_ENTRIES) &&
+            pmap_ps_enabled(pmap) && pmap->pm_stage == PM_STAGE1 &&
+            (m->flags & PG_FICTITIOUS) == 0) {
+		seg = &vm_phys_segs[m->segind];
+		if (seg->first_page[atop(m->phys_addr & ~L3C_OFFSET) -
+		    seg->start].psind == 1)
+                        pmap_promote_l3c(pmap, l3, va);
+		if (seg->first_page[atop(m->phys_addr & ~L2_OFFSET) -
+		    seg->start].psind == 2)
+                        pmap_promote_l2(pmap, pde, va, mpte, &lock);
+        }
 #endif
 
 	rv = KERN_SUCCESS;
