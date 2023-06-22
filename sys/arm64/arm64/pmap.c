@@ -1126,7 +1126,7 @@ pmap_bootstrap_l3_page(struct pmap_bootstrap_state *state, int i)
 
 		/*
 		 * If we have an aligned, contiguous chunk of L3C_ENTRIES
-		 * pages, set the contiguous bit within each PTE so that
+		 * L3 pages, set the contiguous bit within each PTE so that
 		 * the chunk can be cached using only one TLB entry.
 		 */
 		if ((state->pa & L3C_OFFSET) == 0) {
