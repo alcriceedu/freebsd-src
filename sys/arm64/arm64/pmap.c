@@ -7217,7 +7217,9 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
                     ((vm_offset_t)end_l3 & PAGE_MASK));
 	}
 
-	/* Break the mappings. */
+	/*
+	 * Break the mappings.
+	 */
 	for (l3 = start_l3; l3 < end_l3; l3++) {
 		/*
 		 * Clear the mapping's contiguous and valid bits, but leave
@@ -7246,13 +7248,14 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 			mask = ATTR_S1_AP_RW_BIT;
 		nbits |= old_l3 & ATTR_AF;
 	}
-
 	if ((nbits & ATTR_AF) != 0) {
 		pmap_invalidate_range(pmap, va & ~L3C_OFFSET, (va + L3C_SIZE) &
 		    ~L3C_OFFSET, true);
 	}
 
-	/* Remake the mappings, updating the accessed and dirty bits. */
+	/*
+	 * Remake the mappings, updating the accessed and dirty bits.
+	 */
 	for (l3 = start_l3; l3 < end_l3; l3++) {
 		old_l3 = pmap_load(l3);
 		while (!atomic_fcmpset_64(l3, &old_l3, (old_l3 & ~mask) |
@@ -7271,7 +7274,6 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 	atomic_add_long(&pmap_l3c_demotions, 1);
 	CTR2(KTR_PMAP, "pmap_demote_l3c: success for va %#lx in pmap %p",
 	    va, pmap);
-
 	return (true);
 }
 
