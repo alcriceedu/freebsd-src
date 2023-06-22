@@ -1125,9 +1125,9 @@ pmap_bootstrap_l3_page(struct pmap_bootstrap_state *state, int i)
 			break;
 
 		/*
-		 * If we have an aligned, contiguous chunk of 16 pages,
-		 * set the contiguous bit within each PTE so that the
-		 * chunk can be cached using only one TLB entry.
+		 * If we have an aligned, contiguous chunk of L3C_ENTRIES
+		 * pages, set the contiguous bit within each PTE so that
+		 * the chunk can be cached using only one TLB entry.
 		 */
 		if ((state->pa & L3C_OFFSET) == 0) {
 			if (state->va + L3C_SIZE < DMAP_MAX_ADDRESS &&
