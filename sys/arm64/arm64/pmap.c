@@ -5118,11 +5118,13 @@ validate:
             pmap_ps_enabled(pmap) && pmap->pm_stage == PM_STAGE1 &&
             (m->flags & PG_FICTITIOUS) == 0) {
 		seg = &vm_phys_segs[m->segind];
-		if (seg->first_page[atop(m->phys_addr & ~L3C_OFFSET) -
-		    seg->start].psind == 1)
+		if ((m->phys_addr & ~L3C_OFFSET) >= seg->start &&
+		    seg->first_page[atop((m->phys_addr & ~L3C_OFFSET) -
+		    seg->start)].psind == 1)
                         pmap_promote_l3c(pmap, l3, va);
-		if (seg->first_page[atop(m->phys_addr & ~L2_OFFSET) -
-		    seg->start].psind == 2)
+		if ((m->phys_addr & ~L2_OFFSET) >= seg->start &&
+		    seg->first_page[atop((m->phys_addr & ~L2_OFFSET) -
+		    seg->start)].psind == 2)
                         pmap_promote_l2(pmap, pde, va, mpte, &lock);
         }
 #endif
