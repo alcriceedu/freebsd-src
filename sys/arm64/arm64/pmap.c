@@ -5120,11 +5120,11 @@ validate:
 		seg = &vm_phys_segs[m->segind];
 		if ((m->phys_addr & ~L3C_OFFSET) >= seg->start &&
 		    seg->first_page[atop((m->phys_addr & ~L3C_OFFSET) -
-		    seg->start)].psind == 1)
+		    seg->start)].psind >= 1)
                         pmap_promote_l3c(pmap, l3, va);
 		if ((m->phys_addr & ~L2_OFFSET) >= seg->start &&
 		    seg->first_page[atop((m->phys_addr & ~L2_OFFSET) -
-		    seg->start)].psind == 2)
+		    seg->start)].psind >= 2)
                         pmap_promote_l2(pmap, pde, va, mpte, &lock);
         }
 #endif
