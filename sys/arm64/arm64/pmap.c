@@ -7201,9 +7201,8 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 	if (((va & ~L3C_OFFSET) < (vm_offset_t)end_l3) &&
 	    ((vm_offset_t)start_l3 < (va & ~L3C_OFFSET) + L3C_SIZE)) {
 		tmpl3 = kva_alloc(PAGE_SIZE);
-		if (tmpl3 == 0) {
+		if (tmpl3 == 0)
 			return (false);
-		}
 		pmap_kenter(tmpl3, PAGE_SIZE,
 		    DMAP_TO_PHYS((vm_offset_t)start_l3) & ~L3_OFFSET,
 		    VM_MEMATTR_WRITE_BACK);
