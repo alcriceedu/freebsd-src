@@ -7197,10 +7197,6 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 	start_l3 = (pt_entry_t *)((uintptr_t)l3p & ~((L3C_ENTRIES *
 	    sizeof(pt_entry_t)) - 1));
 	end_l3 = start_l3 + L3C_ENTRIES;
-	mask = 0;
-	nbits = ATTR_DESCR_VALID;
-	intr = intr_disable();
-
 	tmpl3 = 0;
 	if (((va & ~L3C_OFFSET) < (vm_offset_t)end_l3) &&
 	    ((vm_offset_t)start_l3 < (va & ~L3C_OFFSET) + L3C_SIZE)) {
@@ -7216,6 +7212,9 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 		end_l3 = (pt_entry_t *)(tmpl3 +
                     ((vm_offset_t)end_l3 & PAGE_MASK));
 	}
+	mask = 0;
+	nbits = ATTR_DESCR_VALID;
+	intr = intr_disable();
 
 	/*
 	 * Break the mappings.
