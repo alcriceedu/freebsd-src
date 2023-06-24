@@ -7262,12 +7262,10 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 	dsb(ishst);
 
 	intr_restore(intr);
-
 	if (tmpl3 != 0) {
 		pmap_kremove(tmpl3);
 		kva_free(tmpl3, PAGE_SIZE);
 	}
-
 	atomic_add_long(&pmap_l3c_demotions, 1);
 	CTR2(KTR_PMAP, "pmap_demote_l3c: success for va %#lx in pmap %p",
 	    va, pmap);
