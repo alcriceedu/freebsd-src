@@ -1135,9 +1135,9 @@ pmap_bootstrap_l3_page(struct pmap_bootstrap_state *state, int i)
 			break;
 
 		/*
-		 * If we have an aligned, contiguous chunk of 16 pages,
-		 * set the contiguous bit within each PTE so that the
-		 * chunk can be cached using only one TLB entry.
+		 * If we have an aligned, contiguous chunk of L3C_ENTRIES
+		 * L3 pages, set the contiguous bit within each PTE so that
+		 * the chunk can be cached using only one TLB entry.
 		 */
 		if ((state->pa & L3C_OFFSET) == 0) {
 			if (state->va + L3C_SIZE < DMAP_MAX_ADDRESS &&
@@ -4342,10 +4342,10 @@ pmap_remove_pt_page(pmap_t pmap, vm_offset_t va)
  * inconsistent state.
  */
 static void
-pmap_update_entry(pmap_t pmap, pd_entry_t *pte, pd_entry_t newpte,
+pmap_update_entry(pmap_t pmap, pd_entry_t *ptep, pd_entry_t newpte,
     vm_offset_t va, vm_size_t size)
 {
-	pd_entry_t *l3, *pte_end;
+	pd_entry_t *lip, *ptep_end;
 	register_t intr;
 
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
@@ -4353,11 +4353,10 @@ pmap_update_entry(pmap_t pmap, pd_entry_t *pte, pd_entry_t newpte,
 	if ((newpte & ATTR_SW_NO_PROMOTE) != 0)
 		panic("%s: Updating non-promote pte", __func__);
 
-	if (size == L3C_SIZE) {
-		pte_end = pte + L3C_ENTRIES;
-	} else {
-		pte_end = pte + 1;
-	}
+	if (size == L3C_SIZE)
+		ptep_end = ptep + L3C_ENTRIES;
+	else
+		ptep_end = ptep + 1;
 
 	/*
 	 * Ensure we don't get switched out with the page table in an
@@ -4371,9 +4370,8 @@ pmap_update_entry(pmap_t pmap, pd_entry_t *pte, pd_entry_t newpte,
 	 * unchanged, so that a lockless, concurrent pmap_kextract() can still
 	 * lookup the physical address.
 	 */
-	for (l3 = pte; l3 < pte_end; l3++) {
-                pmap_clear_bits(l3, ATTR_DESCR_VALID);
-        }
+	for (lip = ptep; lip < ptep_end; lip++)
+		pmap_clear_bits(lip, ATTR_DESCR_VALID);
 
 	/*
 	 * When promoting, the L{1,2}_TABLE entry that is being replaced might
@@ -4383,9 +4381,10 @@ pmap_update_entry(pmap_t pmap, pd_entry_t *pte, pd_entry_t newpte,
 	pmap_s1_invalidate_range(pmap, va, va + size, false);
 
 	/* Create the new mapping */
-	for (l3 = pte; l3 < pte_end; l3++, newpte += PAGE_SIZE) {
-                pmap_store(l3, newpte);
-        }
+	for (lip = ptep; lip < ptep_end; lip++) {
+		pmap_store(lip, newpte);
+		newpte += PAGE_SIZE;
+	}
 	dsb(ishst);
 
 	intr_restore(intr);
@@ -7255,13 +7254,12 @@ pmap_change_props_locked(vm_offset_t va, vm_size_t size, vm_prot_t prot,
 			case 3:
 				if ((pmap_load(ptep) & ATTR_CONTIGUOUS) != 0) {
 					if ((tmpva & L3C_OFFSET) == 0 &&
-                                	    (base + size - tmpva) >= L3C_SIZE) {
-                                        	pte_size = L3C_SIZE;
-                                        	break;
-                                	}
-					if (!pmap_demote_l3c(kernel_pmap, ptep, tmpva)) {
-						return (EINVAL);
+					    (base + size - tmpva) >= L3C_SIZE) {
+						pte_size = L3C_SIZE;
+						break;
 					}
+					if (!pmap_demote_l3c(kernel_pmap, ptep, tmpva))
+						return (EINVAL);
 				}
 				pte_size = PAGE_SIZE;
 				break;
@@ -7614,7 +7612,7 @@ pmap_demote_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t va)
 static bool
 pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 {
-	pt_entry_t *end_l3, *l3, mask, nbits, old_l3, *start_l3;
+	pt_entry_t *end_l3, *l3, l3e, mask, nbits, *start_l3;
 	vm_offset_t tmpl3;
 	register_t intr;
 
@@ -7622,17 +7620,12 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 	start_l3 = (pt_entry_t *)((uintptr_t)l3p & ~((L3C_ENTRIES *
 	    sizeof(pt_entry_t)) - 1));
 	end_l3 = start_l3 + L3C_ENTRIES;
-	mask = 0;
-	nbits = ATTR_DESCR_VALID;
-	intr = intr_disable();
-
 	tmpl3 = 0;
 	if (((va & ~L3C_OFFSET) < (vm_offset_t)end_l3) &&
 	    ((vm_offset_t)start_l3 < (va & ~L3C_OFFSET) + L3C_SIZE)) {
 		tmpl3 = kva_alloc(PAGE_SIZE);
-		if (tmpl3 == 0) {
+		if (tmpl3 == 0)
 			return (false);
-		}
 		pmap_kenter(tmpl3, PAGE_SIZE,
 		    DMAP_TO_PHYS((vm_offset_t)start_l3) & ~L3_OFFSET,
 		    VM_MEMATTR_WRITE_BACK);
@@ -7641,8 +7634,13 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 		end_l3 = (pt_entry_t *)(tmpl3 +
                     ((vm_offset_t)end_l3 & PAGE_MASK));
 	}
+	mask = 0;
+	nbits = ATTR_DESCR_VALID;
+	intr = intr_disable();
 
-	/* Break the mappings. */
+	/*
+	 * Break the mappings.
+	 */
 	for (l3 = start_l3; l3 < end_l3; l3++) {
 		/*
 		 * Clear the mapping's contiguous and valid bits, but leave
@@ -7650,14 +7648,14 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 		 * concurrent pmap_kextract() can still lookup the physical
 		 * address.
 		 */
-		old_l3 = pmap_load(l3);
-		KASSERT((old_l3 & ATTR_CONTIGUOUS) != 0,
+		l3e = pmap_load(l3);
+		KASSERT((l3e & ATTR_CONTIGUOUS) != 0,
 		    ("pmap_demote_l3c: missing ATTR_CONTIGUOUS"));
-		KASSERT((old_l3 & (ATTR_SW_DBM | ATTR_S1_AP_RW_BIT)) !=
+		KASSERT((l3e & (ATTR_SW_DBM | ATTR_S1_AP_RW_BIT)) !=
 		    (ATTR_SW_DBM | ATTR_S1_AP(ATTR_S1_AP_RO)),
 		    ("pmap_demote_l3c: XXX"));
-		while (!atomic_fcmpset_64(l3, &old_l3, old_l3 &
-		    ~(ATTR_CONTIGUOUS | ATTR_DESCR_VALID)))
+		while (!atomic_fcmpset_64(l3, &l3e, l3e & ~(ATTR_CONTIGUOUS |
+		    ATTR_DESCR_VALID)))
 			cpu_spinwait();
 
 		/*
@@ -7666,37 +7664,34 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 		 * and dirty bits from this entire set of contiguous L3
 		 * entries.
 		 */
-		if ((old_l3 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
+		if ((l3e & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
 		    (ATTR_S1_AP(ATTR_S1_AP_RW) | ATTR_SW_DBM))
 			mask = ATTR_S1_AP_RW_BIT;
-		nbits |= old_l3 & ATTR_AF;
+		nbits |= l3e & ATTR_AF;
 	}
-
 	if ((nbits & ATTR_AF) != 0) {
 		pmap_invalidate_range(pmap, va & ~L3C_OFFSET, (va + L3C_SIZE) &
 		    ~L3C_OFFSET, true);
 	}
 
-	/* Remake the mappings, updating the accessed and dirty bits. */
+	/*
+	 * Remake the mappings, updating the accessed and dirty bits.
+	 */
 	for (l3 = start_l3; l3 < end_l3; l3++) {
-		old_l3 = pmap_load(l3);
-		while (!atomic_fcmpset_64(l3, &old_l3, (old_l3 & ~mask) |
-		    nbits))
+		l3e = pmap_load(l3);
+		while (!atomic_fcmpset_64(l3, &l3e, (l3e & ~mask) | nbits))
 			cpu_spinwait();
 	}
 	dsb(ishst);
 
 	intr_restore(intr);
-
 	if (tmpl3 != 0) {
 		pmap_kremove(tmpl3);
 		kva_free(tmpl3, PAGE_SIZE);
 	}
-
 	atomic_add_long(&pmap_l3c_demotions, 1);
 	CTR2(KTR_PMAP, "pmap_demote_l3c: success for va %#lx in pmap %p",
 	    va, pmap);
-
 	return (true);
 }
 
