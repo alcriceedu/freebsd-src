@@ -54,6 +54,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
+#include <sys/libkern.h>
 #include <sys/pctrie.h>
 #include <sys/proc.h>	/* smr.h depends on struct thread. */
 #include <sys/smr.h>
@@ -155,18 +156,11 @@ pctrie_slot(uint64_t index, uint16_t level)
 	return ((index >> (level * PCTRIE_WIDTH)) & PCTRIE_MASK);
 }
 
-/* Trims the key after the specified level. */
+/* Computes the key (index) with the low-order 'level' radix-digits zeroed. */
 static __inline uint64_t
 pctrie_trimkey(uint64_t index, uint16_t level)
 {
-	uint64_t ret;
-
-	ret = index;
-	if (level > 0) {
-		ret >>= level * PCTRIE_WIDTH;
-		ret <<= level * PCTRIE_WIDTH;
-	}
-	return (ret);
+	return (index & -PCTRIE_UNITLEVEL(level));
 }
 
 /*
@@ -259,21 +253,22 @@ pctrie_addval(struct pctrie_node *node, uint64_t index, uint16_t clev,
 }
 
 /*
- * Returns the slot where two keys differ.
+ * Returns the level where two keys differ.
  * It cannot accept 2 equal keys.
  */
 static __inline uint16_t
 pctrie_keydiff(uint64_t index1, uint64_t index2)
 {
-	uint16_t clev;
 
 	KASSERT(index1 != index2, ("%s: passing the same key value %jx",
 	    __func__, (uintmax_t)index1));
+	CTASSERT(sizeof(long long) >= sizeof(uint64_t));
 
-	index1 ^= index2;
-	for (clev = PCTRIE_LIMIT;; clev--)
-		if (pctrie_slot(index1, clev) != 0)
-			return (clev);
+	/*
+	 * From the highest-order bit where the indexes differ,
+	 * compute the highest level in the trie where they differ.
+	 */
+	return ((flsll(index1 ^ index2) - 1) / PCTRIE_WIDTH);
 }
 
 /*
@@ -565,8 +560,9 @@ ascend:
 				    NULL, PCTRIE_LOCKED);
 				if (pctrie_isleaf(child)) {
 					m = pctrie_toval(child);
-					if (*m >= index)
-						return (m);
+					KASSERT(*m >= index,
+					    ("pctrie_lookup_ge: leaf < index"));
+					return (m);
 				} else if (child != NULL)
 					goto descend;
 			} while (slot < (PCTRIE_COUNT - 1));
@@ -682,8 +678,9 @@ ascend:
 				    NULL, PCTRIE_LOCKED);
 				if (pctrie_isleaf(child)) {
 					m = pctrie_toval(child);
-					if (*m <= index)
-						return (m);
+					KASSERT(*m <= index,
+					    ("pctrie_lookup_le: leaf > index"));
+					return (m);
 				} else if (child != NULL)
 					goto descend;
 			} while (slot > 0);
@@ -747,7 +744,7 @@ pctrie_remove(struct pctrie *ptree, uint64_t index, pctrie_free_t freefn)
 				if (tmp != NULL)
 					break;
 			}
-			KASSERT(i != PCTRIE_COUNT,
+			KASSERT(tmp != NULL,
 			    ("%s: invalid node configuration", __func__));
 			if (parent == NULL)
 				pctrie_root_store(ptree, tmp, PCTRIE_LOCKED);
