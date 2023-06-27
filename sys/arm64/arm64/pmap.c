@@ -4883,7 +4883,7 @@ pmap_enter(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 	if (psind == 2) {
 		/* Assert the required virtual and physical alignment. */
 		KASSERT((va & L2_OFFSET) == 0, ("pmap_enter: va unaligned"));
-		KASSERT(m->psind > 0, ("pmap_enter: m->psind < psind"));
+		KASSERT(m->psind > 1, ("pmap_enter: m->psind < psind"));
 		rv = pmap_enter_l2(pmap, va, (new_l3 & ~L3_PAGE) | L2_BLOCK,
 		    flags, m, &lock);
 		goto out;
