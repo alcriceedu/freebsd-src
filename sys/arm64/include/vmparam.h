@@ -107,9 +107,9 @@
  */
 #ifndef VM_LEVEL_0_ORDER
 #if PAGE_SIZE == PAGE_SIZE_4K
-#define VM_LEVEL_0_ORDER	9
+#define	VM_LEVEL_0_ORDER	9
 #elif PAGE_SIZE == PAGE_SIZE_16K
-#define VM_LEVEL_0_ORDER	11
+#define	VM_LEVEL_0_ORDER	11
 #else
 #error Unsupported page size
 #endif
