@@ -105,7 +105,7 @@
  * Level 0 reservations consist of 512 pages when the page size is 4K,
  * and 2048 pages when the page size is 16K.
  */
-#ifndef VM_LEVEL_0_ORDER
+#ifndef	VM_LEVEL_0_ORDER
 #if PAGE_SIZE == PAGE_SIZE_4K
 #define	VM_LEVEL_0_ORDER	9
 #elif PAGE_SIZE == PAGE_SIZE_16K

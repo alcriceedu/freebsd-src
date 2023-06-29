@@ -185,9 +185,9 @@ typedef	uint64_t	pt_entry_t;		/* page table entry */
  * can be coalesced into a single TLB entry
  */
 #if PAGE_SIZE == PAGE_SIZE_4K
-#define L3C_ENTRIES	16
+#define	L3C_ENTRIES	16
 #elif PAGE_SIZE == PAGE_SIZE_16K
-#define L3C_ENTRIES	128
+#define	L3C_ENTRIES	128
 #else
 #error Unsupported page size
 #endif
