@@ -89,8 +89,13 @@
 #define	VM_FREELIST_DEFAULT	0
 
 /*
- * The largest allocation size that the physical memory allocator
- * supports is 8192 pages.
+ * When PAGE_SIZE is 4KB, an allocation size of 16MB is supported in order
+ * to optimize the use of the direct map by UMA.  Specifically, a 64-byte
+ * cache line contains at most 8 L2 BLOCK entries, collectively mapping 16MB
+ * of physical memory.  By reducing the number of distinct 16MB "pages" that
+ * are used by UMA, the physical memory allocator reduces the likelihood of
+ * both 2MB page TLB misses and cache misses during the page table walk when
+ * a 2MB page TLB miss does occur.
  */
 #define	VM_NFREEORDER		13
 
@@ -105,11 +110,11 @@
  * Level 0 reservations consist of 512 pages when the page size is 4K,
  * and 2048 pages when the page size is 16K.
  */
-#ifndef VM_LEVEL_0_ORDER
+#ifndef	VM_LEVEL_0_ORDER
 #if PAGE_SIZE == PAGE_SIZE_4K
-#define VM_LEVEL_0_ORDER	9
+#define	VM_LEVEL_0_ORDER	9
 #elif PAGE_SIZE == PAGE_SIZE_16K
-#define VM_LEVEL_0_ORDER	11
+#define	VM_LEVEL_0_ORDER	11
 #else
 #error Unsupported page size
 #endif
