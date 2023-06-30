@@ -7213,7 +7213,7 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 		start_l3 = (pt_entry_t *)(tmpl3 +
 		    ((vm_offset_t)start_l3 & PAGE_MASK));
 		end_l3 = (pt_entry_t *)(tmpl3 +
-                    ((vm_offset_t)end_l3 & PAGE_MASK));
+		    ((vm_offset_t)end_l3 & PAGE_MASK));
 	}
 	mask = 0;
 	nbits = ATTR_DESCR_VALID;
