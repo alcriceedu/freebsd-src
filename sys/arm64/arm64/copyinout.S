@@ -30,9 +30,9 @@
 #include <machine/asm.h>
 __FBSDID("$FreeBSD$");
 
-#include <sys/param.h>
 #include <sys/errno.h>
 
+#include <machine/param.h>
 #include <machine/vmparam.h>
 
 #include "assym.inc"
