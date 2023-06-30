@@ -7193,27 +7193,27 @@ pmap_demote_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t va)
 static bool
 pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 {
-	pt_entry_t *end_l3, *l3, l3e, mask, nbits, *start_l3;
+	pt_entry_t *l3, *l3c_end, *l3c_start, l3e, mask, nbits;
 	vm_offset_t tmpl3;
 	register_t intr;
 
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
-	start_l3 = (pt_entry_t *)((uintptr_t)l3p & ~((L3C_ENTRIES *
+	l3c_start = (pt_entry_t *)((uintptr_t)l3p & ~((L3C_ENTRIES *
 	    sizeof(pt_entry_t)) - 1));
-	end_l3 = start_l3 + L3C_ENTRIES;
+	l3c_end = l3c_start + L3C_ENTRIES;
 	tmpl3 = 0;
-	if ((va & ~L3C_OFFSET) < (vm_offset_t)end_l3 &&
-	    (vm_offset_t)start_l3 < (va & ~L3C_OFFSET) + L3C_SIZE) {
+	if ((va & ~L3C_OFFSET) < (vm_offset_t)l3c_end &&
+	    (vm_offset_t)l3c_start < (va & ~L3C_OFFSET) + L3C_SIZE) {
 		tmpl3 = kva_alloc(PAGE_SIZE);
 		if (tmpl3 == 0)
 			return (false);
 		pmap_kenter(tmpl3, PAGE_SIZE,
-		    DMAP_TO_PHYS((vm_offset_t)start_l3) & ~L3_OFFSET,
+		    DMAP_TO_PHYS((vm_offset_t)l3c_start) & ~L3_OFFSET,
 		    VM_MEMATTR_WRITE_BACK);
-		start_l3 = (pt_entry_t *)(tmpl3 +
-		    ((vm_offset_t)start_l3 & PAGE_MASK));
-		end_l3 = (pt_entry_t *)(tmpl3 +
-		    ((vm_offset_t)end_l3 & PAGE_MASK));
+		l3c_start = (pt_entry_t *)(tmpl3 +
+		    ((vm_offset_t)l3c_start & PAGE_MASK));
+		l3c_end = (pt_entry_t *)(tmpl3 +
+		    ((vm_offset_t)l3c_end & PAGE_MASK));
 	}
 	mask = 0;
 	nbits = ATTR_DESCR_VALID;
@@ -7222,7 +7222,7 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 	/*
 	 * Break the mappings.
 	 */
-	for (l3 = start_l3; l3 < end_l3; l3++) {
+	for (l3 = l3c_start; l3 < l3c_end; l3++) {
 		/*
 		 * Clear the mapping's contiguous and valid bits, but leave
 		 * the rest of the entry unchanged, so that a lockless,
@@ -7258,7 +7258,7 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 	/*
 	 * Remake the mappings, updating the accessed and dirty bits.
 	 */
-	for (l3 = start_l3; l3 < end_l3; l3++) {
+	for (l3 = l3c_start; l3 < l3c_end; l3++) {
 		l3e = pmap_load(l3);
 		while (!atomic_fcmpset_64(l3, &l3e, (l3e & ~mask) | nbits))
 			cpu_spinwait();
