@@ -7202,8 +7202,8 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 	    sizeof(pt_entry_t)) - 1));
 	end_l3 = start_l3 + L3C_ENTRIES;
 	tmpl3 = 0;
-	if (((va & ~L3C_OFFSET) < (vm_offset_t)end_l3) &&
-	    ((vm_offset_t)start_l3 < (va & ~L3C_OFFSET) + L3C_SIZE)) {
+	if ((va & ~L3C_OFFSET) < (vm_offset_t)end_l3 &&
+	    (vm_offset_t)start_l3 < (va & ~L3C_OFFSET) + L3C_SIZE) {
 		tmpl3 = kva_alloc(PAGE_SIZE);
 		if (tmpl3 == 0)
 			return (false);
