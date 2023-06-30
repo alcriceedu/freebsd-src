@@ -6837,7 +6837,8 @@ pmap_change_props_locked(vm_offset_t va, vm_size_t size, vm_prot_t prot,
 						pte_size = L3C_SIZE;
 						break;
 					}
-					if (!pmap_demote_l3c(kernel_pmap, ptep, tmpva))
+					if (!pmap_demote_l3c(kernel_pmap, ptep,
+					    tmpva))
 						return (EINVAL);
 				}
 				pte_size = PAGE_SIZE;
