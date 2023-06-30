@@ -7234,7 +7234,7 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 		    ("pmap_demote_l3c: missing ATTR_CONTIGUOUS"));
 		KASSERT((l3e & (ATTR_SW_DBM | ATTR_S1_AP_RW_BIT)) !=
 		    (ATTR_SW_DBM | ATTR_S1_AP(ATTR_S1_AP_RO)),
-		    ("pmap_demote_l3c: XXX"));
+		    ("pmap_demote_l3c: missing ATTR_S1_AP_RW"));
 		while (!atomic_fcmpset_64(l3, &l3e, l3e & ~(ATTR_CONTIGUOUS |
 		    ATTR_DESCR_VALID)))
 			cpu_spinwait();
