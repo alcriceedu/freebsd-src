@@ -96,8 +96,17 @@
  * are used by UMA, the physical memory allocator reduces the likelihood of
  * both 2MB page TLB misses and cache misses during the page table walk when
  * a 2MB page TLB miss does occur.
+ *
+ * When PAGE_SIZE is 16KB, an allocation size of 32MB is supported.  This
+ * size is used by level 0 reservations and L2 BLOCK mappings.
  */
+#if PAGE_SIZE == PAGE_SIZE_4K
 #define	VM_NFREEORDER		13
+#elif PAGE_SIZE == PAGE_SIZE_16K
+#define	VM_NFREEORDER		11
+#else
+#error Unsupported page size
+#endif
 
 /*
  * Enable superpage reservations: 1 level.
@@ -107,8 +116,8 @@
 #endif
 
 /*
- * Level 0 reservations consist of 512 pages when the page size is 4K,
- * and 2048 pages when the page size is 16K.
+ * Level 0 reservations consist of 512 pages when PAGE_SIZE is 4KB, and
+ * 2048 pages when PAGE_SIZE is 16KB.
  */
 #ifndef	VM_LEVEL_0_ORDER
 #if PAGE_SIZE == PAGE_SIZE_4K
