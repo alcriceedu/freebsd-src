@@ -7261,7 +7261,8 @@ pmap_change_props_locked(vm_offset_t va, vm_size_t size, vm_prot_t prot,
 						pte_size = L3C_SIZE;
 						break;
 					}
-					if (!pmap_demote_l3c(kernel_pmap, ptep, tmpva))
+					if (!pmap_demote_l3c(kernel_pmap, ptep,
+					    tmpva))
 						return (EINVAL);
 				}
 				pte_size = PAGE_SIZE;
@@ -7615,27 +7616,27 @@ pmap_demote_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t va)
 static bool
 pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 {
-	pt_entry_t *end_l3, *l3, l3e, mask, nbits, *start_l3;
+	pt_entry_t *l3, *l3c_end, *l3c_start, l3e, mask, nbits;
 	vm_offset_t tmpl3;
 	register_t intr;
 
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
-	start_l3 = (pt_entry_t *)((uintptr_t)l3p & ~((L3C_ENTRIES *
+	l3c_start = (pt_entry_t *)((uintptr_t)l3p & ~((L3C_ENTRIES *
 	    sizeof(pt_entry_t)) - 1));
-	end_l3 = start_l3 + L3C_ENTRIES;
+	l3c_end = l3c_start + L3C_ENTRIES;
 	tmpl3 = 0;
-	if (((va & ~L3C_OFFSET) < (vm_offset_t)end_l3) &&
-	    ((vm_offset_t)start_l3 < (va & ~L3C_OFFSET) + L3C_SIZE)) {
+	if ((va & ~L3C_OFFSET) < (vm_offset_t)l3c_end &&
+	    (vm_offset_t)l3c_start < (va & ~L3C_OFFSET) + L3C_SIZE) {
 		tmpl3 = kva_alloc(PAGE_SIZE);
 		if (tmpl3 == 0)
 			return (false);
 		pmap_kenter(tmpl3, PAGE_SIZE,
-		    DMAP_TO_PHYS((vm_offset_t)start_l3) & ~L3_OFFSET,
+		    DMAP_TO_PHYS((vm_offset_t)l3c_start) & ~L3_OFFSET,
 		    VM_MEMATTR_WRITE_BACK);
-		start_l3 = (pt_entry_t *)(tmpl3 +
-		    ((vm_offset_t)start_l3 & PAGE_MASK));
-		end_l3 = (pt_entry_t *)(tmpl3 +
-                    ((vm_offset_t)end_l3 & PAGE_MASK));
+		l3c_start = (pt_entry_t *)(tmpl3 +
+		    ((vm_offset_t)l3c_start & PAGE_MASK));
+		l3c_end = (pt_entry_t *)(tmpl3 +
+		    ((vm_offset_t)l3c_end & PAGE_MASK));
 	}
 	mask = 0;
 	nbits = ATTR_DESCR_VALID;
@@ -7644,7 +7645,7 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 	/*
 	 * Break the mappings.
 	 */
-	for (l3 = start_l3; l3 < end_l3; l3++) {
+	for (l3 = l3c_start; l3 < l3c_end; l3++) {
 		/*
 		 * Clear the mapping's contiguous and valid bits, but leave
 		 * the rest of the entry unchanged, so that a lockless,
@@ -7656,7 +7657,7 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 		    ("pmap_demote_l3c: missing ATTR_CONTIGUOUS"));
 		KASSERT((l3e & (ATTR_SW_DBM | ATTR_S1_AP_RW_BIT)) !=
 		    (ATTR_SW_DBM | ATTR_S1_AP(ATTR_S1_AP_RO)),
-		    ("pmap_demote_l3c: XXX"));
+		    ("pmap_demote_l3c: missing ATTR_S1_AP_RW"));
 		while (!atomic_fcmpset_64(l3, &l3e, l3e & ~(ATTR_CONTIGUOUS |
 		    ATTR_DESCR_VALID)))
 			cpu_spinwait();
@@ -7680,7 +7681,7 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 	/*
 	 * Remake the mappings, updating the accessed and dirty bits.
 	 */
-	for (l3 = start_l3; l3 < end_l3; l3++) {
+	for (l3 = l3c_start; l3 < l3c_end; l3++) {
 		l3e = pmap_load(l3);
 		while (!atomic_fcmpset_64(l3, &l3e, (l3e & ~mask) | nbits))
 			cpu_spinwait();
