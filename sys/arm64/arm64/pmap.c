@@ -5570,7 +5570,7 @@ pmap_copy_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va, pt_entry_t l3e,
 			return (false);
 		}
 
-	if (!pmap_pv_insert_l3c(pmap, va, PHYS_TO_VM_PAGE(l3e & ~ATTR_MASK),
+	if (!pmap_pv_insert_l3c(pmap, va, PHYS_TO_VM_PAGE(PTE_TO_PHYS(l3e)),
 	    lockp)) {
 		if (ml3 != NULL)
 			pmap_abort_ptp(pmap, va, ml3);
