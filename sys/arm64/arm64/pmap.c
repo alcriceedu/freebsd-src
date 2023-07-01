@@ -3634,7 +3634,8 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va, vm_offset_t *vap,
 		pmap->pm_stats.wired_count -= L3C_ENTRIES;
 	pmap_resident_count_dec(pmap, L3C_ENTRIES);
 	if ((first_l3e & ATTR_SW_MANAGED) != 0) {
-		new_lock = PHYS_TO_PV_LIST_LOCK(first_l3e & ~ATTR_MASK);
+		m = PHYS_TO_VM_PAGE(first_l3e & ~ATTR_MASK);
+		new_lock = VM_PAGE_TO_PV_LIST_LOCK(m);
 		if (new_lock != *lockp) {
 			if (*lockp != NULL) {
 				/*
@@ -3655,7 +3656,6 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va, vm_offset_t *vap,
 			*lockp = new_lock;
 			rw_wlock(*lockp);
 		}
-		m = PHYS_TO_VM_PAGE(first_l3e & ~ATTR_MASK);
 		pvh = page_to_pvh(m);
 		for (mt = m, tva = va; mt < &m[L3C_ENTRIES]; mt++, tva +=
 		    L3_SIZE) {
