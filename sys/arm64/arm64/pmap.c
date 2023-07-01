@@ -6752,15 +6752,11 @@ pmap_advise(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, int advice)
 						    L3C_SIZE - PAGE_SIZE, va_next
 						    - PAGE_SIZE);
 						dl3 = pmap_l2_to_l3(l2, dva);
-
-                                                KASSERT(pmap_load(dl3) != 0,
+						KASSERT(pmap_load(dl3) != 0,
 						    ("pmap_advise: invalid PTE"));
-
 						lock = NULL;
-
 						pmap_remove_l3(pmap, dl3, dva,
 						    pmap_load(l2), NULL, &lock);
-
 						if (lock != NULL)
 							rw_wunlock(lock);
 					}
