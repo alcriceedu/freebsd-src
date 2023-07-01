@@ -3433,7 +3433,7 @@ pmap_pv_insert_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m,
 {
 	pv_entry_t pv;
 	vm_offset_t tva;
-	vm_paddr_t pa;
+	vm_paddr_t pa __diagused;
 	vm_page_t mt;
 
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
@@ -3442,7 +3442,7 @@ pmap_pv_insert_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m,
 	pa = VM_PAGE_TO_PHYS(m);
 	KASSERT((pa & L3C_OFFSET) == 0,
 	    ("pmap_pv_insert_l3c: pa is not aligned"));
-	CHANGE_PV_LIST_LOCK_TO_PHYS(lockp, pa);
+	CHANGE_PV_LIST_LOCK_TO_PAGE(lockp, m);
 	for (mt = m, tva = va; mt < &m[L3C_ENTRIES]; mt++, tva += L3_SIZE) {
 		/* Pass NULL instead of lockp to disable reclamation. */
 		pv = get_pv_entry(pmap, NULL);
