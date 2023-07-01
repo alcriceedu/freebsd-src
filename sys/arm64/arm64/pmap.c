@@ -5756,8 +5756,10 @@ pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, vm_offset_t dst_addr, vm_size_t len,
 			    pmap_try_insert_pv_entry(dst_pmap, addr,
 			    PHYS_TO_VM_PAGE(PTE_TO_PHYS(ptetemp)), &lock)) {
 				/*
-				 * Clear the wired, modified, and accessed
-				 * (referenced) bits during the copy.
+				 * Clear the wired, contiguous, modified, and
+				 * accessed bits from the destination PTE.
+				 * The contiguous bit is cleared because we
+				 * are not copying the entire 64KB page.
 				 */
 				mask = ATTR_SW_WIRED | ATTR_CONTIGUOUS |
 				    ATTR_AF;
