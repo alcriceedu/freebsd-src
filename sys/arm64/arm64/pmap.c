@@ -4097,7 +4097,7 @@ pmap_protect_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va,
 	if ((l3e & ATTR_SW_MANAGED) != 0 &&
 	    (nbits & ATTR_S1_AP(ATTR_S1_AP_RO)) != 0 &&
 	    dirty) {
-		m = PHYS_TO_VM_PAGE(pmap_load(l3p) & ~ATTR_MASK);
+		m = PHYS_TO_VM_PAGE(PTE_TO_PHYS(pmap_load(l3p)));
 		for (mt = m; mt < &m[L3C_ENTRIES]; mt++)
 			vm_page_dirty(m);
 	}
