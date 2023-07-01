@@ -4196,6 +4196,7 @@ pmap_mask_set_locked(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, pt_entry_t m
 				}
 				continue;
 			}
+
 			if ((l3 & ATTR_CONTIGUOUS) != 0) {
 				/*
 				 * Is this entire set of contiguous L3 entries
@@ -4220,7 +4221,6 @@ pmap_mask_set_locked(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, pt_entry_t m
 					l3 = pmap_load(l3p);
 				}
 			}
-
 			while (!atomic_fcmpset_64(l3p, &l3, (l3 & ~mask) |
 			    nbits))
 				cpu_spinwait();
