@@ -474,7 +474,7 @@ static vm_page_t pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va,
 static int pmap_enter_l2(pmap_t pmap, vm_offset_t va, pd_entry_t new_l2,
     u_int flags, vm_page_t m, struct rwlock **lockp);
 static pt_entry_t pmap_load_l3c(pt_entry_t *l3p);
-static void pmap_protect_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va,
+static void pmap_mask_set_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va,
     vm_offset_t *vap, vm_offset_t va_next, pt_entry_t mask, pt_entry_t nbits);
 static bool pmap_pv_insert_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m,
     struct rwlock **lockp);
@@ -4059,12 +4059,13 @@ pmap_protect_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t sva, pt_entry_t mask,
 }
 
 /*
- * Changes the protection enforced by the specified level 3 contiguous (64KB)
- * page mapping.  Requests TLB invalidations to be performed by the caller
- * through the returned "*vap".
+ * Masks and sets bits in the specified level 3 contiguous (64KB) page mapping.
+ *
+ * Requests TLB invalidations to be performed by the caller through the
+ * returned "*vap".
  */
 static void
-pmap_protect_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va,
+pmap_mask_set_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va,
     vm_offset_t *vap, vm_offset_t va_next, pt_entry_t mask, pt_entry_t nbits)
 {
 	pt_entry_t l3e, *tl3p;
@@ -4074,14 +4075,14 @@ pmap_protect_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va,
 	atomic_add_long(&pmap_l3c_protects, 1);	// XXX
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
 	KASSERT(((uintptr_t)l3p & ((L3C_ENTRIES * sizeof(pt_entry_t)) - 1)) ==
-	    0, ("pmap_protect_l3c: l3p is not aligned"));
+	    0, ("pmap_mask_set_l3c: l3p is not aligned"));
 	KASSERT((va & L3C_OFFSET) == 0,
-	    ("pmap_protect_l3c: va is not aligned"));
+	    ("pmap_mask_set_l3c: va is not aligned"));
 	dirty = false;
 	for (tl3p = l3p; tl3p < &l3p[L3C_ENTRIES]; tl3p++) {
 		l3e = pmap_load(tl3p);
 		KASSERT((l3e & ATTR_CONTIGUOUS) != 0,
-		    ("pmap_protect_l3c: l3e is missing ATTR_CONTIGUOUS"));
+		    ("pmap_mask_set_l3c: l3e is missing ATTR_CONTIGUOUS"));
 		while (!atomic_fcmpset_64(tl3p, &l3e, (l3e & ~mask) | nbits))
 			cpu_spinwait();
 		if ((l3e & (ATTR_SW_DBM | ATTR_S1_AP_RW_BIT)) ==
@@ -4206,7 +4207,7 @@ pmap_mask_set_locked(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, pt_entry_t m
 				 */
 				if ((sva & L3C_OFFSET) == 0 &&
 				    sva + L3C_OFFSET <= va_next - 1) {
-					pmap_protect_l3c(pmap, l3p, sva, &va,
+					pmap_mask_set_l3c(pmap, l3p, sva, &va,
 					    va_next, mask, nbits);
 					l3p += L3C_ENTRIES - 1;
 					sva += L3C_SIZE - L3_SIZE;
