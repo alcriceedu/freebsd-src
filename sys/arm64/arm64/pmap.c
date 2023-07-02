@@ -5524,9 +5524,8 @@ pmap_unwire(pmap_t pmap, vm_offset_t sva, vm_offset_t eva)
 				if ((sva & L3C_OFFSET) == 0) {
 					partial_l3c = sva + L3C_SIZE > eva;
 				}
-				if (partial_l3c) {
+				if (partial_l3c)
 					pmap_demote_l3c(pmap, l3, sva);
-				}
 			}
 			if ((pmap_load(l3) & ATTR_SW_WIRED) == 0)
 				panic("pmap_unwire: l3 %#jx is missing "
