@@ -3727,11 +3727,10 @@ pmap_remove_l3_range(pmap_t pmap, pd_entry_t l2e, vm_offset_t sva,
 					/* The L3 table was unmapped. */
 					sva += L3C_SIZE;
 					break;
-				} else {
-					l3 += L3C_ENTRIES - 1;
-					sva += L3C_SIZE - L3_SIZE;
-					continue;
 				}
+				l3 += L3C_ENTRIES - 1;
+				sva += L3C_SIZE - L3_SIZE;
+				continue;
 			}
 
 			pmap_demote_l3c(pmap, l3, sva);
