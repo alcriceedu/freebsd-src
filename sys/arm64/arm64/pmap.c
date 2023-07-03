@@ -5511,17 +5511,22 @@ pmap_unwire(pmap_t pmap, vm_offset_t sva, vm_offset_t eva)
 
 		if (va_next > eva)
 			va_next = eva;
-		partial_l3c = true;
-		for (l3 = pmap_l2_to_l3(l2, sva); sva != va_next; l3++,
-		    sva += L3_SIZE) {
+		for (partial_l3c = true, l3 = pmap_l2_to_l3(l2, sva);
+		    sva != va_next; l3++, sva += L3_SIZE) {
 			if (pmap_load(l3) == 0)
 				continue;
 			if ((pmap_load(l3) & ATTR_CONTIGUOUS) != 0) {
 				/*
-				 * XXX Avoid demotion for whole page unwiring.
+				 * Avoid demotion for whole-page unwiring.
 				 */
 				if ((sva & L3C_OFFSET) == 0) {
-					partial_l3c = sva + L3C_SIZE > eva;
+					/*
+					 * Handle the possibility that
+					 * "va_next" is zero because of
+					 * address wraparound.
+					 */
+					partial_l3c = sva + L3C_OFFSET >
+					    va_next - 1;
 				}
 				if (partial_l3c)
 					pmap_demote_l3c(pmap, l3, sva);
