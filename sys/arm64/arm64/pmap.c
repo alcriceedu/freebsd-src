@@ -4548,7 +4548,7 @@ setl3:
 	 * such as pmap_enter_quick(), don't automatically mark the
 	 * underlying pages as referenced.
 	 */
-	newl2 &= ~ATTR_AF | all_l3e_AF;
+	newl2 &= ~(ATTR_CONTIGUOUS | ATTR_AF | ATTR_DESCR_MASK) | all_l3e_AF;
 
 	/*
 	 * Save the page table page in its current state until the L2
@@ -4573,7 +4573,6 @@ setl3:
 	if ((newl2 & ATTR_SW_MANAGED) != 0)
 		pmap_pv_promote_l2(pmap, va, PTE_TO_PHYS(newl2), lockp);
 
-	newl2 &= ~(ATTR_DESCR_MASK | ATTR_CONTIGUOUS);
 	newl2 |= L2_BLOCK;
 
 	pmap_update_entry(pmap, l2, newl2, va & ~L2_OFFSET, L2_SIZE);
