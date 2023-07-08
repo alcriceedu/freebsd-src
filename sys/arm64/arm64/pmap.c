@@ -7614,7 +7614,7 @@ pmap_demote_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t va)
 static bool
 pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 {
-	pt_entry_t *l3, *l3c_end, *l3c_start, l3e, mask, nbits;
+	pt_entry_t *l3c_end, *l3c_start, l3e, mask, nbits, *tl3p;
 	vm_offset_t tmpl3;
 	register_t intr;
 
@@ -7643,20 +7643,20 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 	/*
 	 * Break the mappings.
 	 */
-	for (l3 = l3c_start; l3 < l3c_end; l3++) {
+	for (tl3p = l3c_start; tl3p < l3c_end; tl3p++) {
 		/*
 		 * Clear the mapping's contiguous and valid bits, but leave
 		 * the rest of the entry unchanged, so that a lockless,
 		 * concurrent pmap_kextract() can still lookup the physical
 		 * address.
 		 */
-		l3e = pmap_load(l3);
+		l3e = pmap_load(tl3p);
 		KASSERT((l3e & ATTR_CONTIGUOUS) != 0,
 		    ("pmap_demote_l3c: missing ATTR_CONTIGUOUS"));
 		KASSERT((l3e & (ATTR_SW_DBM | ATTR_S1_AP_RW_BIT)) !=
 		    (ATTR_SW_DBM | ATTR_S1_AP(ATTR_S1_AP_RO)),
 		    ("pmap_demote_l3c: missing ATTR_S1_AP_RW"));
-		while (!atomic_fcmpset_64(l3, &l3e, l3e & ~(ATTR_CONTIGUOUS |
+		while (!atomic_fcmpset_64(tl3p, &l3e, l3e & ~(ATTR_CONTIGUOUS |
 		    ATTR_DESCR_VALID)))
 			cpu_spinwait();
 
@@ -7679,9 +7679,9 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 	/*
 	 * Remake the mappings, updating the accessed and dirty bits.
 	 */
-	for (l3 = l3c_start; l3 < l3c_end; l3++) {
-		l3e = pmap_load(l3);
-		while (!atomic_fcmpset_64(l3, &l3e, (l3e & ~mask) | nbits))
+	for (tl3p = l3c_start; tl3p < l3c_end; tl3p++) {
+		l3e = pmap_load(tl3p);
+		while (!atomic_fcmpset_64(tl3p, &l3e, (l3e & ~mask) | nbits))
 			cpu_spinwait();
 	}
 	dsb(ishst);
