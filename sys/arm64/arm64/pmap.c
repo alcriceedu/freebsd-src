@@ -170,16 +170,6 @@ __FBSDID("$FreeBSD$");
 #define	NUL1E		(NUL0E * NL1PG)
 #define	NUL2E		(NUL1E * NL2PG)
 
-#if !defined(DIAGNOSTIC)
-#ifdef __GNUC_GNU_INLINE__
-#define PMAP_INLINE	__attribute__((__gnu_inline__)) inline
-#else
-#define PMAP_INLINE	extern inline
-#endif
-#else
-#define PMAP_INLINE
-#endif
-
 #ifdef PV_STATS
 #define PV_STAT(x)	do { x ; } while (0)
 #define __pvused
@@ -1979,15 +1969,13 @@ pmap_kextract(vm_offset_t va)
 void
 pmap_kenter(vm_offset_t sva, vm_size_t size, vm_paddr_t pa, int mode)
 {
-	pd_entry_t *pde;
-	pt_entry_t *pte, attr;
+	pt_entry_t attr, old_l3e __diagused, *ptep;
 	vm_offset_t va;
-	int lvl;
 
 	KASSERT((pa & L3_OFFSET) == 0,
-	   ("pmap_kenter: Invalid physical address"));
+	    ("pmap_kenter: Invalid physical address"));
 	KASSERT((sva & L3_OFFSET) == 0,
-	   ("pmap_kenter: Invalid virtual address"));
+	    ("pmap_kenter: Invalid virtual address"));
 	KASSERT((size & PAGE_MASK) == 0,
 	    ("pmap_kenter: Mapping is not page-sized"));
 
@@ -1995,13 +1983,11 @@ pmap_kenter(vm_offset_t sva, vm_size_t size, vm_paddr_t pa, int mode)
 	    ATTR_S1_IDX(mode) | L3_PAGE;
 	va = sva;
 	while (size != 0) {
-		pde = pmap_pde(kernel_pmap, va, &lvl);
-		KASSERT(pde != NULL,
-		    ("pmap_kenter: Invalid page entry, va: 0x%lx", va));
-		KASSERT(lvl == 2, ("pmap_kenter: Invalid level %d", lvl));
-
-		pte = pmap_l2_to_l3(pde, va);
-		pmap_load_store(pte, PHYS_TO_PTE(pa) | attr);
+		ptep = pmap_pte_exists(kernel_pmap, va, 3, __func__);
+		old_l3e = pmap_load_store(ptep, PHYS_TO_PTE(pa) | attr);
+		KASSERT(old_l3e == 0,
+		    ("pmap_kenter: found existing mapping at %p: %#lx",
+		    ptep, old_l3e));
 
 		va += PAGE_SIZE;
 		pa += PAGE_SIZE;
@@ -2020,7 +2006,7 @@ pmap_kenter_device(vm_offset_t sva, vm_size_t size, vm_paddr_t pa)
 /*
  * Remove a page from the kernel pagetables.
  */
-PMAP_INLINE void
+void
 pmap_kremove(vm_offset_t va)
 {
 	pt_entry_t *pte;
@@ -2030,16 +2016,11 @@ pmap_kremove(vm_offset_t va)
 	pmap_s1_invalidate_page(kernel_pmap, va, true);
 }
 
-void
-pmap_kremove_device(vm_offset_t sva, vm_size_t size)
+static void
+pmap_kremove_range(vm_offset_t sva, vm_size_t size)
 {
 	pt_entry_t *pte;
 	vm_offset_t va;
-
-	KASSERT((sva & L3_OFFSET) == 0,
-	   ("pmap_kremove_device: Invalid virtual address"));
-	KASSERT((size & PAGE_MASK) == 0,
-	    ("pmap_kremove_device: Mapping is not page-sized"));
 
 	va = sva;
 	while (size != 0) {
@@ -2050,6 +2031,16 @@ pmap_kremove_device(vm_offset_t sva, vm_size_t size)
 		size -= PAGE_SIZE;
 	}
 	pmap_s1_invalidate_range(kernel_pmap, sva, va, true);
+}
+
+void
+pmap_kremove_device(vm_offset_t sva, vm_size_t size)
+{
+	KASSERT((sva & L3_OFFSET) == 0,
+	    ("pmap_kremove_device: Invalid virtual address"));
+	KASSERT((size & PAGE_MASK) == 0,
+	    ("pmap_kremove_device: Mapping is not page-sized"));
+	pmap_kremove_range(sva, size);
 }
 
 /*
@@ -6546,7 +6537,7 @@ void
 pmap_unmapbios(void *p, vm_size_t size)
 {
 	struct pmap_preinit_mapping *ppim;
-	vm_offset_t offset, tmpsize, va, va_trunc;
+	vm_offset_t offset, va, va_trunc;
 	pd_entry_t *pde;
 	pt_entry_t *l2;
 	int i, lvl, l2_blocks, block;
@@ -6596,14 +6587,8 @@ pmap_unmapbios(void *p, vm_size_t size)
 		size = round_page(offset + size);
 		va = trunc_page(va);
 
-		pde = pmap_pde(kernel_pmap, va, &lvl);
-		KASSERT(pde != NULL,
-		    ("pmap_unmapbios: Invalid page entry, va: 0x%lx", va));
-		KASSERT(lvl == 2, ("pmap_unmapbios: Invalid level %d", lvl));
-
 		/* Unmap and invalidate the pages */
-                for (tmpsize = 0; tmpsize < size; tmpsize += PAGE_SIZE)
-			pmap_kremove(va + tmpsize);
+		pmap_kremove_range(va, size);
 
 		kva_free(va, size);
 	}
