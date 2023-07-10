@@ -1969,13 +1969,15 @@ pmap_kextract(vm_offset_t va)
 void
 pmap_kenter(vm_offset_t sva, vm_size_t size, vm_paddr_t pa, int mode)
 {
-	pt_entry_t attr, old_l3e __diagused, *ptep;
+	pd_entry_t *pde;
+	pt_entry_t *pte, attr;
 	vm_offset_t va;
+	int lvl;
 
 	KASSERT((pa & L3_OFFSET) == 0,
-	    ("pmap_kenter: Invalid physical address"));
+	   ("pmap_kenter: Invalid physical address"));
 	KASSERT((sva & L3_OFFSET) == 0,
-	    ("pmap_kenter: Invalid virtual address"));
+	   ("pmap_kenter: Invalid virtual address"));
 	KASSERT((size & PAGE_MASK) == 0,
 	    ("pmap_kenter: Mapping is not page-sized"));
 
@@ -1983,11 +1985,13 @@ pmap_kenter(vm_offset_t sva, vm_size_t size, vm_paddr_t pa, int mode)
 	    ATTR_S1_IDX(mode) | L3_PAGE;
 	va = sva;
 	while (size != 0) {
-		ptep = pmap_pte_exists(kernel_pmap, va, 3, __func__);
-		old_l3e = pmap_load_store(ptep, PHYS_TO_PTE(pa) | attr);
-		KASSERT(old_l3e == 0,
-		    ("pmap_kenter: found existing mapping at %p: %#lx",
-		    ptep, old_l3e));
+		pde = pmap_pde(kernel_pmap, va, &lvl);
+		KASSERT(pde != NULL,
+		    ("pmap_kenter: Invalid page entry, va: 0x%lx", va));
+		KASSERT(lvl == 2, ("pmap_kenter: Invalid level %d", lvl));
+
+		pte = pmap_l2_to_l3(pde, va);
+		pmap_load_store(pte, PHYS_TO_PTE(pa) | attr);
 
 		va += PAGE_SIZE;
 		pa += PAGE_SIZE;
@@ -2016,11 +2020,16 @@ pmap_kremove(vm_offset_t va)
 	pmap_s1_invalidate_page(kernel_pmap, va, true);
 }
 
-static void
-pmap_kremove_range(vm_offset_t sva, vm_size_t size)
+void
+pmap_kremove_device(vm_offset_t sva, vm_size_t size)
 {
 	pt_entry_t *pte;
 	vm_offset_t va;
+
+	KASSERT((sva & L3_OFFSET) == 0,
+	   ("pmap_kremove_device: Invalid virtual address"));
+	KASSERT((size & PAGE_MASK) == 0,
+	    ("pmap_kremove_device: Mapping is not page-sized"));
 
 	va = sva;
 	while (size != 0) {
@@ -2031,16 +2040,6 @@ pmap_kremove_range(vm_offset_t sva, vm_size_t size)
 		size -= PAGE_SIZE;
 	}
 	pmap_s1_invalidate_range(kernel_pmap, sva, va, true);
-}
-
-void
-pmap_kremove_device(vm_offset_t sva, vm_size_t size)
-{
-	KASSERT((sva & L3_OFFSET) == 0,
-	    ("pmap_kremove_device: Invalid virtual address"));
-	KASSERT((size & PAGE_MASK) == 0,
-	    ("pmap_kremove_device: Mapping is not page-sized"));
-	pmap_kremove_range(sva, size);
 }
 
 /*
@@ -6588,7 +6587,7 @@ pmap_unmapbios(void *p, vm_size_t size)
 		va = trunc_page(va);
 
 		/* Unmap and invalidate the pages */
-		pmap_kremove_range(va, size);
+		pmap_kremove_device(va, size);
 
 		kva_free(va, size);
 	}
