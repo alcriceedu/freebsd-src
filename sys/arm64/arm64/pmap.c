@@ -1965,12 +1965,16 @@ pmap_kextract(vm_offset_t va)
 /***************************************************
  * Low level mapping routines.....
  ***************************************************/
+static SYSCTL_NODE(_debug, OID_AUTO, counters, CTLFLAG_RD, 0, "");
+
+static long non_zeroes;
+SYSCTL_ULONG(_debug_counters, OID_AUTO, non_zeroes, CTLFLAG_RD, &non_zeroes, 0, "");
 
 void
 pmap_kenter(vm_offset_t sva, vm_size_t size, vm_paddr_t pa, int mode)
 {
 	pd_entry_t *pde;
-	pt_entry_t *pte, attr;
+	pt_entry_t *pte, attr, old;
 	vm_offset_t va;
 	int lvl;
 
@@ -1991,7 +1995,9 @@ pmap_kenter(vm_offset_t sva, vm_size_t size, vm_paddr_t pa, int mode)
 		KASSERT(lvl == 2, ("pmap_kenter: Invalid level %d", lvl));
 
 		pte = pmap_l2_to_l3(pde, va);
-		pmap_load_store(pte, PHYS_TO_PTE(pa) | attr);
+		old = pmap_load_store(pte, PHYS_TO_PTE(pa) | attr);
+		if (old != 0)
+			atomic_add_long(&non_zeroes, 1);
 
 		va += PAGE_SIZE;
 		pa += PAGE_SIZE;
