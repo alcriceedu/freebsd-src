@@ -579,6 +579,7 @@ pmc_pmu_pmcallocate(const char *event_name, struct pmc_op_pmcallocate *pm)
 {
 	const struct pmu_event *pe;
 	struct pmu_event_desc ped;
+	char *debug;
 	pmu_mfr_t mfr;
 	int idx = -1;
 
@@ -595,6 +596,9 @@ pmc_pmu_pmcallocate(const char *event_name, struct pmc_op_pmcallocate *pm)
 
 	if (pe->event == NULL)
 		return (ENOENT);
+	debug = getenv("PMUDEBUG");
+	if (debug != NULL && strcmp(debug, "true") == 0)
+		printf("%s(): event_name %s pe->event %s\n", __func__, event_name, pe->event);
 	if (pmu_parse_event(&ped, pe->event))
 		return (ENOENT);
 

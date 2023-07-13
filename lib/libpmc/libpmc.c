@@ -644,16 +644,20 @@ k8_allocate_pmc(enum pmc_event pe, char *ctrspec,
 
 		} else if (KWMATCH(p, K8_KW_EDGE)) {
 			pmc_config->pm_caps |= PMC_CAP_EDGE;
+			pmc_config->pm_md.pm_amd.pm_amd_config |= AMD_PMC_EDGE;
 		} else if (KWMATCH(p, K8_KW_INV)) {
 			pmc_config->pm_caps |= PMC_CAP_INVERT;
+			pmc_config->pm_md.pm_amd.pm_amd_config |= AMD_PMC_INVERT;
 		} else if (KWPREFIXMATCH(p, K8_KW_MASK "=")) {
 			if ((n = pmc_parse_mask(pmask, p, &evmask)) < 0)
 				return (-1);
 			pmc_config->pm_caps |= PMC_CAP_QUALIFIER;
 		} else if (KWMATCH(p, K8_KW_OS)) {
 			pmc_config->pm_caps |= PMC_CAP_SYSTEM;
+			pmc_config->pm_md.pm_amd.pm_amd_config |= AMD_PMC_OS;
 		} else if (KWMATCH(p, K8_KW_USR)) {
 			pmc_config->pm_caps |= PMC_CAP_USER;
+			pmc_config->pm_md.pm_amd.pm_amd_config |= AMD_PMC_USR;
 		} else
 			return (-1);
 	}
@@ -1054,7 +1058,7 @@ pmc_allocate(const char *ctrspec, enum pmc_mode mode,
 {
 	size_t n;
 	int retval;
-	char *r, *spec_copy;
+	char *r, *spec_copy, *p;
 	const char *ctrname;
 	const struct pmc_event_descr *ev;
 	const struct pmc_event_alias *alias;
@@ -1084,6 +1088,15 @@ pmc_allocate(const char *ctrspec, enum pmc_mode mode,
 	 */
 	r = spec_copy = strdup(ctrspec);
 	ctrname = strsep(&r, ",");
+	/* Parse PMC capability parameters. */
+	while ((p = strsep(&r, ",")) != NULL) {
+		if (KWMATCH(p, "os"))
+			pmc_config.pm_caps |= PMC_CAP_SYSTEM;
+		else if (KWMATCH(p, "usr"))
+			pmc_config.pm_caps |= PMC_CAP_USER;
+		else
+			printf("Currently supported parameters: os,usr; ignoring unrecognized parameter: %s\n", p);
+	}
 	if (pmc_pmu_enabled()) {
 		if (pmc_pmu_pmcallocate(ctrname, &pmc_config) == 0) {
 			/*
@@ -1096,6 +1109,7 @@ pmc_allocate(const char *ctrspec, enum pmc_mode mode,
 
 		/* Otherwise, reset any changes */
 		pmc_config.pm_ev = 0;
+		// XXX Need to re-introduce PMC_CAP_INTERRUPT later?
 		pmc_config.pm_caps = 0;
 		pmc_config.pm_class = 0;
 	}
@@ -1105,6 +1119,7 @@ pmc_allocate(const char *ctrspec, enum pmc_mode mode,
 	/* replace an event alias with the canonical event specifier */
 	if (pmc_mdep_event_aliases)
 		for (alias = pmc_mdep_event_aliases; alias->pm_alias; alias++)
+			// XXX Should strsep() ctrspec, like in other places.
 			if (!strcasecmp(ctrspec, alias->pm_alias)) {
 				spec_copy = strdup(alias->pm_spec);
 				break;
