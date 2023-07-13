@@ -1133,7 +1133,8 @@ main(int argc, char **argv)
 	 */
 
 	STAILQ_FOREACH(ev, &args.pa_events, ev_next) {
-		if (pmc_allocate(ev->ev_spec, ev->ev_mode,
+		if (ev->ev_pmcid == PMC_ID_INVALID &&
+		    pmc_allocate(ev->ev_spec, ev->ev_mode,
 			ev->ev_flags, ev->ev_cpu, &ev->ev_pmcid,
 			ev->ev_count) < 0)
 			err(EX_OSERR,
