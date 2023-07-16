@@ -82,6 +82,7 @@ X86_64::X86_64() {
   ipltEntrySize = 16;
   trapInstr = {0xcc, 0xcc, 0xcc, 0xcc}; // 0xcc = INT3
   nopInstrs = nopInstructions;
+  defaultMaxPageSize = 0x200000;
 
   // Align to the large page size (known as a superpage or huge page).
   // FreeBSD automatically promotes large, superpage-aligned allocations.
