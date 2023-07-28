@@ -9117,6 +9117,11 @@ out:
 	return (cleared + not_cleared);
 }
 
+static int __read_frequently advise_demotion_disabled;
+SYSCTL_INT(_vm_pmap, OID_AUTO, advise_demotion_disabled, CTLFLAG_RDTUN |
+    CTLFLAG_NOFETCH,
+    &advise_demotion_disabled, 0, "Are madvise demotions disabled?");
+
 /*
  *	Apply the given advice to the specified range of addresses within the
  *	given pmap.  Depending on the advice, clear the referenced and/or
@@ -9180,7 +9185,8 @@ pmap_advise(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, int advice)
 		if ((oldpde & PG_V) == 0)
 			continue;
 		else if ((oldpde & PG_PS) != 0) {
-			if ((oldpde & PG_MANAGED) == 0)
+			if (advise_demotion_disabled ||
+			    (oldpde & PG_MANAGED) == 0)
 				continue;
 			lock = NULL;
 			if (!pmap_demote_pde_locked(pmap, pde, sva, &lock)) {
