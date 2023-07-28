@@ -60,6 +60,7 @@
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
+#include <netinet/sctp.h>
 #include <netinet/ip_icmp.h>
 #include <netinet/icmp6.h>
 #endif
@@ -1061,18 +1062,9 @@ struct pf_kstate {
 	u_int32_t		 creation;
 	u_int32_t	 	 expire;
 	u_int32_t		 pfsync_time;
-	u_int16_t		 qid;
-	u_int16_t		 pqid;
-	u_int16_t		 dnpipe;
-	u_int16_t		 dnrpipe;
+	struct pf_rule_actions	 act;
 	u_int16_t		 tag;
-	u_int8_t		 log;
-	int32_t			 rtableid;
-	u_int8_t		 min_ttl;
-	u_int8_t		 set_tos;
-	u_int16_t		 max_mss;
 	u_int8_t		 rt;
-	u_int8_t		 set_prio[2];
 };
 
 /*
@@ -1550,6 +1542,7 @@ struct pf_pdesc {
 	union pf_headers {
 		struct tcphdr		tcp;
 		struct udphdr		udp;
+		struct sctphdr		sctp;
 		struct icmp		icmp;
 #ifdef INET6
 		struct icmp6_hdr	icmp6;
@@ -1579,6 +1572,16 @@ struct pf_pdesc {
 	u_int8_t	 dir;		/* direction */
 	u_int8_t	 sidx;		/* key index for source */
 	u_int8_t	 didx;		/* key index for destination */
+#define PFDESC_SCTP_INIT	0x0001
+#define PFDESC_SCTP_INIT_ACK	0x0002
+#define PFDESC_SCTP_COOKIE	0x0004
+#define PFDESC_SCTP_ABORT	0x0008
+#define PFDESC_SCTP_SHUTDOWN	0x0010
+#define PFDESC_SCTP_SHUTDOWN_COMPLETE	0x0020
+#define PFDESC_SCTP_DATA	0x0040
+#define PFDESC_SCTP_OTHER	0x0080
+	u_int16_t	 sctp_flags;
+	u_int32_t	 sctp_initiate_tag;
 };
 #endif
 
@@ -2279,6 +2282,8 @@ int	pf_normalize_tcp_init(struct mbuf *, int, struct pf_pdesc *,
 int	pf_normalize_tcp_stateful(struct mbuf *, int, struct pf_pdesc *,
 	    u_short *, struct tcphdr *, struct pf_kstate *,
 	    struct pf_state_peer *, struct pf_state_peer *, int *);
+int	pf_normalize_sctp(int, struct pfi_kkif *, struct mbuf *, int,
+	    int, void *, struct pf_pdesc *);
 u_int32_t
 	pf_state_expires(const struct pf_kstate *);
 void	pf_purge_expired_fragments(void);
@@ -2480,15 +2485,15 @@ struct pf_krule		*pf_get_translation(struct pf_pdesc *, struct mbuf *,
 struct pf_state_key	*pf_state_key_setup(struct pf_pdesc *, struct pf_addr *,
 			    struct pf_addr *, u_int16_t, u_int16_t);
 struct pf_state_key	*pf_state_key_clone(struct pf_state_key *);
-
+void			 pf_rule_to_actions(struct pf_krule *,
+			    struct pf_rule_actions *);
 int			 pf_normalize_mss(struct mbuf *m, int off,
-			    struct pf_pdesc *pd, u_int16_t maxmss);
-u_int16_t		 pf_rule_to_scrub_flags(u_int32_t);
+			    struct pf_pdesc *pd);
 #ifdef INET
-void	pf_scrub_ip(struct mbuf **, uint32_t, uint8_t, uint8_t);
+void	pf_scrub_ip(struct mbuf **, struct pf_pdesc *);
 #endif	/* INET */
 #ifdef INET6
-void	pf_scrub_ip6(struct mbuf **, uint32_t, uint8_t, uint8_t);
+void	pf_scrub_ip6(struct mbuf **, struct pf_pdesc *);
 #endif	/* INET6 */
 
 struct pfi_kkif		*pf_kkif_create(int);
