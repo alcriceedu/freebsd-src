@@ -28,8 +28,6 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- * $FreeBSD$
  */
 
 #ifndef _SYS_PMC_H_
@@ -370,6 +368,14 @@ enum pmc_ops {
 /* V2 API */
 #define	PMC_F_CALLCHAIN		0x00000080 /*OP ALLOCATE capture callchains */
 #define	PMC_F_USERCALLCHAIN	0x00000100 /*OP ALLOCATE use userspace stack */
+
+/* V10 API */
+#define	PMC_F_EV_PMU		0x00000200 /*
+					    * OP ALLOCATE: pm_ev has special
+					    * userspace meaning; counter
+					    * configuration is communicated
+					    * through class-dependent fields
+					    */
 
 /* internal flags */
 #define	PMC_F_ATTACHED_TO_OWNER	0x00010000 /*attached to owner*/

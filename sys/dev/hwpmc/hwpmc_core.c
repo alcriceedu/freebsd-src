@@ -31,8 +31,6 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
-
 #include <sys/param.h>
 #include <sys/bus.h>
 #include <sys/pmc.h>
@@ -239,6 +237,9 @@ iaf_allocate_pmc(int cpu, int ri, struct pmc *pm,
 		return (EINVAL);
 
 	if (a->pm_class != PMC_CLASS_IAF)
+		return (EINVAL);
+
+	if ((a->pm_flags & PMC_F_EV_PMU) == 0)
 		return (EINVAL);
 
 	iap = &a->pm_md.pm_iap;
@@ -721,6 +722,9 @@ iap_allocate_pmc(int cpu, int ri, struct pmc *pm,
 	    ("[core,%d] illegal row-index value %d", __LINE__, ri));
 
 	if (a->pm_class != PMC_CLASS_IAP)
+		return (EINVAL);
+
+	if ((a->pm_flags & PMC_F_EV_PMU) == 0)
 		return (EINVAL);
 
 	iap = &a->pm_md.pm_iap;

@@ -31,8 +31,6 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
-
 /* Support for the AMD K7 and later processors */
 
 #include <sys/param.h>
@@ -583,6 +581,9 @@ amd_allocate_pmc(int cpu, int ri, struct pmc *pm,
 	/* check class match */
 	if (pd->pd_class != a->pm_class)
 		return EINVAL;
+
+	if ((a->pm_flags & PMC_F_EV_PMU) == 0)
+		return (EINVAL);
 
 	caps = pm->pm_caps;
 

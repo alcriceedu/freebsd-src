@@ -67,8 +67,6 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
-
 #include "opt_inet.h"
 #include "opt_inet6.h"
 #include "opt_ipsec.h"
@@ -256,8 +254,8 @@ in6_pcbbind(struct inpcb *inp, struct sockaddr_in6 *sin6, struct ucred *cred)
 				     IN6_IS_ADDR_UNSPECIFIED(&t->in6p_faddr)) &&
 				    (!IN6_IS_ADDR_UNSPECIFIED(&sin6->sin6_addr) ||
 				     !IN6_IS_ADDR_UNSPECIFIED(&t->in6p_laddr) ||
-				     (t->inp_flags2 & INP_REUSEPORT) ||
-				     (t->inp_flags2 & INP_REUSEPORT_LB) == 0) &&
+				     (t->inp_socket->so_options & SO_REUSEPORT) ||
+				     (t->inp_socket->so_options & SO_REUSEPORT_LB) == 0) &&
 				    (inp->inp_cred->cr_uid !=
 				     t->inp_cred->cr_uid))
 					return (EADDRINUSE);
@@ -283,8 +281,8 @@ in6_pcbbind(struct inpcb *inp, struct sockaddr_in6 *sin6, struct ucred *cred)
 			}
 			t = in6_pcblookup_local(pcbinfo, &sin6->sin6_addr,
 			    lport, lookupflags, cred);
-			if (t && (reuseport & inp_so_options(t)) == 0 &&
-			    (reuseport_lb & inp_so_options(t)) == 0) {
+			if (t && (reuseport & t->inp_socket->so_options) == 0 &&
+			    (reuseport_lb & t->inp_socket->so_options) == 0) {
 				return (EADDRINUSE);
 			}
 #ifdef INET
@@ -296,8 +294,8 @@ in6_pcbbind(struct inpcb *inp, struct sockaddr_in6 *sin6, struct ucred *cred)
 				t = in_pcblookup_local(pcbinfo, sin.sin_addr,
 				   lport, lookupflags, cred);
 				if (t &&
-				    (reuseport & inp_so_options(t)) == 0 &&
-				    (reuseport_lb & inp_so_options(t)) == 0 &&
+				    (reuseport & t->inp_socket->so_options) == 0 &&
+				    (reuseport_lb & t->inp_socket->so_options) == 0 &&
 				    (ntohl(t->inp_laddr.s_addr) != INADDR_ANY ||
 				        (t->inp_vflag & INP_IPV6PROTO) != 0)) {
 					return (EADDRINUSE);
@@ -337,7 +335,7 @@ in6_pcbbind(struct inpcb *inp, struct sockaddr_in6 *sin6, struct ucred *cred)
  */
 static int
 in6_pcbladdr(struct inpcb *inp, struct sockaddr_in6 *sin6,
-    struct in6_addr *plocal_addr6)
+    struct in6_addr *plocal_addr6, bool sas_required)
 {
 	int error = 0;
 	int scope_ambiguous = 0;
@@ -366,13 +364,25 @@ in6_pcbladdr(struct inpcb *inp, struct sockaddr_in6 *sin6,
 	if ((error = prison_remote_ip6(inp->inp_cred, &sin6->sin6_addr)) != 0)
 		return (error);
 
-	error = in6_selectsrc_socket(sin6, inp->in6p_outputopts,
-	    inp, inp->inp_cred, scope_ambiguous, &in6a, NULL);
-	if (error)
-		return (error);
+	if (sas_required) {
+		error = in6_selectsrc_socket(sin6, inp->in6p_outputopts,
+		    inp, inp->inp_cred, scope_ambiguous, &in6a, NULL);
+		if (error)
+			return (error);
+	} else {
+		/*
+		 * Source address selection isn't required when syncache
+		 * has already established connection and both source and
+		 * destination addresses was chosen.
+		 *
+		 * This also includes the case when fwd_tag was used to
+		 * select source address in tcp_input().
+		 */
+		in6a = inp->in6p_laddr;
+	}
+
 	if (IN6_IS_ADDR_UNSPECIFIED(&in6a))
 		return (EHOSTUNREACH);
-
 	/*
 	 * Do not update this earlier, in case we return with an error.
 	 *
@@ -400,7 +410,7 @@ in6_pcbladdr(struct inpcb *inp, struct sockaddr_in6 *sin6,
  */
 int
 in6_pcbconnect(struct inpcb *inp, struct sockaddr_in6 *sin6, struct ucred *cred,
-    bool rehash __unused)
+    bool sas_required)
 {
 	struct inpcbinfo *pcbinfo = inp->inp_pcbinfo;
 	struct sockaddr_in6 laddr6;
@@ -434,7 +444,8 @@ in6_pcbconnect(struct inpcb *inp, struct sockaddr_in6 *sin6, struct ucred *cred,
 	 * Call inner routine, to assign local interface address.
 	 * in6_pcbladdr() may automatically fill in sin6_scope_id.
 	 */
-	if ((error = in6_pcbladdr(inp, sin6, &laddr6.sin6_addr)) != 0)
+	if ((error = in6_pcbladdr(inp, sin6, &laddr6.sin6_addr,
+	    sas_required)) != 0)
 		return (error);
 
 	if (in6_pcblookup_hash_locked(pcbinfo, &sin6->sin6_addr,

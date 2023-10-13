@@ -70,8 +70,6 @@ static char sccsid[] = "@(#)diff3.c	8.1 (Berkeley) 6/6/93";
 #endif
 #endif /* not lint */
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
-
 #include <sys/capsicum.h>
 #include <sys/procdesc.h>
 #include <sys/types.h>
@@ -337,7 +335,8 @@ merge(int m1, int m2)
 				change(2, &d2->old, false);
 			} else if (Aflag || mflag) {
 				// XXX-THJ: What does it mean for the second file to differ?
-				j = edit(d2, dup, j, DIFF_TYPE2);
+				if (eflag == EFLAG_UNMERGED)
+					j = edit(d2, dup, j, DIFF_TYPE2);
 			}
 			d2++;
 			continue;
@@ -863,7 +862,7 @@ main(int argc, char **argv)
 			eflag = EFLAG_UNMERGED;
 			break;
 		case 'E':
-			eflag = EFLAG_UNMERGED;
+			eflag = EFLAG_OVERLAP;
 			oflag = 1;
 			break;
 		case 'i':
@@ -909,7 +908,8 @@ main(int argc, char **argv)
 	argv += optind;
 
 	if (Aflag) {
-		eflag = EFLAG_UNMERGED;
+		if (eflag == EFLAG_NONE)
+			eflag = EFLAG_UNMERGED;
 		oflag = 1;
 	}
 
