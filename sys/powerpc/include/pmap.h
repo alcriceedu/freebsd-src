@@ -27,8 +27,6 @@
  * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- * $FreeBSD$
  */
 /*-
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -77,7 +75,7 @@
 #include <machine/tlb.h>
 #include <machine/vmparam.h>
 #ifdef __powerpc64__
-#include <vm/vm_radix.h>
+#include <vm/_vm_radix.h>
 #endif
 
 /*

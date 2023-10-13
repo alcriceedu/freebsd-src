@@ -43,8 +43,6 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
-
 #include "opt_hwpmc_hooks.h"
 
 #include <sys/param.h>
@@ -1443,6 +1441,7 @@ vn_io_fault(struct file *fp, struct uio *uio, struct ucred *active_cred,
 	void *rl_cookie;
 	struct vn_io_fault_args args;
 	int error;
+	bool do_io_fault, do_rangelock;
 
 	doio = uio->uio_rw == UIO_READ ? vn_read : vn_write;
 	vp = fp->f_vnode;
@@ -1464,13 +1463,10 @@ vn_io_fault(struct file *fp, struct uio *uio, struct ucred *active_cred,
 			return (EISDIR);
 	}
 
+	do_io_fault = do_vn_io_fault(vp, uio);
+	do_rangelock = do_io_fault || (vn_irflag_read(vp) & VIRF_PGREAD) != 0;
 	foffset_lock_uio(fp, uio, flags);
-	if (do_vn_io_fault(vp, uio)) {
-		args.kind = VN_IO_FAULT_FOP;
-		args.args.fop_args.fp = fp;
-		args.args.fop_args.doio = doio;
-		args.cred = active_cred;
-		args.flags = flags | FOF_OFFSET;
+	if (do_rangelock) {
 		if (uio->uio_rw == UIO_READ) {
 			rl_cookie = vn_rangelock_rlock(vp, uio->uio_offset,
 			    uio->uio_offset + uio->uio_resid);
@@ -1482,11 +1478,19 @@ vn_io_fault(struct file *fp, struct uio *uio, struct ucred *active_cred,
 			rl_cookie = vn_rangelock_wlock(vp, uio->uio_offset,
 			    uio->uio_offset + uio->uio_resid);
 		}
+	}
+	if (do_io_fault) {
+		args.kind = VN_IO_FAULT_FOP;
+		args.args.fop_args.fp = fp;
+		args.args.fop_args.doio = doio;
+		args.cred = active_cred;
+		args.flags = flags | FOF_OFFSET;
 		error = vn_io_fault1(vp, uio, &args, td);
-		vn_rangelock_unlock(vp, rl_cookie);
 	} else {
 		error = doio(fp, uio, active_cred, flags | FOF_OFFSET, td);
 	}
+	if (do_rangelock)
+		vn_rangelock_unlock(vp, rl_cookie);
 	foffset_unlock_uio(fp, uio, flags);
 	return (error);
 }
@@ -3072,12 +3076,14 @@ vn_copy_file_range(struct vnode *invp, off_t *inoffp, struct vnode *outvp,
 		goto out;
 
 	/*
-	 * If the two vnode are for the same file system, call
+	 * If the two vnodes are for the same file system type, call
 	 * VOP_COPY_FILE_RANGE(), otherwise call vn_generic_copy_file_range()
-	 * which can handle copies across multiple file systems.
+	 * which can handle copies across multiple file system types.
 	 */
 	*lenp = len;
-	if (invp->v_mount == outvp->v_mount)
+	if (invp->v_mount == outvp->v_mount ||
+	    strcmp(invp->v_mount->mnt_vfc->vfc_name,
+	    outvp->v_mount->mnt_vfc->vfc_name) == 0)
 		error = VOP_COPY_FILE_RANGE(invp, inoffp, outvp, outoffp,
 		    lenp, flags, incred, outcred, fsize_td);
 	else
@@ -4018,6 +4024,9 @@ vn_lock_pair_pause(const char *wmesg)
  * Both vnodes could be unlocked temporary (and reclaimed).
  *
  * If requesting shared locking, locked vnode lock must not be recursed.
+ *
+ * Only one of LK_SHARED and LK_EXCLUSIVE must be specified.
+ * LK_NODDLKTREAT can be optionally passed.
  */
 void
 vn_lock_pair(struct vnode *vp1, bool vp1_locked, int lkflags1,
@@ -4025,19 +4034,21 @@ vn_lock_pair(struct vnode *vp1, bool vp1_locked, int lkflags1,
 {
 	int error;
 
-	MPASS(lkflags1 == LK_SHARED || lkflags1 == LK_EXCLUSIVE);
-	MPASS(lkflags2 == LK_SHARED || lkflags2 == LK_EXCLUSIVE);
+	MPASS(((lkflags1 & LK_SHARED) != 0) ^ ((lkflags1 & LK_EXCLUSIVE) != 0));
+	MPASS((lkflags1 & ~(LK_SHARED | LK_EXCLUSIVE | LK_NODDLKTREAT)) == 0);
+	MPASS(((lkflags2 & LK_SHARED) != 0) ^ ((lkflags2 & LK_EXCLUSIVE) != 0));
+	MPASS((lkflags2 & ~(LK_SHARED | LK_EXCLUSIVE | LK_NODDLKTREAT)) == 0);
 
 	if (vp1 == NULL && vp2 == NULL)
 		return;
 
 	if (vp1 != NULL) {
-		if (lkflags1 == LK_SHARED &&
+		if ((lkflags1 & LK_SHARED) != 0 &&
 		    (vp1->v_vnlock->lock_object.lo_flags & LK_NOSHARE) != 0)
-			lkflags1 = LK_EXCLUSIVE;
+			lkflags1 = (lkflags1 & ~LK_SHARED) | LK_EXCLUSIVE;
 		if (vp1_locked && VOP_ISLOCKED(vp1) != LK_EXCLUSIVE) {
 			ASSERT_VOP_LOCKED(vp1, "vp1");
-			if (lkflags1 == LK_EXCLUSIVE) {
+			if ((lkflags1 & LK_EXCLUSIVE) != 0) {
 				VOP_UNLOCK(vp1);
 				ASSERT_VOP_UNLOCKED(vp1,
 				    "vp1 shared recursed");
@@ -4050,12 +4061,12 @@ vn_lock_pair(struct vnode *vp1, bool vp1_locked, int lkflags1,
 	}
 
 	if (vp2 != NULL) {
-		if (lkflags2 == LK_SHARED &&
+		if ((lkflags2 & LK_SHARED) != 0 &&
 		    (vp2->v_vnlock->lock_object.lo_flags & LK_NOSHARE) != 0)
-			lkflags2 = LK_EXCLUSIVE;
+			lkflags2 = (lkflags2 & ~LK_SHARED) | LK_EXCLUSIVE;
 		if (vp2_locked && VOP_ISLOCKED(vp2) != LK_EXCLUSIVE) {
 			ASSERT_VOP_LOCKED(vp2, "vp2");
-			if (lkflags2 == LK_EXCLUSIVE) {
+			if ((lkflags2 & LK_EXCLUSIVE) != 0) {
 				VOP_UNLOCK(vp2);
 				ASSERT_VOP_UNLOCKED(vp2,
 				    "vp2 shared recursed");
