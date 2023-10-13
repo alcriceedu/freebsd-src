@@ -26,8 +26,6 @@
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- * $FreeBSD$
  */
 #ifndef	_LINUXKPI_LINUX_KERNEL_H_
 #define	_LINUXKPI_LINUX_KERNEL_H_
@@ -623,12 +621,6 @@ mult_frac(uintmax_t x, uintmax_t multiplier, uintmax_t divisor)
 	uintmax_t r = (x % divisor);
 
 	return ((q * multiplier) + ((r * multiplier) / divisor));
-}
-
-static inline int64_t
-abs64(int64_t x)
-{
-	return (x < 0 ? -x : x);
 }
 
 typedef struct linux_ratelimit {

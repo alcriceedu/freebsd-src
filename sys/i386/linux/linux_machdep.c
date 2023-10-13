@@ -26,9 +26,6 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
-
 #include "opt_posix.h"
 
 #include <sys/param.h>
@@ -312,15 +309,6 @@ linux_set_upcall(struct thread *td, register_t stack)
 }
 
 int
-linux_mmap2(struct thread *td, struct linux_mmap2_args *args)
-{
-
-	return (linux_mmap_common(td, args->addr, args->len, args->prot,
-		args->flags, args->fd, (uint64_t)(uint32_t)args->pgoff *
-		PAGE_SIZE));
-}
-
-int
 linux_mmap(struct thread *td, struct linux_mmap_args *args)
 {
 	int error;
@@ -333,20 +321,6 @@ linux_mmap(struct thread *td, struct linux_mmap_args *args)
 	return (linux_mmap_common(td, linux_args.addr, linux_args.len,
 	    linux_args.prot, linux_args.flags, linux_args.fd,
 	    (uint32_t)linux_args.pgoff));
-}
-
-int
-linux_mprotect(struct thread *td, struct linux_mprotect_args *uap)
-{
-
-	return (linux_mprotect_common(td, PTROUT(uap->addr), uap->len, uap->prot));
-}
-
-int
-linux_madvise(struct thread *td, struct linux_madvise_args *uap)
-{
-
-	return (linux_madvise_common(td, PTROUT(uap->addr), uap->len, uap->behav));
 }
 
 int
@@ -519,7 +493,7 @@ linux_set_thread_area(struct thread *td, struct linux_set_thread_area_args *args
 	/*
 	 * Semantics of Linux version: every thread in the system has array of
 	 * 3 tls descriptors. 1st is GLIBC TLS, 2nd is WINE, 3rd unknown. This
-	 * syscall loads one of the selected tls decriptors with a value and
+	 * syscall loads one of the selected tls descriptors with a value and
 	 * also loads GDT descriptors 6, 7 and 8 with the content of the
 	 * per-thread descriptors.
 	 *
