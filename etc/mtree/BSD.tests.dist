@@ -1,4 +1,3 @@
-# $FreeBSD$
 #
 # Please see the file src/etc/mtree/README before making changes to this file.
 #
@@ -278,6 +277,8 @@
             diff
             ..
         ..
+    ..
+    include
     ..
     lib
         atf
@@ -815,6 +816,8 @@
         mac
             bsdextended
             ..
+            ipacl
+            ..
             portacl
             ..
         ..
@@ -895,6 +898,8 @@
         vfs
         ..
         vm
+            stack
+            ..
         ..
         vmm
         ..
@@ -1132,6 +1137,8 @@
         ..
         uniq
         ..
+        unzip
+        ..
         vmstat
         ..
         wc
@@ -1175,6 +1182,8 @@
         rpcbind
         ..
         sa
+        ..
+        syslogd
         ..
     ..
 ..

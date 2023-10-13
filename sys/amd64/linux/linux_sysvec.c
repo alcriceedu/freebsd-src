@@ -31,9 +31,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
-
 #define	__ELF_WORD_SIZE	64
 
 #include <sys/param.h>
@@ -43,7 +40,6 @@ __FBSDID("$FreeBSD$");
 #include <sys/kernel.h>
 #include <sys/ktr.h>
 #include <sys/lock.h>
-#include <sys/malloc.h>
 #include <sys/module.h>
 #include <sys/mutex.h>
 #include <sys/proc.h>
@@ -54,13 +50,9 @@ __FBSDID("$FreeBSD$");
 
 #include <vm/pmap.h>
 #include <vm/vm.h>
-#include <vm/vm_map.h>
-#include <vm/vm_page.h>
+#include <vm/vm_param.h>
 
-#include <machine/cpu.h>
 #include <machine/md_var.h>
-#include <machine/pcb.h>
-#include <machine/specialreg.h>
 #include <machine/trap.h>
 
 #include <x86/linux/linux_x86.h>
@@ -233,7 +225,7 @@ linux64_arch_copyout_auxargs(struct image_params *imgp, Elf_Auxinfo **pos)
 
 	AUXARGS_ENTRY((*pos), LINUX_AT_SYSINFO_EHDR, linux_vdso_base);
 	AUXARGS_ENTRY((*pos), LINUX_AT_HWCAP, cpu_feature);
-	AUXARGS_ENTRY((*pos), LINUX_AT_HWCAP2, 0);
+	AUXARGS_ENTRY((*pos), LINUX_AT_HWCAP2, linux_x86_elf_hwcap2());
 	AUXARGS_ENTRY((*pos), LINUX_AT_PLATFORM, PTROUT(linux_platform));
 }
 

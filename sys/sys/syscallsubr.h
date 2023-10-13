@@ -23,8 +23,6 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- * $FreeBSD$
  */
 
 #ifndef _SYS_SYSCALLSUBR_H_
@@ -141,6 +139,26 @@ int	kern_cpuset_setid(struct thread *td, cpuwhich_t which,
 int	kern_dup(struct thread *td, u_int mode, int flags, int old, int new);
 int	kern_execve(struct thread *td, struct image_args *args,
 	    struct mac *mac_p, struct vmspace *oldvmspace);
+int	kern_extattr_delete_fd(struct thread *td, int fd, int attrnamespace,
+	    const char *attrname);
+int	kern_extattr_delete_path(struct thread *td, const char *path,
+	    int attrnamespace, const char *attrname, int follow,
+	    enum uio_seg pathseg);
+int	kern_extattr_get_fd(struct thread *td, int fd, int attrnamespace,
+	    const char *attrname, void *data, size_t nbytes);
+int	kern_extattr_get_path(struct thread *td, const char *path,
+	    int attrnamespace, const char *attrname, void *data,
+	    size_t nbytes, int follow, enum uio_seg pathseg);
+int	kern_extattr_list_fd(struct thread *td, int fd, int attrnamespace,
+	    struct uio *auiop);
+int	kern_extattr_list_path(struct thread *td, const char *path,
+	    int attrnamespace, struct uio *auiop, int follow,
+	    enum uio_seg pathseg);
+int	kern_extattr_set_fd(struct thread *td, int fd, int attrnamespace,
+	    const char *attrname, void *data, size_t nbytes);
+int	kern_extattr_set_path(struct thread *td, const char *path,
+	    int attrnamespace, const char *attrname, void *data,
+	    size_t nbytes, int follow, enum uio_seg pathseg);
 int	kern_fchmodat(struct thread *td, int fd, const char *path,
 	    enum uio_seg pathseg, mode_t mode, int flag);
 int	kern_fchownat(struct thread *td, int fd, const char *path,
@@ -206,6 +224,8 @@ int	kern_minherit(struct thread *td, uintptr_t addr, size_t len,
 	    int inherit);
 int	kern_mkdirat(struct thread *td, int fd, const char *path,
 	    enum uio_seg segflg, int mode);
+int	kern_membarrier(struct thread *td, int cmd, unsigned flags,
+	    int cpu_id);
 int	kern_mkfifoat(struct thread *td, int fd, const char *path,
 	    enum uio_seg pathseg, int mode);
 int	kern_mknodat(struct thread *td, int fd, const char *path,
@@ -216,7 +236,8 @@ int	kern_mmap(struct thread *td, const struct mmap_req *mrp);
 int	kern_mmap_racct_check(struct thread *td, struct vm_map *map,
 	    vm_size_t size);
 int	kern_mmap_maxprot(struct proc *p, int prot);
-int	kern_mprotect(struct thread *td, uintptr_t addr, size_t size, int prot);
+int	kern_mprotect(struct thread *td, uintptr_t addr, size_t size,
+	    int prot, int flags);
 int	kern_msgctl(struct thread *, int, int, struct msqid_ds *);
 int	kern_msgrcv(struct thread *, int, void *, size_t, long, int, long *);
 int	kern_msgsnd(struct thread *, int, const void *, size_t, int, long);
