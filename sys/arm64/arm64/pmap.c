@@ -5019,20 +5019,13 @@ validate:
 
 #if VM_NRESERVLEVEL > 0
 	/*
-	 * Try to promote from level 3 pages to a level 3 contiguous superpage,
-	 * and then to a level 2 superpage. This currently only works on
-	 * stage 1 pmaps as pmap_promote_l2 looks at stage 1 specific fields
-	 * and performs a break-before-make sequence that is incorrect for a
-	 * stage 2 pmap.
+	 * If both the page table page and the reservation are fully
+	 * populated, then attempt promotion.
 	 */
-	if ((mpte == NULL || mpte->ref_count >= L3C_ENTRIES) &&
-            (m->flags & PG_FICTITIOUS) == 0) {
-		seg = &vm_phys_segs[m->segind];
-		if ((m->phys_addr & ~L2_OFFSET) >= seg->start &&
-		    seg->first_page[atop((m->phys_addr & ~L2_OFFSET) -
-		    seg->start)].psind >= 2)
-                        (void)pmap_promote_l2(pmap, pde, va, mpte, &lock);
-        }
+	if ((mpte == NULL || mpte->ref_count == NL3PG) &&
+	    (m->flags & PG_FICTITIOUS) == 0 &&
+	    vm_reserv_level_iffullpop(m) == 0)
+		(void)pmap_promote_l2(pmap, pde, va, mpte, &lock);
 #endif
 
 	rv = KERN_SUCCESS;
