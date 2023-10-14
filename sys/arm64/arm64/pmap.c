@@ -464,7 +464,6 @@ static int pmap_enter_l2(pmap_t pmap, vm_offset_t va, pd_entry_t new_l2,
 static int pmap_enter_l3c(pmap_t pmap, vm_offset_t va, pt_entry_t l3e, u_int flags,
     vm_page_t m, vm_page_t *ml3, struct rwlock **lockp);
 static pt_entry_t pmap_load_l3c(pt_entry_t *l3p);
-static void pmap_promote_l3c(pmap_t pmap, pd_entry_t *l3p, vm_offset_t va);
 static void pmap_mask_set_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va,
     vm_offset_t *vap, vm_offset_t va_next, pt_entry_t mask, pt_entry_t nbits);
 static bool pmap_pv_insert_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m,
@@ -1653,14 +1652,6 @@ SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, demotions, CTLFLAG_RD,
 static u_long pmap_l3c_mappings;
 SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, mappings, CTLFLAG_RD,
     &pmap_l3c_mappings, 0, "64KB page mappings");
-
-static u_long pmap_l3c_p_failures;
-SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, p_failures, CTLFLAG_RD,
-    &pmap_l3c_p_failures, 0, "64KB page promotion failures");
-
-static u_long pmap_l3c_promotions;
-SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, promotions, CTLFLAG_RD,
-    &pmap_l3c_promotions, 0, "64KB page promotions");
 
 static u_long pmap_l3c_removes;	// XXX
 SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, removes, CTLFLAG_RD,
@@ -4611,106 +4602,6 @@ setl3:
 	    pmap);
 	return (true);
 }
-
-/*
- * XXX
- */
-static void
-pmap_promote_l3c(pmap_t pmap, pd_entry_t *l3p, vm_offset_t va)
-{
-	pd_entry_t firstl3c, *l3, oldl3, pa;
-	register_t intr;
-
-	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
-
-	/*
-	 * Compute the address of the first L3 entry in the superpage
-	 * candidate.
-	 */
-	l3p = (pt_entry_t *)((uintptr_t)l3p & ~((L3C_ENTRIES *
-	    sizeof(pt_entry_t)) - 1));
-
-	firstl3c = pmap_load(l3p);
-
-	/*
-	 * Check that the first L3 entry is aligned and has its access
-	 * flag set.
-	 */
-	if (((firstl3c & (~ATTR_MASK | ATTR_AF)) & L3C_OFFSET) != ATTR_AF) {
-		atomic_add_long(&pmap_l3c_p_failures, 1);
-		CTR2(KTR_PMAP, "pmap_promote_l3c: failure for va %#lx"
-		    " in pmap %p", va, pmap);
-		return;
-	}
-
-	/*
-	 * If the first L3 entry is a clean read-write mapping, convert it
-	 * to a read-only mapping.
-	 */
-set_first:
-	if ((firstl3c & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
-	    (ATTR_S1_AP(ATTR_S1_AP_RO) | ATTR_SW_DBM)) {
-		/*
-		 * When the mapping is clean, i.e., ATTR_S1_AP_RO is set,
-		 * ATTR_SW_DBM can be cleared without a TLB invalidation.
-		 */
-		if (!atomic_fcmpset_64(l3p, &firstl3c, firstl3c & ~ATTR_SW_DBM))
-			goto set_first;
-		firstl3c &= ~ATTR_SW_DBM;
-	}
-
-	/*
-	 * Check that the rest of the L3 entries are compatible with the first,
-	 * and convert clean read-write mappings to read-only mappings.
-	 */
-	pa = firstl3c + L3C_SIZE - PAGE_SIZE;
-	for (l3 = l3p + L3C_ENTRIES - 1; l3 > l3p; l3--) {
-		oldl3 = pmap_load(l3);
-set_l3:
-		if ((oldl3 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
-		    (ATTR_S1_AP(ATTR_S1_AP_RO) | ATTR_SW_DBM)) {
-			/*
-			 * When the mapping is clean, i.e., ATTR_S1_AP_RO is
-			 * set, ATTR_SW_DBM can be cleared without a TLB
-			 * invalidation.
-			 */
-			if (!atomic_fcmpset_64(l3, &oldl3, oldl3 &
-			    ~ATTR_SW_DBM))
-				goto set_l3;
-			oldl3 &= ~ATTR_SW_DBM;
-		}
-		if (oldl3 != pa) {
-			atomic_add_long(&pmap_l3c_p_failures, 1);
-			CTR2(KTR_PMAP, "pmap_promote_l3c: failure for va %#lx"
-			    " in pmap %p", va, pmap);
-			return;
-		}
-		pa -= PAGE_SIZE;
-	}
-	intr = intr_disable();
-
-	/*
-	 * Clear the valid bit for each L3 entry.
-	 */
-	for (l3 = l3p; l3 < l3p + L3C_ENTRIES; l3++)
-		pmap_clear_bits(l3, ATTR_DESCR_VALID);
-
-	pmap_invalidate_range(pmap, va & ~L3C_OFFSET, (va + L3C_SIZE) &
-	    ~L3C_OFFSET, true);
-
-	/*
-	 * Remake the mappings with the contiguous bit set.
-	 */
-	for (l3 = l3p; l3 < l3p + L3C_ENTRIES; l3++)
-		pmap_set_bits(l3, ATTR_CONTIGUOUS | ATTR_DESCR_VALID);
-
-	dsb(ishst);
-	intr_restore(intr);
-
-	atomic_add_long(&pmap_l3c_promotions, 1);
-	CTR2(KTR_PMAP, "pmap_promote_l3c: success for va %#lx in pmap %p",
-	    va, pmap);
-}
 #endif /* VM_NRESERVLEVEL > 0 */
 
 static int
@@ -5137,10 +5028,6 @@ validate:
 	if ((mpte == NULL || mpte->ref_count >= L3C_ENTRIES) &&
             (m->flags & PG_FICTITIOUS) == 0) {
 		seg = &vm_phys_segs[m->segind];
-		if ((m->phys_addr & ~L3C_OFFSET) >= seg->start &&
-		    seg->first_page[atop((m->phys_addr & ~L3C_OFFSET) -
-		    seg->start)].psind >= 1)
-                        pmap_promote_l3c(pmap, l3, va);
 		if ((m->phys_addr & ~L2_OFFSET) >= seg->start &&
 		    seg->first_page[atop((m->phys_addr & ~L2_OFFSET) -
 		    seg->start)].psind >= 2)
