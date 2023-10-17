@@ -5487,6 +5487,7 @@ pmap_enter_l3c(pmap_t pmap, vm_offset_t va, pt_entry_t l3e, u_int flags,
 			if (*ml3 != NULL) {
 				(*ml3)->ref_count -= L3C_ENTRIES - 1;
 				pmap_abort_ptp(pmap, va, *ml3);
+				*ml3 = NULL;
 			}
 			return (KERN_RESOURCE_SHORTAGE);
 		}
