@@ -5264,7 +5264,6 @@ static int
 pmap_enter_l3c(pmap_t pmap, vm_offset_t va, pt_entry_t l3e, u_int flags,
     vm_page_t m, vm_page_t *ml3, struct rwlock **lockp)
 {
-	struct spglist free;
 	pd_entry_t *l2p, *pde;
 	pt_entry_t old_l3e, *l3p, *tl3p;
 	vm_page_t mt;
@@ -5339,23 +5338,22 @@ pmap_enter_l3c(pmap_t pmap, vm_offset_t va, pt_entry_t l3e, u_int flags,
 	/*
 	 * If there are existing mappings, either abort or remove them.
 	 */
-	for (tl3p = l3p; tl3p < &l3p[L3C_ENTRIES]; tl3p++) {
-		if ((old_l3e = pmap_load(tl3p)) != 0) {
-			if ((flags & PMAP_ENTER_NOREPLACE) != 0) {
+	if ((flags & PMAP_ENTER_NOREPLACE) != 0) {
+		for (tl3p = l3p; tl3p < &l3p[L3C_ENTRIES]; tl3p++) {
+			if ((old_l3e = pmap_load(tl3p)) != 0) {
 				if (*ml3 != NULL)
 					(*ml3)->ref_count -= L3C_ENTRIES;
 				return (KERN_FAILURE);
-			} else {
-				SLIST_INIT(&free);
-				pmap_remove_l3_range(pmap,
-				    pmap_load(pmap_l2(pmap, va)), va,
-				    va + L3C_SIZE, &free, lockp);
-				pmap_invalidate_range(pmap, va, va +
-				    L3C_SIZE, true);
-				vm_page_free_pages_toq(&free, true);
-				break;
 			}
 		}
+	} else {
+		/*
+		 * Because we increment the L3 page's reference count above,
+		 * it is guranteed not to be freed here and we can pass NULL
+		 * instead of a valid free list.
+		 */
+		pmap_remove_l3_range(pmap, pmap_load(pmap_l2(pmap, va)), va,
+		    va + L3C_SIZE, NULL, lockp);
 	}
 
 	/*
@@ -5366,6 +5364,7 @@ pmap_enter_l3c(pmap_t pmap, vm_offset_t va, pt_entry_t l3e, u_int flags,
 			if (*ml3 != NULL) {
 				(*ml3)->ref_count -= L3C_ENTRIES - 1;
 				pmap_abort_ptp(pmap, va, *ml3);
+				*ml3 = NULL;
 			}
 			return (KERN_RESOURCE_SHORTAGE);
 		}
