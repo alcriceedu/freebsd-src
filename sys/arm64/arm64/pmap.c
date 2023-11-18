@@ -4721,7 +4721,6 @@ pmap_enter(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 	pv_entry_t pv;
 	vm_paddr_t opa, pa;
 	vm_page_t mpte, om;
-	struct vm_phys_seg *seg;
 	boolean_t nosleep;
 	int lvl, rv;
 
