@@ -2044,6 +2044,17 @@ pmap_kenter(vm_offset_t sva, vm_size_t size, vm_paddr_t pa, int mode)
 		    ("pmap_kenter: Invalid page entry, va: 0x%lx", va));
 		KASSERT(lvl == 2, ("pmap_kenter: Invalid level %d", lvl));
 
+		/*
+		 * If we have an aligned, contiguous chunk of L3C_ENTRIES
+		 * L3 pages, set the contiguous bit within each PTE so that
+		 * the chunk can be cached using only one TLB entry.
+		 */
+		if ((va & L3C_OFFSET) == 0 && (pa & L3C_OFFSET) == 0) {
+			if (size >= L3C_SIZE)
+				attr |= ATTR_CONTIGUOUS;
+			else
+				attr &= ~ATTR_CONTIGUOUS;
+		}
 		pte = pmap_l2_to_l3(pde, va);
 		old_l3e |= pmap_load_store(pte, PHYS_TO_PTE(pa) | attr);
 
