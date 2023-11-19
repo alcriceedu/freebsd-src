@@ -2089,6 +2089,8 @@ pmap_kremove(vm_offset_t va)
 	pt_entry_t *pte;
 
 	pte = pmap_pte_exists(kernel_pmap, va, 3, __func__);
+	KASSERT((pmap_load(pte) & ATTR_CONTIGUOUS) == 0,
+	    ("pmap_kremove: unexpected ATTR_CONTIGUOUS"));
 	pmap_clear(pte);
 	pmap_s1_invalidate_page(kernel_pmap, va, true);
 }
