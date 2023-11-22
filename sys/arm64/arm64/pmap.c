@@ -2142,7 +2142,7 @@ pmap_kremove(vm_offset_t va)
 void
 pmap_kremove_device(vm_offset_t sva, vm_size_t size)
 {
-	pt_entry_t *pte;
+	pt_entry_t *pte, *ptep_end;
 	vm_offset_t va;
 	int lvl;
 
@@ -2169,6 +2169,20 @@ pmap_kremove_device(vm_offset_t sva, vm_size_t size)
 			size -= L2_SIZE;
 			break;
 		case 3:
+			if ((pmap_load(pte) & ATTR_CONTIGUOUS) != 0) {
+				KASSERT((va & L3C_OFFSET) == 0,
+				    ("Unaligned L3C virtual address"));
+				KASSERT(size >= L3C_SIZE,
+				    ("Insufficient L3C size"));
+
+				ptep_end = pte + L3C_ENTRIES;
+				for (; pte < ptep_end; pte++)
+					pmap_clear(pte);
+
+				va += L3C_SIZE;
+				size -= L3C_SIZE;
+				break;
+			}
 			pmap_clear(pte);
 
 			va += PAGE_SIZE;
