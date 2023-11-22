@@ -2142,7 +2142,7 @@ pmap_kremove(vm_offset_t va)
 void
 pmap_kremove_device(vm_offset_t sva, vm_size_t size)
 {
-	pt_entry_t *pte, *ptep_end;
+	pt_entry_t *ptep, *ptep_end;
 	vm_offset_t va;
 	int lvl;
 
@@ -2153,8 +2153,8 @@ pmap_kremove_device(vm_offset_t sva, vm_size_t size)
 
 	va = sva;
 	while (size != 0) {
-		pte = pmap_pte(kernel_pmap, va, &lvl);
-		KASSERT(pte != NULL, ("Invalid page table, va: 0x%lx", va));
+		ptep = pmap_pte(kernel_pmap, va, &lvl);
+		KASSERT(ptep != NULL, ("Invalid page table, va: 0x%lx", va));
 		switch (lvl) {
 		case 2:
 			KASSERT((va & L2_OFFSET) == 0,
@@ -2162,28 +2162,28 @@ pmap_kremove_device(vm_offset_t sva, vm_size_t size)
 			KASSERT(size >= L2_SIZE, ("Insufficient size"));
 
 			PMAP_LOCK(kernel_pmap);
-			pmap_remove_kernel_l2(kernel_pmap, pte, va);
+			pmap_remove_kernel_l2(kernel_pmap, ptep, va);
 			PMAP_UNLOCK(kernel_pmap);
 
 			va += L2_SIZE;
 			size -= L2_SIZE;
 			break;
 		case 3:
-			if ((pmap_load(pte) & ATTR_CONTIGUOUS) != 0) {
+			if ((pmap_load(ptep) & ATTR_CONTIGUOUS) != 0) {
 				KASSERT((va & L3C_OFFSET) == 0,
 				    ("Unaligned L3C virtual address"));
 				KASSERT(size >= L3C_SIZE,
 				    ("Insufficient L3C size"));
 
-				ptep_end = pte + L3C_ENTRIES;
-				for (; pte < ptep_end; pte++)
-					pmap_clear(pte);
+				ptep_end = ptep + L3C_ENTRIES;
+				for (; ptep < ptep_end; ptep++)
+					pmap_clear(ptep);
 
 				va += L3C_SIZE;
 				size -= L3C_SIZE;
 				break;
 			}
-			pmap_clear(pte);
+			pmap_clear(ptep);
 
 			va += PAGE_SIZE;
 			size -= PAGE_SIZE;
