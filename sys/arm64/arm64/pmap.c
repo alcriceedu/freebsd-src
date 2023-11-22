@@ -461,11 +461,14 @@ static vm_page_t pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va,
     vm_page_t m, vm_prot_t prot, vm_page_t mpte, struct rwlock **lockp);
 static int pmap_enter_l2(pmap_t pmap, vm_offset_t va, pd_entry_t new_l2,
     u_int flags, vm_page_t m, struct rwlock **lockp);
+static int pmap_insert_pt_page(pmap_t pmap, vm_page_t mpte, bool promoted,
+    bool all_l3e_AF_set);
 static pt_entry_t pmap_load_l3c(pt_entry_t *l3p);
 static void pmap_mask_set_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va,
     vm_offset_t *vap, vm_offset_t va_next, pt_entry_t mask, pt_entry_t nbits);
 static bool pmap_pv_insert_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m,
     struct rwlock **lockp);
+static void pmap_remove_kernel_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t va);
 static int pmap_remove_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t sva,
     pd_entry_t l1e, struct spglist *free, struct rwlock **lockp);
 static int pmap_remove_l3(pmap_t pmap, pt_entry_t *l3, vm_offset_t sva,
@@ -483,6 +486,8 @@ static vm_page_t _pmap_alloc_l3(pmap_t pmap, vm_pindex_t ptepindex,
 static void _pmap_unwire_l3(pmap_t pmap, vm_offset_t va, vm_page_t m,
     struct spglist *free);
 static int pmap_unuse_pt(pmap_t, vm_offset_t, pd_entry_t, struct spglist *);
+static void pmap_update_entry(pmap_t pmap, pd_entry_t *pte, pd_entry_t newpte,
+    vm_offset_t va, vm_size_t size);
 static __inline vm_page_t pmap_remove_pt_page(pmap_t pmap, vm_offset_t va);
 
 /*
@@ -2025,7 +2030,8 @@ pmap_kenter(vm_offset_t sva, vm_size_t size, vm_paddr_t pa, int mode)
 	pd_entry_t *pde;
 	pt_entry_t attr, old_l3e, *pte;
 	vm_offset_t va;
-	int lvl;
+	vm_page_t mpte;
+	int error, lvl;
 
 	KASSERT((pa & L3_OFFSET) == 0,
 	    ("pmap_kenter: Invalid physical address"));
@@ -2035,7 +2041,7 @@ pmap_kenter(vm_offset_t sva, vm_size_t size, vm_paddr_t pa, int mode)
 	    ("pmap_kenter: Mapping is not page-sized"));
 
 	attr = ATTR_DEFAULT | ATTR_S1_AP(ATTR_S1_AP_RW) | ATTR_S1_XN |
-	    ATTR_S1_IDX(mode) | L3_PAGE;
+	    ATTR_S1_IDX(mode);
 	old_l3e = 0;
 	va = sva;
 	while (size != 0) {
@@ -2043,6 +2049,34 @@ pmap_kenter(vm_offset_t sva, vm_size_t size, vm_paddr_t pa, int mode)
 		KASSERT(pde != NULL,
 		    ("pmap_kenter: Invalid page entry, va: 0x%lx", va));
 		KASSERT(lvl == 2, ("pmap_kenter: Invalid level %d", lvl));
+
+		/*
+		 * XXX
+		 */
+		if ((va & L2_OFFSET) == 0 && size >= L2_SIZE &&
+		    (pa & L2_OFFSET) == 0 && vm_initialized) {
+			mpte = PHYS_TO_VM_PAGE(pmap_load(pde) & ~ATTR_MASK);
+			PMAP_LOCK(kernel_pmap);
+			error = pmap_insert_pt_page(kernel_pmap, mpte, false,
+			    false);
+			if (error == 0) {
+				/*
+				 * Although the page table page "mpte" should
+				 * be devoid of mappings, the TLB might hold
+				 * intermediate entries that reference it, so
+				 * we perform a single-page invalidation.
+				 */
+				pmap_update_entry(kernel_pmap, pde, pa | attr |
+				    L2_BLOCK, va, PAGE_SIZE);
+			}
+			PMAP_UNLOCK(kernel_pmap);
+			if (error == 0) {
+				va += L2_SIZE;
+				pa += L2_SIZE;
+				size -= L2_SIZE;
+				continue;
+			}
+		}
 
 		/*
 		 * If we have an aligned, contiguous chunk of L3C_ENTRIES
@@ -2056,7 +2090,8 @@ pmap_kenter(vm_offset_t sva, vm_size_t size, vm_paddr_t pa, int mode)
 				attr &= ~ATTR_CONTIGUOUS;
 		}
 		pte = pmap_l2_to_l3(pde, va);
-		old_l3e |= pmap_load_store(pte, PHYS_TO_PTE(pa) | attr);
+		old_l3e |= pmap_load_store(pte, PHYS_TO_PTE(pa) | attr |
+		    L3_PAGE);
 
 		va += PAGE_SIZE;
 		pa += PAGE_SIZE;
@@ -2107,6 +2142,7 @@ pmap_kremove_device(vm_offset_t sva, vm_size_t size)
 {
 	pt_entry_t *pte;
 	vm_offset_t va;
+	int lvl;
 
 	KASSERT((sva & L3_OFFSET) == 0,
 	    ("pmap_kremove_device: Invalid virtual address"));
@@ -2115,11 +2151,31 @@ pmap_kremove_device(vm_offset_t sva, vm_size_t size)
 
 	va = sva;
 	while (size != 0) {
-		pte = pmap_pte_exists(kernel_pmap, va, 3, __func__);
-		pmap_clear(pte);
+		pte = pmap_pte(kernel_pmap, va, &lvl);
+		KASSERT(pte != NULL, ("Invalid page table, va: 0x%lx", va));
+		switch (lvl) {
+		case 2:
+			KASSERT((va & L2_OFFSET) == 0,
+			    ("Unaligned virtual address"));
+			KASSERT(size >= L2_SIZE, ("Insufficient size"));
 
-		va += PAGE_SIZE;
-		size -= PAGE_SIZE;
+			PMAP_LOCK(kernel_pmap);
+			pmap_remove_kernel_l2(kernel_pmap, pte, va);
+			PMAP_UNLOCK(kernel_pmap);
+
+			va += L2_SIZE;
+			size -= L2_SIZE;
+			break;
+		case 3:
+			pmap_clear(pte);
+
+			va += PAGE_SIZE;
+			size -= PAGE_SIZE;
+			break;
+		default:
+			KASSERT(0, ("Invalid page table level: %d", lvl));
+			break;
+		}
 	}
 	pmap_s1_invalidate_range(kernel_pmap, sva, va, true);
 }
