@@ -6181,11 +6181,13 @@ pmap_remove_pages(pmap_t pmap)
 					    lvl);
 				}
 
-/*
- * We cannot remove wired pages from a process' mapping at this time
- * XXX For 64KB pages, all of the constituent PTEs should have the wired bit
- * set, so we don't check for ATTR_CONTIGUOUS here.
- */
+				/*
+				 * We cannot remove wired mappings at this time.
+				 *
+				 * For 64KB pages, all of the constituent PTEs
+				 * should have the wired bit set, so we don't
+				 * check for ATTR_CONTIGUOUS here.
+				 */
 				if (tpte & ATTR_SW_WIRED) {
 					allfree = 0;
 					continue;
@@ -6216,7 +6218,8 @@ pmap_remove_pages(pmap_t pmap)
 
 				/*
 				 * Update the vm_page_t clean/reference bits.
-				 * XXX We don't check for ATTR_CONTIGUOUS here
+				 *
+				 * We don't check for ATTR_CONTIGUOUS here
 				 * because writeable 64KB pages are expected
 				 * to be dirty, i.e., every constituent PTE
 				 * should be dirty.
