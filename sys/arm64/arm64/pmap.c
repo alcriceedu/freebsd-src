@@ -2051,7 +2051,8 @@ pmap_kenter(vm_offset_t sva, vm_size_t size, vm_paddr_t pa, int mode)
 		KASSERT(lvl == 2, ("pmap_kenter: Invalid level %d", lvl));
 
 		/*
-		 * XXX
+		 * If we have an aligned, contiguous chunk of L2_SIZE, try
+		 * to create an L2_BLOCK mapping.
 		 */
 		if ((va & L2_OFFSET) == 0 && size >= L2_SIZE &&
 		    (pa & L2_OFFSET) == 0 && vm_initialized) {
@@ -2089,6 +2090,7 @@ pmap_kenter(vm_offset_t sva, vm_size_t size, vm_paddr_t pa, int mode)
 			else
 				attr &= ~ATTR_CONTIGUOUS;
 		}
+
 		pte = pmap_l2_to_l3(pde, va);
 		old_l3e |= pmap_load_store(pte, PHYS_TO_PTE(pa) | attr |
 		    L3_PAGE);
