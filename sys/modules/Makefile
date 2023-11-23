@@ -41,6 +41,7 @@ SUBDIR=	\
 	${_arcmsr} \
 	${_allwinner} \
 	${_armv8crypto} \
+	${_armv8_rng} \
 	${_asmc} \
 	ata \
 	ath \
@@ -565,7 +566,7 @@ _iwlwifi=	iwlwifi
 _iwlwififw=	iwlwififw
 .endif
 _ossl=		ossl
-#_rtw88=		rtw88
+_rtw88=		rtw88
 _vmware=	vmware
 .endif
 
@@ -674,6 +675,7 @@ _cxgb=		cxgb
 
 .if ${MACHINE_CPUARCH} == "aarch64"
 _armv8crypto=	armv8crypto
+_armv8_rng=	armv8_rng
 _dpaa2=		dpaa2
 _sff=		sff
 _em=		em
