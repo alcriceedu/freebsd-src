@@ -7335,8 +7335,8 @@ pmap_advise(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, int advice)
                                         */
                                         if ((oldl3 & ATTR_SW_WIRED) == 0) {
 						dva = MIN((sva & ~L3C_OFFSET) +
-						    L3C_SIZE - PAGE_SIZE, va_next
-						    - PAGE_SIZE);
+						    L3C_SIZE - PAGE_SIZE,
+						    va_next - PAGE_SIZE);
 						dl3 = pmap_l2_to_l3(l2, dva);
 						KASSERT(pmap_load(dl3) != 0,
 						    ("pmap_advise: invalid PTE"));
@@ -7353,6 +7353,7 @@ pmap_advise(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, int advice)
 					 */
 					oldl3 = pmap_load(l3);
 				}
+
 				/*
 				 * Check that we did not just destroy this entry so
 				 * we avoid corrupting the page able.
