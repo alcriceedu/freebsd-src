@@ -795,6 +795,8 @@
                 ..
                 stripe
                 ..
+                union
+                ..
                 uzip
                     etalon
                     ..
@@ -1094,6 +1096,8 @@
         patch
         ..
         pr
+        ..
+        printenv
         ..
         printf
         ..
