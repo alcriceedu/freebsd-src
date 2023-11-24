@@ -2171,6 +2171,10 @@ pmap_kremove_device(vm_offset_t sva, vm_size_t size)
 			    ("Unaligned virtual address"));
 			KASSERT(size >= L2_SIZE, ("Insufficient size"));
 
+			if (va != sva) {
+				pmap_s1_invalidate_range(kernel_pmap, sva, va,
+				    true);
+			}
 			pmap_clear(ptep);
 			pmap_s1_invalidate_page(kernel_pmap, va, true);
 			PMAP_LOCK(kernel_pmap);
@@ -2178,6 +2182,7 @@ pmap_kremove_device(vm_offset_t sva, vm_size_t size)
 			PMAP_UNLOCK(kernel_pmap);
 
 			va += L2_SIZE;
+			sva = va;
 			size -= L2_SIZE;
 			break;
 		case 3:
@@ -2205,7 +2210,8 @@ pmap_kremove_device(vm_offset_t sva, vm_size_t size)
 			break;
 		}
 	}
-	pmap_s1_invalidate_range(kernel_pmap, sva, va, true);
+	if (va != sva)
+		pmap_s1_invalidate_range(kernel_pmap, sva, va, true);
 }
 
 /*
