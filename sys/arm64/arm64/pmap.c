@@ -2171,6 +2171,8 @@ pmap_kremove_device(vm_offset_t sva, vm_size_t size)
 			    ("Unaligned virtual address"));
 			KASSERT(size >= L2_SIZE, ("Insufficient size"));
 
+			pmap_clear(ptep);
+			pmap_s1_invalidate_page(kernel_pmap, va, true);
 			PMAP_LOCK(kernel_pmap);
 			pmap_remove_kernel_l2(kernel_pmap, ptep, va);
 			PMAP_UNLOCK(kernel_pmap);
