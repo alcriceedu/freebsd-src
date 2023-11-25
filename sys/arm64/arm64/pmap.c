@@ -466,6 +466,7 @@ static vm_page_t pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va,
     vm_page_t m, vm_prot_t prot, vm_page_t mpte, struct rwlock **lockp);
 static int pmap_enter_l2(pmap_t pmap, vm_offset_t va, pd_entry_t new_l2,
     u_int flags, vm_page_t m, struct rwlock **lockp);
+static bool pmap_every_pte_zero(vm_paddr_t pa);
 static int pmap_insert_pt_page(pmap_t pmap, vm_page_t mpte, bool promoted,
     bool all_l3e_AF_set);
 static pt_entry_t pmap_load_l3c(pt_entry_t *l3p);
@@ -2067,6 +2068,8 @@ pmap_kenter(vm_offset_t sva, vm_size_t size, vm_paddr_t pa, int mode)
 		if ((va & L2_OFFSET) == 0 && size >= L2_SIZE &&
 		    (pa & L2_OFFSET) == 0 && vm_initialized) {
 			mpte = PHYS_TO_VM_PAGE(PTE_TO_PHYS(pmap_load(pde)));
+			KASSERT(pmap_every_pte_zero(VM_PAGE_TO_PHYS(mpte)),
+			    ("pmap_kenter: Unexpected mapping"));
 			PMAP_LOCK(kernel_pmap);
 			error = pmap_insert_pt_page(kernel_pmap, mpte, false,
 			    false);
