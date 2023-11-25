@@ -2066,7 +2066,7 @@ pmap_kenter(vm_offset_t sva, vm_size_t size, vm_paddr_t pa, int mode)
 		 */
 		if ((va & L2_OFFSET) == 0 && size >= L2_SIZE &&
 		    (pa & L2_OFFSET) == 0 && vm_initialized) {
-			mpte = PHYS_TO_VM_PAGE(pmap_load(pde) & ~ATTR_MASK);
+			mpte = PHYS_TO_VM_PAGE(PTE_TO_PHYS(pmap_load(pde)));
 			PMAP_LOCK(kernel_pmap);
 			error = pmap_insert_pt_page(kernel_pmap, mpte, false,
 			    false);
@@ -2077,8 +2077,9 @@ pmap_kenter(vm_offset_t sva, vm_size_t size, vm_paddr_t pa, int mode)
 				 * intermediate entries that reference it, so
 				 * we perform a single-page invalidation.
 				 */
-				pmap_update_entry(kernel_pmap, pde, pa | attr |
-				    L2_BLOCK, va, PAGE_SIZE);
+				pmap_update_entry(kernel_pmap, pde,
+				    PHYS_TO_PTE(pa) | attr | L2_BLOCK, va,
+				    PAGE_SIZE);
 			}
 			PMAP_UNLOCK(kernel_pmap);
 			if (error == 0) {
