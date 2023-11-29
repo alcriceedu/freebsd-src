@@ -4661,8 +4661,7 @@ setl3:
 				goto setl3;
 			oldl3 &= ~ATTR_SW_DBM;
 		}
-		if ((oldl3 & (ATTR_MASK & ~(ATTR_CONTIGUOUS | ATTR_AF))) !=
-		    (newl2 & (ATTR_MASK & ~(ATTR_CONTIGUOUS | ATTR_AF)))) {
+		if ((oldl3 & ATTR_PROMOTE) != (newl2 & ATTR_PROMOTE)) {
 			atomic_add_long(&pmap_l2_p_failures, 1);
 			CTR2(KTR_PMAP, "pmap_promote_l2: failure for va %#lx"
 			    " in pmap %p", va, pmap);
@@ -7715,8 +7714,7 @@ pmap_demote_l2_locked(pmap_t pmap, pt_entry_t *l2, vm_offset_t va,
 	/*
 	 * If the mapping has changed attributes, update the L3Es.
 	 */
-	if ((pmap_load(l3) & (ATTR_MASK & ~(ATTR_CONTIGUOUS | ATTR_AF))) !=
-	    (newl3 & (ATTR_MASK & ~(ATTR_CONTIGUOUS | ATTR_AF))))
+	if ((pmap_load(l3) & ATTR_PROMOTE) != (newl3 & ATTR_PROMOTE))
 		pmap_fill_l3(l3, newl3);
 
 	/*
