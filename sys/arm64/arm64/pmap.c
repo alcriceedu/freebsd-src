@@ -3550,7 +3550,7 @@ pmap_pv_insert_l2(pmap_t pmap, vm_offset_t va, pd_entry_t l2e, u_int flags,
 }
 
 /*
- * Conditionally creates the PV entries for a 64KB contiguous page mapping if
+ * Conditionally creates the PV entries for a L3C superpage mapping if
  * the required memory can be allocated without resorting to reclamation.
  */
 static bool
@@ -3718,10 +3718,10 @@ pmap_remove_l3(pmap_t pmap, pt_entry_t *l3, vm_offset_t va,
 }
 
 /*
- * Removes the specified level 3 contiguous (64KB) page mapping.  Requests TLB
- * invalidations to be performed by the caller through the returned "*vap".
- * Returns true if the level 3 table "ml3" was unmapped and added to the
- * spglist "free".  Otherwise, returns false.
+ * Removes the specified L3C superpage mapping.  Requests TLB invalidations
+ * to be performed by the caller through the returned "*vap". Returns true
+ * if the level 3 table "ml3" was unmapped and added to the spglist "free".
+ * Otherwise, returns false.
  */
 static bool
 pmap_remove_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va, vm_offset_t *vap,
@@ -4184,7 +4184,7 @@ pmap_protect_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t sva, pt_entry_t mask,
 }
 
 /*
- * Masks and sets bits in the specified level 3 contiguous (64KB) page mapping.
+ * Masks and sets bits in the specified L3C superpage mapping.
  *
  * Requests TLB invalidations to be performed by the caller through the
  * returned "*vap".
@@ -5921,7 +5921,7 @@ pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, vm_offset_t dst_addr, vm_size_t len,
 				 * Clear the wired, contiguous, modified, and
 				 * accessed bits from the destination PTE.
 				 * The contiguous bit is cleared because we
-				 * are not copying the entire 64KB page.
+				 * are not copying the entire L3C superpage.
 				 */
 				mask = ATTR_SW_WIRED | ATTR_CONTIGUOUS |
 				    ATTR_AF;
@@ -6260,7 +6260,7 @@ pmap_remove_pages(pmap_t pmap)
 				/*
 				 * We cannot remove wired mappings at this time.
 				 *
-				 * For 64KB pages, all of the constituent PTEs
+				 * For L3C superpages, all of the constituent PTEs
 				 * should have the wired bit set, so we don't
 				 * check for ATTR_CONTIGUOUS here.
 				 */
@@ -6296,7 +6296,7 @@ pmap_remove_pages(pmap_t pmap)
 				 * Update the vm_page_t clean/reference bits.
 				 *
 				 * We don't check for ATTR_CONTIGUOUS here
-				 * because writeable 64KB pages are expected
+				 * because writeable L3C superpages are expected
 				 * to be dirty, i.e., every constituent PTE
 				 * should be dirty.
 				 */
@@ -6772,9 +6772,9 @@ small_mappings:
 		} else if ((tpte & ATTR_CONTIGUOUS) != 0 &&
 		    (pmap_load_l3c(pte) & ATTR_AF) != 0) {
 			/*
-			 * An L3 contiguous (64KB) page mapping is regarded as
-			 * accessed until the accessed bit has been cleared in
-			 * all of its constituent entries.
+			 * An L3C superpage mapping is regarded as accessed
+			 * until the accessed bit has been cleared in all
+			 * of its constituent entries.
 			 */
 			not_cleared++;
 		}
@@ -6902,15 +6902,15 @@ pmap_advise(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, int advice)
 				}
 				if ((oldl3 & ATTR_CONTIGUOUS) != 0) {
 					/*
-					 * Unconditionally demote the 64KB
-					 * page because we do not allow
+					 * Unconditionally demote the L3C
+					 * superpage because we do not allow
 					 * writeable, clean superpages.
 					 */
 					pmap_demote_l3c(pmap, l3, sva);
 
 					/*
                                          * Destroy the final mapping before the
-                                         * next 64KB boundary or va_next, whichever
+                                         * next L3C boundary or va_next, whichever
                                          * comes first, so that a subsequent access
                                          * may act as a repromotion trigger.
                                         */
@@ -7048,7 +7048,7 @@ restart:
 		KASSERT((oldl3 & ATTR_CONTIGUOUS) == 0 ||
 		    (oldl3 & (ATTR_SW_DBM | ATTR_S1_AP_RW_BIT)) !=
 		    (ATTR_SW_DBM | ATTR_S1_AP(ATTR_S1_AP_RO)),
-		    ("writeable 64KB page not dirty"));
+		    ("writeable L3C superpage not dirty"));
 		if ((oldl3 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) == ATTR_SW_DBM) {
 			if ((oldl3 & ATTR_CONTIGUOUS) != 0)
 				pmap_demote_l3c(pmap, l3, pv->pv_va);
@@ -7778,7 +7778,7 @@ pmap_demote_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t va)
 }
 
 /*
- * Demote a 64KB contiguous mapping to 16 4KB page mappings.
+ * Demote a L3C superpage mapping to L3C_ENTRIES 4KB page mappings.
  */
 static bool
 pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
@@ -7867,7 +7867,7 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 }
 
 /*
- * Accumulate the accessed and dirty bits within a contiguous superpage and
+ * Accumulate the accessed and dirty bits within a L3C superpage and
  * return the specified PTE with them applied correctly.
  */
 static pt_entry_t
