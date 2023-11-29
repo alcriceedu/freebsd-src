@@ -1117,7 +1117,7 @@ pmap_bootstrap_l3_page(struct pmap_bootstrap_state *state, int i)
 	u_int l3_slot;
 	bool first;
 
-	if ((physmap[i + 1] - state->pa) < L3_SIZE)
+	if (physmap[i + 1] - state->pa < L3_SIZE)
 		return;
 
 	/* Make sure there is a valid L2 table */
@@ -1126,7 +1126,7 @@ pmap_bootstrap_l3_page(struct pmap_bootstrap_state *state, int i)
 	MPASS((state->va & L3_OFFSET) == 0);
 	for (first = true, contig = 0;
 	    state->va < DMAP_MAX_ADDRESS &&
-	    (physmap[i + 1] - state->pa) >= L3_SIZE;
+	    physmap[i + 1] - state->pa >= L3_SIZE;
 	    state->va += L3_SIZE, state->pa += L3_SIZE) {
 		/*
 		 * Stop if we are about to walk off the end of what the
@@ -1142,7 +1142,7 @@ pmap_bootstrap_l3_page(struct pmap_bootstrap_state *state, int i)
 		 */
 		if ((state->pa & L3C_OFFSET) == 0) {
 			if (state->va + L3C_SIZE < DMAP_MAX_ADDRESS &&
-			    (physmap[i + 1] - state->pa) >= L3C_SIZE) {
+			    physmap[i + 1] - state->pa >= L3C_SIZE) {
 				contig = ATTR_CONTIGUOUS;
 			} else {
 				contig = 0;
