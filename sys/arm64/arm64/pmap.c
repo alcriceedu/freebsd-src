@@ -4225,7 +4225,7 @@ pmap_mask_set_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va,
 	    dirty) {
 		m = PHYS_TO_VM_PAGE(PTE_TO_PHYS(pmap_load(l3p)));
 		for (mt = m; mt < &m[L3C_ENTRIES]; mt++)
-			vm_page_dirty(m);
+			vm_page_dirty(mt);
 	}
 
 	if (*vap == va_next)
