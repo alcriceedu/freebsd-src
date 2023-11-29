@@ -2074,6 +2074,8 @@ pmap_kenter(vm_offset_t sva, vm_size_t size, vm_paddr_t pa, int mode)
 			error = pmap_insert_pt_page(kernel_pmap, mpte, false,
 			    false);
 			if (error == 0) {
+				attr &= ~ATTR_CONTIGUOUS;
+
 				/*
 				 * Although the page table page "mpte" should
 				 * be devoid of mappings, the TLB might hold
