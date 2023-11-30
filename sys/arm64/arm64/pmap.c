@@ -2212,7 +2212,7 @@ pmap_kremove_device(vm_offset_t sva, vm_size_t size)
 			size -= PAGE_SIZE;
 			break;
 		default:
-			KASSERT(0, ("Invalid page table level: %d", lvl));
+			__assert_unreachable();
 			break;
 		}
 	}
