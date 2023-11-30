@@ -7883,6 +7883,8 @@ pmap_load_l3c(pt_entry_t *l3p)
 	/* Iterate over each mapping in the superpage. */
 	for (tl3p = l3c_start; tl3p < l3c_end; tl3p++) {
 		l3e = pmap_load(tl3p);
+		KASSERT((l3e & ATTR_CONTIGUOUS) != 0,
+		    ("pmap_load_l3c: missing ATTR_CONTIGUOUS"));
 		/* Update mask if the current page has its dirty bit set. */
 		if ((l3e & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
 		    (ATTR_S1_AP(ATTR_S1_AP_RW) | ATTR_SW_DBM))
