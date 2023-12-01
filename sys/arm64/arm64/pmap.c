@@ -7779,21 +7779,25 @@ pmap_demote_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t va)
 
 /*
  * Demote a L3C superpage mapping to L3C_ENTRIES 4KB page mappings.
+ *
+ * In contrast to pmap_demote_l2(), we do not destroy mappings that haven't
+ * been accessed, preserving them costs less.
  */
 static bool
 pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 {
 	pt_entry_t *l3c_end, *l3c_start, l3e, mask, nbits, *tl3p;
-	vm_offset_t tmpl3;
+	vm_offset_t eva, sva, tmpl3;
 	register_t intr;
 
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
 	l3c_start = (pt_entry_t *)((uintptr_t)l3p & ~((L3C_ENTRIES *
 	    sizeof(pt_entry_t)) - 1));
 	l3c_end = l3c_start + L3C_ENTRIES;
+	sva = va & ~L3C_OFFSET;
+	eva = sva + L3C_SIZE;
 	tmpl3 = 0;
-	if ((va & ~L3C_OFFSET) < (vm_offset_t)l3c_end &&
-	    (vm_offset_t)l3c_start < (va & ~L3C_OFFSET) + L3C_SIZE) {
+	if (sva < (vm_offset_t)l3c_end && (vm_offset_t)l3c_start < eva) {
 		tmpl3 = kva_alloc(PAGE_SIZE);
 		if (tmpl3 == 0)
 			return (false);
@@ -7840,10 +7844,8 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 			mask = ATTR_S1_AP_RW_BIT;
 		nbits |= l3e & ATTR_AF;
 	}
-	if ((nbits & ATTR_AF) != 0) {
-		pmap_invalidate_range(pmap, va & ~L3C_OFFSET, (va + L3C_SIZE) &
-		    ~L3C_OFFSET, true);
-	}
+	if ((nbits & ATTR_AF) != 0)
+		pmap_invalidate_range(pmap, sva, eva, true);
 
 	/*
 	 * Remake the mappings, updating the accessed and dirty bits.
