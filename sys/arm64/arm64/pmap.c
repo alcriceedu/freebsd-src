@@ -687,6 +687,15 @@ pmap_pte(pmap_t pmap, vm_offset_t va, int *level)
 	return (l3);
 }
 
+static __inline void
+pmap_compute_l3c_bounds(pt_entry_t *l3p, pt_entry_t **l3c_start,
+    pt_entry_t **l3c_end)
+{
+	*l3c_start = (pt_entry_t *)((uintptr_t)l3p & ~((L3C_ENTRIES *
+	    sizeof(pt_entry_t)) - 1));
+	*l3c_end = *l3c_start + L3C_ENTRIES;
+}
+
 /*
  * If the given pmap has an L{1,2}_BLOCK or L3_PAGE entry at the specified
  * level that maps the specified virtual address, then a pointer to that entry
@@ -7791,9 +7800,7 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 	register_t intr;
 
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
-	l3c_start = (pt_entry_t *)((uintptr_t)l3p & ~((L3C_ENTRIES *
-	    sizeof(pt_entry_t)) - 1));
-	l3c_end = l3c_start + L3C_ENTRIES;
+	pmap_compute_l3c_bounds(l3p, &l3c_start, &l3c_end);
 	sva = va & ~L3C_OFFSET;
 	eva = sva + L3C_SIZE;
 	tmpl3 = 0;
@@ -7877,9 +7884,7 @@ pmap_load_l3c(pt_entry_t *l3p)
 {
 	pt_entry_t *l3c_end, *l3c_start, l3e, mask, nbits, *tl3p;
 
-	l3c_start = (pt_entry_t *)((uintptr_t)l3p & ~((L3C_ENTRIES *
-	    sizeof(pt_entry_t)) - 1));
-	l3c_end = l3c_start + L3C_ENTRIES;
+	pmap_compute_l3c_bounds(l3p, &l3c_start, &l3c_end);
 	mask = 0;
 	nbits = 0;
 	/* Iterate over each mapping in the superpage. */
