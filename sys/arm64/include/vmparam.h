@@ -100,13 +100,13 @@
  * both 2MB page TLB misses and cache misses during the page table walk when
  * a 2MB page TLB miss does occur.
  *
- * When PAGE_SIZE is 16KB, an allocation size of 32MB is supported.  This
- * size is used by level 0 reservations and L2 BLOCK mappings.
+ * Similarly, when PAGE_SIZE is 16KB, and consequently size of an L2 BLOCK is
+ * 32MB, an allocation size of 256MB is supported.
  */
 #if PAGE_SIZE == PAGE_SIZE_4K
 #define	VM_NFREEORDER		13
 #elif PAGE_SIZE == PAGE_SIZE_16K
-#define	VM_NFREEORDER		11
+#define	VM_NFREEORDER		15
 #else
 #error Unsupported page size
 #endif
