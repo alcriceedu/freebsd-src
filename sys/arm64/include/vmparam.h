@@ -112,27 +112,41 @@
 #endif
 
 /*
- * Enable superpage reservations: 1 level.
+ * Enable superpage reservations: 2 levels.
  */
 #ifndef	VM_NRESERVLEVEL
-#define	VM_NRESERVLEVEL		1
+#define	VM_NRESERVLEVEL		2
 #endif
 
 /*
- * Level 0 reservations consist of 512 pages when PAGE_SIZE is 4KB, and
- * 2048 pages when PAGE_SIZE is 16KB.
+ * Level 0 reservations consist of 16 pages when PAGE_SIZE is 4KB, and
+ * 128 pages when PAGE_SIZE is 16KB.
  */
 #ifndef	VM_LEVEL_0_ORDER
 #if PAGE_SIZE == PAGE_SIZE_4K
-#define	VM_LEVEL_0_ORDER	9
+#define	VM_LEVEL_0_ORDER	4
 #elif PAGE_SIZE == PAGE_SIZE_16K
-#define	VM_LEVEL_0_ORDER	11
+#define	VM_LEVEL_0_ORDER	7
 #else
 #error Unsupported page size
 #endif
 #endif
 
-#define VM_LEVEL_0_FULL_PSIND	2
+/*
+ * Level 1 reservations consist of 512 pages when PAGE_SIZE is 4KB, and
+ * 2048 pages when PAGE_SIZE is 16KB.
+ */
+#ifndef	VM_LEVEL_1_ORDER
+#if PAGE_SIZE == PAGE_SIZE_4K
+#define	VM_LEVEL_1_ORDER	9
+#elif PAGE_SIZE == PAGE_SIZE_16K
+#define	VM_LEVEL_1_ORDER	11
+#else
+#error Unsupported page size
+#endif
+#endif
+
+#define VM_LEVEL_0_FULL_PSIND	2 // YYY
 
 #define VM_LEVEL_0_PART_PSIND	1
 
@@ -247,7 +261,7 @@
 
 #define	KERNBASE		(VM_MIN_KERNEL_ADDRESS)
 #define	SHAREDPAGE		(VM_MAXUSER_ADDRESS - PAGE_SIZE)
-#define	USRSTACK		SHAREDPAGE
+#define	USRSTACK		(SHAREDPAGE & ~((1UL << (VM_LEVEL_1_ORDER + PAGE_SHIFT)) - 1))
 
 /*
  * How many physical pages per kmem arena virtual page.
