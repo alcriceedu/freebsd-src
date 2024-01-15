@@ -1548,7 +1548,7 @@ vm_reserv_reclaim_contig(int domain, u_long npages, vm_paddr_t low,
 			posn = vm_reserv_find_contig(rv, (int)npages, lo, hi,
 			    ppn_align, ppn_bound);
 			if (posn >= 0) {
-				vm_reserv_domain_scan_unlock(domain);
+				vm_reserv_domain_scan_unlock(domain, rsind);
 				/* Allocate requested space */
 				rv->popcnt += npages;
 				while (npages-- > 0)
