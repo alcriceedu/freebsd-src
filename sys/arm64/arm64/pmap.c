@@ -5237,18 +5237,20 @@ validate:
 	 * and performs a break-before-make sequence that is incorrect for a
 	 * stage 2 pmap.
 	 */
-	if ((mpte == NULL || mpte->ref_count >= L3C_ENTRIES) &&
-            (m->flags & PG_FICTITIOUS) == 0) {
+	if (pmap_ps_enabled(pmap) && pmap->pm_stage == PM_STAGE1 &&
+	    (m->flags & PG_FICTITIOUS) == 0) {
 		seg = &vm_phys_segs[m->segind];
-		if ((m->phys_addr & ~L3C_OFFSET) >= seg->start &&
+		if ((mpte == NULL || mpte->ref_count >= L3C_ENTRIES) &&
+		    (m->phys_addr & ~L3C_OFFSET) >= seg->start &&
 		    seg->first_page[atop((m->phys_addr & ~L3C_OFFSET) -
 		    seg->start)].psind >= 1)
-                        pmap_promote_l3c(pmap, l3, va);
-		if ((m->phys_addr & ~L2_OFFSET) >= seg->start &&
+			pmap_promote_l3c(pmap, l3, va);
+		if ((mpte == NULL || mpte->ref_count == NL3PG) &&
+		    (m->phys_addr & ~L2_OFFSET) >= seg->start &&
 		    seg->first_page[atop((m->phys_addr & ~L2_OFFSET) -
 		    seg->start)].psind >= 2)
-                        (void)pmap_promote_l2(pmap, pde, va, mpte, &lock);
-        }
+			(void)pmap_promote_l2(pmap, pde, va, mpte, &lock);
+	}
 #endif
 
 	rv = KERN_SUCCESS;
