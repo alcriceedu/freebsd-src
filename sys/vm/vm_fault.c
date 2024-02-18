@@ -1815,8 +1815,8 @@ found:
 				    next_i - i, rv_pa, rv_pa_end, PAGE_SIZE, L2_SIZE, VM_MEMATTR_DEFAULT);
 
 				if (m_ret != NULL) {
-					/* call sse2_pagezero next_i-i times, no PG_ZERO should be considered */
-					pmap_zero_pages_idle(m_ret, next_i - i);
+					/* call bzero, no PG_ZERO should be considered */
+					pmap_zero_pages(m_ret, next_i - i);
 					sync_prezero += next_i - i;
 
 					/* pages are hot in cache, validate and activate them */

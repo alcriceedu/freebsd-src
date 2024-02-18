@@ -687,6 +687,28 @@ vm_reserv_has_pindex(vm_reserv_t rv, vm_pindex_t pindex)
 	return (((pindex - rv->pindex) & ~(reserv_pages[rv->rsind] - 1)) == 0);
 }
 
+vm_pindex_t
+vm_reserv_pindex_from_page(vm_page_t m)
+{
+	vm_reserv_t rv;
+
+	rv = vm_reserv_from_page(m);
+
+	return rv->pindex;
+}
+
+void
+vm_reserv_copy_popmap_from_page(vm_page_t m, popmap_t *popmap)
+{
+	vm_reserv_t rv;
+	int i;
+
+	rv = vm_reserv_from_page(m);
+
+	for (i = 0; i < NPOPMAP; i++)
+		popmap[i] = rv->popmap[i];
+}
+
 /*
  * Increases the given reservation's population count.  Moves the reservation
  * to the tail of the partially populated reservation queue.
