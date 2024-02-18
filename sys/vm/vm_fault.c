@@ -117,6 +117,10 @@
 
 #define	VM_FAULT_DONTNEED_MIN	1048576
 
+/* definitions for reservation popmap bitvector */
+#define	popmap_nbits		(NBBY * sizeof(u_long))
+#define	popmap_nentries		howmany(512, popmap_nbits)
+
 struct faultstate {
 	/* Fault parameters. */
 	vm_offset_t	vaddr;
@@ -191,6 +195,26 @@ SYSCTL_INT(_vm, OID_AUTO, pfault_oom_wait, CTLFLAG_RWTUN,
     &vm_pfault_oom_wait, 0,
     "Number of seconds to wait for free pages before retrying "
     "the page fault handler");
+
+static int enable_syncpromo = 1;
+SYSCTL_INT(_vm, OID_AUTO, enable_syncpromo, CTLFLAG_RWTUN,
+    &enable_syncpromo, 0, "enable sync promotion");
+
+static int sync_succ = 0;
+SYSCTL_INT(_vm, OID_AUTO, sync_succ, CTLFLAG_RWTUN,
+    &sync_succ, 0, "successful sync promotion");
+
+static int sync_fail = 0;
+SYSCTL_INT(_vm, OID_AUTO, sync_fail, CTLFLAG_RWTUN,
+    &sync_fail, 0, "failed sync promotion");
+
+static int sync_prezero = 0;
+SYSCTL_INT(_vm, OID_AUTO, sync_prezero, CTLFLAG_RWTUN,
+    &sync_prezero, 0, "extra zeroed pages");
+
+static int sync_fault = 0;
+SYSCTL_INT(_vm, OID_AUTO, sync_fault, CTLFLAG_RWTUN,
+    &sync_fault, 0, "synchronous superpage faulting");
 
 static inline void
 vm_fault_page_release(vm_page_t *mp)
@@ -1537,7 +1561,11 @@ vm_fault(vm_map_t map, vm_offset_t vaddr, vm_prot_t fault_type,
     int fault_flags, vm_page_t *m_hold)
 {
 	struct faultstate fs;
-	int ahead, behind, faultcount, rv;
+	vm_page_t m_ret, m_super;
+	vm_paddr_t rv_pa, rv_pa_end;
+	vm_pindex_t rv_pindex;
+	u_long popmap[popmap_nentries];
+	int ahead, behind, faultcount, rv, i, next_i, psind;
 	enum fault_status res;
 	enum fault_next_status res_next;
 	bool hardfault;
@@ -1750,6 +1778,100 @@ found:
 
 	vm_fault_dirty(&fs, fs.m);
 
+#if VM_NRESERVLEVEL > 0
+
+	VM_OBJECT_WLOCK(fs.object);
+
+	if (enable_syncpromo && fs.m != NULL && !fs.wired &&
+	    (fault_flags & VM_FAULT_WIRE) == 0 && fs.object != NULL &&
+	    fs.object->type == OBJT_DEFAULT &&
+	    fs.object->backing_object == NULL &&
+	    vm_reserv_satisfy_sync_promotion(fs.m)) {
+		rv_pindex = vm_reserv_pindex_from_page(fs.m);
+
+		/* alloc segment by segment */
+		vm_reserv_copy_popmap_from_page(fs.m, popmap);
+		rv_pa = VM_PAGE_TO_PHYS(fs.m) - ((fs.pindex - rv_pindex) << PAGE_SHIFT);
+		rv_pa_end = rv_pa + L2_SIZE;
+
+		/* utilize 1 cacheline popmap bitvector */
+		i = 0;
+		while (i < 512) {
+			/* find next i with popmap[i] cleared */
+			while (i < 512 && (popmap[i / popmap_nbits] &
+			    (1UL << (i % popmap_nbits))) != 0)
+				++i;
+
+			/* find next next_i with popmap[next_i] set */
+			next_i = i;
+			while (next_i < 512 && (popmap[next_i / popmap_nbits] &
+			    (1UL << (next_i % popmap_nbits))) == 0)
+				++next_i;
+
+			if (i < next_i) {
+				/* may try not to busy the page */
+				m_ret = vm_page_alloc_contig(fs.object, rv_pindex + i,
+				    VM_ALLOC_NORMAL | VM_ALLOC_RESERVONLY | VM_ALLOC_ZERO | VM_ALLOC_NOBUSY,
+				    next_i - i, rv_pa, rv_pa_end, PAGE_SIZE, L2_SIZE, VM_MEMATTR_DEFAULT);
+
+				if (m_ret != NULL) {
+					/* call sse2_pagezero next_i-i times, no PG_ZERO should be considered */
+					pmap_zero_pages_idle(m_ret, next_i - i);
+					sync_prezero += next_i - i;
+
+					/* pages are hot in cache, validate and activate them */
+					vm_page_activate_and_validate_pages(m_ret, next_i - i);
+				} else {
+					/* abort if allocation failed */
+					goto syncpromo_failed;
+				}
+			}
+
+			i = next_i;
+		}
+
+		if (i == 512) {
+			CTR2(KTR_VM,
+			    "sync superpage promotion succeeded, pid %d (%s)\n",
+			    curproc->p_pid, curproc->p_comm);
+			sync_succ++;
+
+			/* check anonymous superpage mapping legitmacy if fully-populated */
+			psind = 0;
+			if ((fs.m->flags & PG_FICTITIOUS) == 0 &&
+			    (m_super = vm_reserv_to_superpage(fs.m)) != NULL &&
+			    rounddown2(vaddr, pagesizes[m_super->psind]) >= fs.entry->start &&
+			    roundup2(vaddr + 1, pagesizes[m_super->psind]) <= fs.entry->end &&
+			    (vaddr & (pagesizes[m_super->psind] - 1)) == (VM_PAGE_TO_PHYS(fs.m) &
+			    (pagesizes[m_super->psind] - 1)) &&
+			    pmap_ps_enabled(fs.map->pmap)) {
+				psind = m_super->psind;
+				vaddr = rounddown2(vaddr, pagesizes[psind]);
+			}
+
+			if (psind == 1) {
+				/* You are not wired here */
+				rv = pmap_enter(fs.map->pmap, vaddr, m_super, fs.prot,
+				    fault_type | PMAP_ENTER_NOSLEEP | (fs.wired ? PMAP_ENTER_WIRED : 0), 1);
+
+				if (rv == KERN_SUCCESS) {
+					/* Succeeded to map a superpage */
+					sync_fault++;
+					VM_OBJECT_UNLOCK(fs.object);
+					goto skip_pmap;
+				}
+			}
+		} else {
+syncpromo_failed:
+			sync_fail++;
+		}
+
+	}
+
+	VM_OBJECT_UNLOCK(fs.object);
+
+#endif
+
 	/*
 	 * Put this page into the physical map.  We had to do the unlock above
 	 * because pmap_enter() may sleep.  We don't put the page
@@ -1763,6 +1885,8 @@ found:
 		vm_fault_prefault(&fs, vaddr,
 		    faultcount > 0 ? behind : PFBAK,
 		    faultcount > 0 ? ahead : PFFOR, false);
+
+skip_pmap:
 
 	/*
 	 * If the page is not wired down, then put it where the pageout daemon
