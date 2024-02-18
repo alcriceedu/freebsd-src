@@ -687,6 +687,24 @@ vm_reserv_has_pindex(vm_reserv_t rv, vm_pindex_t pindex)
 	return (((pindex - rv->pindex) & ~(reserv_pages[rv->rsind] - 1)) == 0);
 }
 
+bool
+vm_reserv_satisfy_sync_promotion(vm_page_t m)
+{
+	vm_reserv_t rv;
+
+	/* expect m to be installed in a reservation */
+	rv = vm_reserv_from_page(m);
+
+	return (rv->rsind == 1 &&
+	    rv->object != NULL &&
+	    rv->object == m->object &&
+	    m->pindex >= rv->pindex &&
+	    m->pindex < rv->pindex + VM_LEVEL_0_NPAGES &&
+	    popmap_is_set(rv->popmap, m->pindex - rv->pindex) &&
+	    rv->inpartpopq == RV_INPARTPOPQ &&
+	    rv->popcnt >= sync_popthreshold);
+}
+
 vm_pindex_t
 vm_reserv_pindex_from_page(vm_page_t m)
 {
