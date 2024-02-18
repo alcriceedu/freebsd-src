@@ -4235,17 +4235,17 @@ vm_page_activate_and_validate_pages(vm_page_t m_left, int npages)
 	vm_page_lock_assert(m_left, MA_OWNED);
 
 	/* all superpage belongs to the same vm_domain */
-	pq = &vm_phys_domain(m_left)->vmd_pagequeues[PQ_ACTIVE];
+	pq = &VM_DOMAIN(vm_page_domain(m_left))->vmd_pagequeues[PQ_ACTIVE];
 	vm_pagequeue_lock(pq);
 	for (m_tmp = m_left; m_tmp < &m_left[npages]; m_tmp++) {
 		/* validate this page */
 		m_tmp->valid = VM_PAGE_BITS_ALL;
 		/* most pages are not faulted so simply scan over all pages */
-		if (m_tmp->act_count < ACT_INIT)
-			m_tmp->act_count = ACT_INIT;
-		if (m_tmp->queue != PQ_NONE)
+		if (m_tmp->a.act_count < ACT_INIT)
+			m_tmp->a.act_count = ACT_INIT;
+		if (m_tmp->a.queue != PQ_NONE)
 			vm_page_dequeue(m_tmp);
-		m_tmp->queue = PQ_ACTIVE;
+		m_tmp->a.queue = PQ_ACTIVE;
 		TAILQ_INSERT_TAIL(&pq->pq_pl, m_tmp, plinks.q);
 		vm_pagequeue_cnt_inc(pq);
 	}
