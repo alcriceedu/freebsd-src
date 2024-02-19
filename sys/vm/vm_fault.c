@@ -1781,6 +1781,7 @@ found:
 #if VM_NRESERVLEVEL > 0
 
 	VM_OBJECT_WLOCK(fs.object);
+	vm_object_busy(fs.object);
 
 	if (enable_syncpromo && fs.m != NULL && !fs.wired &&
 	    (fault_flags & VM_FAULT_WIRE) == 0 && fs.object != NULL &&
@@ -1857,6 +1858,7 @@ found:
 				if (rv == KERN_SUCCESS) {
 					/* Succeeded to map a superpage */
 					sync_fault++;
+					vm_object_unbusy(fs.object);
 					VM_OBJECT_UNLOCK(fs.object);
 					goto skip_pmap;
 				}
@@ -1868,6 +1870,7 @@ syncpromo_failed:
 
 	}
 
+	vm_object_unbusy(fs.object);
 	VM_OBJECT_UNLOCK(fs.object);
 
 #endif

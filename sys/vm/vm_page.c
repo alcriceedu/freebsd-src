@@ -4233,27 +4233,16 @@ vm_page_activate(vm_page_t m)
 void
 vm_page_activate_and_validate_pages(vm_page_t m_left, int npages)
 {
-	struct vm_pagequeue *pq;
 	vm_page_t m_tmp;
 
-	vm_page_lock_assert(m_left, MA_OWNED);
-
-	/* all superpage belongs to the same vm_domain */
-	pq = &VM_DOMAIN(vm_page_domain(m_left))->vmd_pagequeues[PQ_ACTIVE];
-	vm_pagequeue_lock(pq);
+	/* most pages are not faulted so simply scan over all pages */
 	for (m_tmp = m_left; m_tmp < &m_left[npages]; m_tmp++) {
 		/* validate this page */
 		m_tmp->valid = VM_PAGE_BITS_ALL;
-		/* most pages are not faulted so simply scan over all pages */
-		if (m_tmp->a.act_count < ACT_INIT)
-			m_tmp->a.act_count = ACT_INIT;
-		if (m_tmp->a.queue != PQ_NONE)
-			vm_page_dequeue(m_tmp);
-		m_tmp->a.queue = PQ_ACTIVE;
-		TAILQ_INSERT_TAIL(&pq->pq_pl, m_tmp, plinks.q);
-		vm_pagequeue_cnt_inc(pq);
+
+		/* activate this page */
+		vm_page_activate(m_tmp);
 	}
-	vm_pagequeue_unlock(pq);
 }
 
 /*
