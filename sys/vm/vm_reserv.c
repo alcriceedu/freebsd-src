@@ -727,7 +727,7 @@ vm_reserv_copy_popmap_from_page(vm_page_t m, popmap_t *popmap)
 
 	rv = vm_reserv_from_page(m);
 
-	for (i = 0; i < NPOPMAP; i++)
+	for (i = 0; i < reserv_npopmaps[rv->rsind]; i++)
 		popmap[i] = rv->popmap[i];
 }
 
