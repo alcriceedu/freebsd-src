@@ -1788,93 +1788,126 @@ found:
 	    fs.object->type == OBJT_DEFAULT &&
 	    fs.object->backing_object == NULL &&
 	    vm_reserv_satisfy_sync_promotion(fs.m)) {
+		/*
+		 * Compute the pindex of the start and the physical
+		 * address of the start and end of the reservation.
+		 */
 		rv_pindex = vm_reserv_pindex_from_page(fs.m);
-
-		/* alloc segment by segment */
-		vm_reserv_copy_popmap_from_page(fs.m, popmap);
-		rv_pa = VM_PAGE_TO_PHYS(fs.m) - ((fs.pindex - rv_pindex) << PAGE_SHIFT);
+		rv_pa = VM_PAGE_TO_PHYS(fs.m) - ((fs.pindex - rv_pindex)
+		    << PAGE_SHIFT);
 		rv_pa_end = rv_pa + L2_SIZE;
 
+		/*
+		 * Copy the popmap from the reservation.
+		 */
+		vm_reserv_copy_popmap_from_page(fs.m, popmap);
+
+		/*
+		 * Iterate over the popmap, ensuring that it is
+		 * consistent with the vm_object and allocating
+		 * pages as necessary.
+		 */
 		m_obj = vm_page_find_least(fs.object, rv_pindex);
-		pa = fs.m->phys_addr & ~(L2_OFFSET);
+		pa = rv_pa;
 		i = j = 0;
 		while (j < 512) {
-			while (j < 512 && (popmap[i / popmap_nbits] & (1UL << (i % popmap_nbits))) == (popmap[j / popmap_nbits] & (1UL << (j % popmap_nbits))))
+			/*
+			 * Advance j until we reach the end of this run of 0s or 1s.
+			 */
+			while (j < 512 && (popmap[i / popmap_nbits] & (1UL << (i % popmap_nbits))) ==
+			    (popmap[j / popmap_nbits] & (1UL << (j % popmap_nbits))))
 				j++;
 
 			if (i < j) {
-				if (!(popmap[i / popmap_nbits] & (1UL << (i % popmap_nbits)))) {
-					// Verify that pages [rv_pindex + i, rv_pindex + j) are not in the vm_object
-					if (m_obj->pindex < rv_pindex + j)
-						goto syncpromo_failed;
+				if (!(popmap[i / popmap_nbits] & (1UL << (i % popmap_nbits)))) { // Run of 0s
+					/*
+					 * Verify that pindices [rv_pindex + i, rv_pindex + j)
+					 * are not in the vm_object.
+					 */
+					if (m_obj->pindex < rv_pindex + j) {
+						sync_fail++;
+						goto syncpromo_out;
+					}
 
+					/*
+					 * Allocate the pages from the reservation.
+					 */
 					m_ret = vm_page_alloc_contig(fs.object, rv_pindex + i,
 					    VM_ALLOC_NORMAL | VM_ALLOC_RESERVONLY | VM_ALLOC_ZERO | VM_ALLOC_NOBUSY,
 					    j - i, rv_pa, rv_pa_end, PAGE_SIZE, L2_SIZE, VM_MEMATTR_DEFAULT);
 
 					if (m_ret != NULL) {
-						/* call bzero, no PG_ZERO should be considered */
+						/*
+						 * Zero the pages using bzero(), ignoring PG_ZERO.
+						 */
 						pmap_zero_pages(m_ret, j - i);
 						sync_prezero += j - i;
 
-						/* pages are hot in cache, validate and activate them */
+						/*
+						 * Activate and validate the pages since they are
+						 * hot in the cache.
+						 */
 						vm_page_activate_and_validate_pages(m_ret, j - i);
 					} else {
-						/* abort if allocation failed */
-						goto syncpromo_failed;
+						sync_fail++;
+						goto syncpromo_out;
 					}
 
 					pa += (j - i) << PAGE_SHIFT;
 					i = j;
-				} else {
-					// Verify that pages [rv_pindex + i, rv_pindex + j) are in the vm_object and come from the reservation
+				} else { // Run of 1s
+					/*
+					 * Verify that pindices [rv_pindex + i, rv_pindex + j)
+					 * are in the vm_object and come from the reservation.
+					 */
 					for (; i < j; i++, m_obj = vm_page_next(m_obj), pa += PAGE_SIZE) {
-						if (m_obj->pindex != rv_pindex + i || m_obj->phys_addr != pa)
-							goto syncpromo_failed;
+						if (m_obj->pindex != rv_pindex + i || m_obj->phys_addr != pa) {
+							sync_fail++;
+							goto syncpromo_out;
+						}
 					}
 				}
 			}
 		}
 
-		if (j == 512) {
-			CTR2(KTR_VM,
-			    "sync superpage promotion succeeded, pid %d (%s)\n",
-			    curproc->p_pid, curproc->p_comm);
-			sync_succ++;
+		CTR2(KTR_VM,
+		    "sync superpage promotion succeeded, pid %d (%s)\n",
+		    curproc->p_pid, curproc->p_comm);
+		sync_succ++;
 
-			/* check anonymous superpage mapping legitmacy if fully-populated */
-			psind = 0;
-			if ((fs.m->flags & PG_FICTITIOUS) == 0 &&
-			    (m_super = vm_reserv_to_superpage(fs.m)) != NULL &&
-			    rounddown2(vaddr, pagesizes[m_super->psind]) >= fs.entry->start &&
-			    roundup2(vaddr + 1, pagesizes[m_super->psind]) <= fs.entry->end &&
-			    (vaddr & (pagesizes[m_super->psind] - 1)) == (VM_PAGE_TO_PHYS(fs.m) &
-			    (pagesizes[m_super->psind] - 1)) &&
-			    pmap_ps_enabled(fs.map->pmap)) {
-				psind = m_super->psind;
-				vaddr = rounddown2(vaddr, pagesizes[psind]);
-			}
-
-			if (psind >= 1) {
-				/* You are not wired here */
-				rv = pmap_enter(fs.map->pmap, vaddr, m_super, fs.prot,
-				    fault_type | PMAP_ENTER_NOSLEEP | (fs.wired ? PMAP_ENTER_WIRED : 0), 1);
-
-				if (rv == KERN_SUCCESS) {
-					/* Succeeded to map a superpage */
-					sync_fault++;
-					vm_object_unbusy(fs.object);
-					VM_OBJECT_UNLOCK(fs.object);
-					goto skip_pmap;
-				}
-			}
-		} else {
-syncpromo_failed:
-			sync_fail++;
+		/*
+		 * If the reservation is fully populated, verify the legitimacy
+		 * of an anonymous superpage mapping.
+		 */
+		psind = 0;
+		if ((fs.m->flags & PG_FICTITIOUS) == 0 &&
+		    (m_super = vm_reserv_to_superpage(fs.m)) != NULL &&
+		    rounddown2(vaddr, pagesizes[m_super->psind]) >= fs.entry->start &&
+		    roundup2(vaddr + 1, pagesizes[m_super->psind]) <= fs.entry->end &&
+		    (vaddr & (pagesizes[m_super->psind] - 1)) == (VM_PAGE_TO_PHYS(fs.m) &
+		    (pagesizes[m_super->psind] - 1)) &&
+		    pmap_ps_enabled(fs.map->pmap)) {
+			psind = m_super->psind;
+			vaddr = rounddown2(vaddr, pagesizes[psind]);
 		}
 
+		/*
+		 * If appropriate, attempt to map the superpage.
+		 */
+		if (psind >= 1) {
+			rv = pmap_enter(fs.map->pmap, vaddr, m_super, fs.prot,
+			    fault_type | PMAP_ENTER_NOSLEEP | (fs.wired ? PMAP_ENTER_WIRED : 0), 1);
+
+			if (rv == KERN_SUCCESS) {
+				sync_fault++;
+				vm_object_unbusy(fs.object);
+				VM_OBJECT_UNLOCK(fs.object);
+				goto skip_pmap;
+			}
+		}
 	}
 
+syncpromo_out:
 	vm_object_unbusy(fs.object);
 	VM_OBJECT_UNLOCK(fs.object);
 
