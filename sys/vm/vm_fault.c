@@ -1850,7 +1850,7 @@ found:
 				vaddr = rounddown2(vaddr, pagesizes[psind]);
 			}
 
-			if (psind == 2) {
+			if (psind >= 1) {
 				/* You are not wired here */
 				rv = pmap_enter(fs.map->pmap, vaddr, m_super, fs.prot,
 				    fault_type | PMAP_ENTER_NOSLEEP | (fs.wired ? PMAP_ENTER_WIRED : 0), 1);
