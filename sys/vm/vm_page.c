@@ -4228,19 +4228,19 @@ vm_page_activate(vm_page_t m)
 }
 
 /*
- * activate pages in a range
+ * Activate and validate pages in a contiguous range.
  */
 void
 vm_page_activate_and_validate_pages(vm_page_t m_left, int npages)
 {
 	vm_page_t m_tmp;
 
-	/* most pages are not faulted so simply scan over all pages */
+	/*
+	 * Most pages have not been faulted in, so we simply scan
+	 * over all of the pages.
+	 */
 	for (m_tmp = m_left; m_tmp < &m_left[npages]; m_tmp++) {
-		/* validate this page */
 		m_tmp->valid = VM_PAGE_BITS_ALL;
-
-		/* activate this page */
 		vm_page_activate(m_tmp);
 	}
 }

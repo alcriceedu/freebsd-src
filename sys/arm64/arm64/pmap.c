@@ -6276,6 +6276,11 @@ pmap_zero_page(vm_page_t m)
 	pagezero((void *)va);
 }
 
+/*
+ *	pmap_zero_pages zeros the specified contiguous range of
+ * 	hardware pages by mapping them into KVM and using bzero
+ *	to clear their contents.
+ */
 void
 pmap_zero_pages(vm_page_t m, int npages)
 {
