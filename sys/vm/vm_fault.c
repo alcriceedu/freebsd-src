@@ -117,9 +117,8 @@
 
 #define	VM_FAULT_DONTNEED_MIN	1048576
 
-/* definitions for reservation popmap bitvector */
+/* Number of bits in each part of a reservation popmap bit vector. */
 #define	popmap_nbits		(NBBY * sizeof(u_long))
-#define	popmap_nentries		howmany(512, popmap_nbits)
 
 struct faultstate {
 	/* Fault parameters. */
@@ -1564,7 +1563,7 @@ vm_fault(vm_map_t map, vm_offset_t vaddr, vm_prot_t fault_type,
 	vm_page_t m_ret, m_super, m_obj;
 	vm_paddr_t rv_pa, rv_pa_end, pa;
 	vm_pindex_t rv_pindex;
-	u_long popmap[popmap_nentries];
+	u_long *popmap;
 	int ahead, behind, faultcount, rv, i, j, psind;
 	enum fault_status res;
 	enum fault_next_status res_next;
@@ -1798,9 +1797,9 @@ found:
 		rv_pa_end = rv_pa + L2_SIZE;
 
 		/*
-		 * Copy the popmap from the reservation.
+		 * Get the popmap from the reservation.
 		 */
-		vm_reserv_copy_popmap_from_page(fs.m, popmap);
+		popmap = vm_reserv_popmap_from_page(fs.m);
 
 		/*
 		 * Iterate over the popmap, ensuring that it is

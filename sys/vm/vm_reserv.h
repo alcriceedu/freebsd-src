@@ -71,7 +71,7 @@ void		vm_reserv_count_xxx(vm_object_t object, unsigned int *count,
 		    unsigned int *full, unsigned int *full_psind);
 bool		vm_reserv_satisfy_sync_promotion(vm_page_t m);
 vm_pindex_t 	vm_reserv_pindex_from_page(vm_page_t m);
-void 		vm_reserv_copy_popmap_from_page(vm_page_t m, u_long *popmap);
+u_long *	vm_reserv_popmap_from_page(vm_page_t m);
 
 #endif	/* VM_NRESERVLEVEL > 0 */
 #endif	/* _KERNEL */

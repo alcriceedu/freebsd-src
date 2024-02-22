@@ -716,19 +716,17 @@ vm_reserv_pindex_from_page(vm_page_t m)
 
 	rv = vm_reserv_from_page(m);
 
-	return rv->pindex;
+	return (rv->pindex);
 }
 
-void
-vm_reserv_copy_popmap_from_page(vm_page_t m, popmap_t *popmap)
+popmap_t *
+vm_reserv_popmap_from_page(vm_page_t m)
 {
 	vm_reserv_t rv;
-	int i;
 
 	rv = vm_reserv_from_page(m);
 
-	for (i = 0; i < reserv_npopmaps[rv->rsind]; i++)
-		popmap[i] = rv->popmap[i];
+	return (rv->popmap);
 }
 
 /*
