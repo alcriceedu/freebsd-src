@@ -1561,11 +1561,11 @@ vm_fault(vm_map_t map, vm_offset_t vaddr, vm_prot_t fault_type,
     int fault_flags, vm_page_t *m_hold)
 {
 	struct faultstate fs;
-	vm_page_t m_ret, m_super;
-	vm_paddr_t rv_pa, rv_pa_end;
+	vm_page_t m_ret, m_super, m_obj;
+	vm_paddr_t rv_pa, rv_pa_end, pa;
 	vm_pindex_t rv_pindex;
 	u_long popmap[popmap_nentries];
-	int ahead, behind, faultcount, rv, i, next_i, psind;
+	int ahead, behind, faultcount, rv, i, j, psind;
 	enum fault_status res;
 	enum fault_next_status res_next;
 	bool hardfault;
@@ -1795,43 +1795,48 @@ found:
 		rv_pa = VM_PAGE_TO_PHYS(fs.m) - ((fs.pindex - rv_pindex) << PAGE_SHIFT);
 		rv_pa_end = rv_pa + L2_SIZE;
 
-		/* utilize 1 cacheline popmap bitvector */
-		i = 0;
-		while (i < 512) {
-			/* find next i with popmap[i] cleared */
-			while (i < 512 && (popmap[i / popmap_nbits] &
-			    (1UL << (i % popmap_nbits))) != 0)
-				++i;
+		m_obj = vm_page_find_least(fs.object, rv_pindex);
+		pa = fs.m->phys_addr & ~(L2_OFFSET);
+		i = j = 0;
+		while (j < 512) {
+			while (j < 512 && (popmap[i / popmap_nbits] & (1UL << (i % popmap_nbits))) == (popmap[j / popmap_nbits] & (1UL << (j % popmap_nbits))))
+				j++;
 
-			/* find next next_i with popmap[next_i] set */
-			next_i = i;
-			while (next_i < 512 && (popmap[next_i / popmap_nbits] &
-			    (1UL << (next_i % popmap_nbits))) == 0)
-				++next_i;
+			if (i < j) {
+				if (!(popmap[i / popmap_nbits] & (1UL << (i % popmap_nbits)))) {
+					// Verify that pages [rv_pindex + i, rv_pindex + j) are not in the vm_object
+					if (m_obj->pindex < rv_pindex + j)
+						goto syncpromo_failed;
 
-			if (i < next_i) {
-				/* may try not to busy the page */
-				m_ret = vm_page_alloc_contig(fs.object, rv_pindex + i,
-				    VM_ALLOC_NORMAL | VM_ALLOC_RESERVONLY | VM_ALLOC_ZERO | VM_ALLOC_NOBUSY,
-				    next_i - i, rv_pa, rv_pa_end, PAGE_SIZE, L2_SIZE, VM_MEMATTR_DEFAULT);
+					m_ret = vm_page_alloc_contig(fs.object, rv_pindex + i,
+					    VM_ALLOC_NORMAL | VM_ALLOC_RESERVONLY | VM_ALLOC_ZERO | VM_ALLOC_NOBUSY,
+					    j - i, rv_pa, rv_pa_end, PAGE_SIZE, L2_SIZE, VM_MEMATTR_DEFAULT);
 
-				if (m_ret != NULL) {
-					/* call bzero, no PG_ZERO should be considered */
-					pmap_zero_pages(m_ret, next_i - i);
-					sync_prezero += next_i - i;
+					if (m_ret != NULL) {
+						/* call bzero, no PG_ZERO should be considered */
+						pmap_zero_pages(m_ret, j - i);
+						sync_prezero += j - i;
 
-					/* pages are hot in cache, validate and activate them */
-					vm_page_activate_and_validate_pages(m_ret, next_i - i);
+						/* pages are hot in cache, validate and activate them */
+						vm_page_activate_and_validate_pages(m_ret, j - i);
+					} else {
+						/* abort if allocation failed */
+						goto syncpromo_failed;
+					}
+
+					pa += (j - i) << PAGE_SHIFT;
+					i = j;
 				} else {
-					/* abort if allocation failed */
-					goto syncpromo_failed;
+					// Verify that pages [rv_pindex + i, rv_pindex + j) are in the vm_object and come from the reservation
+					for (; i < j; i++, m_obj = vm_page_next(m_obj), pa += PAGE_SIZE) {
+						if (m_obj->pindex != rv_pindex + i || m_obj->phys_addr != pa)
+							goto syncpromo_failed;
+					}
 				}
 			}
-
-			i = next_i;
 		}
 
-		if (i == 512) {
+		if (j == 512) {
 			CTR2(KTR_VM,
 			    "sync superpage promotion succeeded, pid %d (%s)\n",
 			    curproc->p_pid, curproc->p_comm);
