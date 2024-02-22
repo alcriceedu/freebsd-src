@@ -1908,6 +1908,7 @@ found:
 	}
 
 syncpromo_out:
+
 	vm_object_unbusy(fs.object);
 	VM_OBJECT_UNLOCK(fs.object);
 
