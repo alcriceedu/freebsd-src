@@ -1824,7 +1824,7 @@ found:
 					 * Verify that pindices [rv_pindex + i, rv_pindex + j)
 					 * are not in the vm_object.
 					 */
-					if (m_obj->pindex < rv_pindex + j) {
+					if (m_obj != NULL && m_obj->pindex < rv_pindex + j) {
 						sync_fail++;
 						goto syncpromo_out;
 					}
@@ -1860,8 +1860,9 @@ found:
 					 * Verify that pindices [rv_pindex + i, rv_pindex + j)
 					 * are in the vm_object and come from the reservation.
 					 */
-					for (; i < j; i++, m_obj = vm_page_next(m_obj), pa += PAGE_SIZE) {
-						if (m_obj->pindex != rv_pindex + i || m_obj->phys_addr != pa) {
+					for (; i < j; i++, m_obj = TAILQ_NEXT(m_obj, listq), pa += PAGE_SIZE) {
+						if (m_obj == NULL || m_obj->pindex != rv_pindex + i ||
+						    m_obj->phys_addr != pa) {
 							sync_fail++;
 							goto syncpromo_out;
 						}
