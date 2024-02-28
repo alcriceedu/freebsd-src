@@ -1560,7 +1560,7 @@ vm_fault(vm_map_t map, vm_offset_t vaddr, vm_prot_t fault_type,
     int fault_flags, vm_page_t *m_hold)
 {
 	struct faultstate fs;
-	vm_page_t m_ret, m_super, m_obj;
+	vm_page_t m_ret, m_obj;
 	vm_paddr_t rv_pa, rv_pa_end, pa;
 	vm_pindex_t rv_pindex;
 	u_long *popmap;
@@ -1782,10 +1782,17 @@ found:
 	VM_OBJECT_WLOCK(fs.object);
 	vm_object_busy(fs.object);
 
+	psind = 2; // XXX Eventually will be determined by reservation code
+
 	if (enable_syncpromo && fs.m != NULL && !fs.wired &&
 	    (fault_flags & VM_FAULT_WIRE) == 0 && fs.object != NULL &&
 	    fs.object->type == OBJT_DEFAULT &&
 	    fs.object->backing_object == NULL &&
+	    (fs.m->flags & PG_FICTITIOUS) == 0 &&
+	    rounddown2(vaddr, pagesizes[psind]) >= fs.entry->start &&
+	    roundup2(vaddr + 1, pagesizes[psind]) <= fs.entry->end &&
+	    (vaddr & (pagesizes[psind] - 1)) == (VM_PAGE_TO_PHYS(fs.m) & (pagesizes[psind] - 1)) &&
+	    pmap_ps_enabled(fs.map->pmap) &&
 	    vm_reserv_satisfy_sync_promotion(fs.m)) {
 		/*
 		 * Compute the pindex of the start and the physical
@@ -1876,34 +1883,17 @@ found:
 		sync_succ++;
 
 		/*
-		 * If the reservation is fully populated, verify the legitimacy
-		 * of an anonymous superpage mapping.
+		 * Attempt to map the superpage.
 		 */
-		psind = 0;
-		if ((fs.m->flags & PG_FICTITIOUS) == 0 &&
-		    (m_super = vm_reserv_to_superpage(fs.m)) != NULL &&
-		    rounddown2(vaddr, pagesizes[m_super->psind]) >= fs.entry->start &&
-		    roundup2(vaddr + 1, pagesizes[m_super->psind]) <= fs.entry->end &&
-		    (vaddr & (pagesizes[m_super->psind] - 1)) == (VM_PAGE_TO_PHYS(fs.m) &
-		    (pagesizes[m_super->psind] - 1)) &&
-		    pmap_ps_enabled(fs.map->pmap)) {
-			psind = m_super->psind;
-			vaddr = rounddown2(vaddr, pagesizes[psind]);
-		}
+		rv = pmap_enter(fs.map->pmap, rounddown2(vaddr, pagesizes[psind]),
+		    PHYS_TO_VM_PAGE(rounddown2(fs.m->phys_addr, pagesizes[psind])),
+		    fs.prot, fault_type | PMAP_ENTER_NOSLEEP | (fs.wired ? PMAP_ENTER_WIRED : 0), psind);
 
-		/*
-		 * If appropriate, attempt to map the superpage.
-		 */
-		if (psind >= 1) {
-			rv = pmap_enter(fs.map->pmap, vaddr, m_super, fs.prot,
-			    fault_type | PMAP_ENTER_NOSLEEP | (fs.wired ? PMAP_ENTER_WIRED : 0), psind);
-
-			if (rv == KERN_SUCCESS) {
-				sync_fault++;
-				vm_object_unbusy(fs.object);
-				VM_OBJECT_UNLOCK(fs.object);
-				goto skip_pmap;
-			}
+		if (rv == KERN_SUCCESS) {
+			sync_fault++;
+			vm_object_unbusy(fs.object);
+			VM_OBJECT_UNLOCK(fs.object);
+			goto skip_pmap;
 		}
 	}
 

@@ -696,9 +696,6 @@ vm_reserv_satisfy_sync_promotion(vm_page_t m)
 {
 	vm_reserv_t rv;
 
-	/*
-	 * We assume m is part of a reservation.
-	 */
 	rv = vm_reserv_from_page(m);
 
 	return (rv->rsind == 1 &&
