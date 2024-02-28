@@ -1896,7 +1896,7 @@ found:
 		 */
 		if (psind >= 1) {
 			rv = pmap_enter(fs.map->pmap, vaddr, m_super, fs.prot,
-			    fault_type | PMAP_ENTER_NOSLEEP | (fs.wired ? PMAP_ENTER_WIRED : 0), 1);
+			    fault_type | PMAP_ENTER_NOSLEEP | (fs.wired ? PMAP_ENTER_WIRED : 0), psind);
 
 			if (rv == KERN_SUCCESS) {
 				sync_fault++;
