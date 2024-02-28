@@ -701,8 +701,6 @@ vm_reserv_satisfy_sync_promotion(vm_page_t m)
 	return (rv->rsind == 1 &&
 	    rv->object != NULL &&
 	    rv->object == m->object &&
-	    m->pindex >= rv->pindex &&
-	    m->pindex < rv->pindex + reserv_pages[rv->rsind] &&
 	    popmap_is_set(rv->popmap, m->pindex - rv->pindex) &&
 	    rv->inpartpopq &&
 	    rv->popcnt >= sync_popthreshold);
