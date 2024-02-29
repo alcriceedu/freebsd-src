@@ -327,9 +327,13 @@ static COUNTER_U64_DEFINE_EARLY(vm_reserv_reclaimed);
 SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, reclaimed, CTLFLAG_RD,
     &vm_reserv_reclaimed, "Cumulative number of reclaimed reservations");
 
-static int sync_popthreshold = 64;
-SYSCTL_INT(_vm_reserv, OID_AUTO, sync_popthreshold, CTLFLAG_RWTUN,
-    &sync_popthreshold, 0, "sync promotion pop threshold");
+static int sync_popthreshold_0 = 4;
+SYSCTL_INT(_vm_reserv, OID_AUTO, sync_popthreshold_0, CTLFLAG_RWTUN,
+    &sync_popthreshold_0, 0, "64 KB sync promotion pop threshold");
+
+static int sync_popthreshold_1 = 64;
+SYSCTL_INT(_vm_reserv, OID_AUTO, sync_popthreshold_1, CTLFLAG_RWTUN,
+    &sync_popthreshold_1, 0, "2 MB sync promotion pop threshold");
 
 /*
  * The object lock pool is used to synchronize the rvq.  We can not use a
@@ -702,9 +706,9 @@ vm_reserv_satisfy_sync_promotion(vm_page_t m, vm_offset_t va, vm_offset_t start,
 	if (rv->object == NULL || rv->object != m->object || !rv->inpartpopq)
 		return (false);
 
-	// rv_pindex and popmap need to be adjusted by offset
+	*psind = 0;
 	*rv_pindex = rv->pindex;
-	*popmap = rv->popmap;
+	*popmap = rv->popmap; // Needs to be adjusted by offset
 	*offset = 0;
 
 	carry = 0;
@@ -716,10 +720,11 @@ vm_reserv_satisfy_sync_promotion(vm_page_t m, vm_offset_t va, vm_offset_t start,
 				*psind = 1;
 			}
 		} else { /* rv->rsind == 1 */
-			*offset = atop(m->phys_addr - rv->pages->phys_addr);
-			count = bitcount16(((uint16_t *)rv->popmap)[*offset / 16])
+			*offset = atop(rounddown2(m->phys_addr, reserv_sizes[0]) - rv->pages->phys_addr);
+			count = bitcount16(((uint16_t *)rv->popmap)[*offset / 16]);
 			if (count >= sync_popthreshold_0) {
 				*psind = 1;
+				*rv_pindex += *offset;
 				carry = sync_popthreshold_0 - count;
 			}
 		}
@@ -729,32 +734,14 @@ vm_reserv_satisfy_sync_promotion(vm_page_t m, vm_offset_t va, vm_offset_t start,
 	if (rounddown2(va, reserv_sizes[1]) >= start && roundup2(va + 1, reserv_sizes[1]) <= end) {
 		if (rv->rsind == 1) {
 			if (rv->popcnt + carry >= sync_popthreshold_1) {
+				*offset = 0;
                                 *psind = 2;
+				*rv_pindex = rv->pindex;
                         }
 		}
 	}
 
 	return (*psind != 0);
-}
-
-vm_pindex_t
-vm_reserv_pindex_from_page(vm_page_t m)
-{
-	vm_reserv_t rv;
-
-	rv = vm_reserv_from_page(m);
-
-	return (rv->pindex);
-}
-
-popmap_t *
-vm_reserv_popmap_from_page(vm_page_t m)
-{
-	vm_reserv_t rv;
-
-	rv = vm_reserv_from_page(m);
-
-	return (rv->popmap);
 }
 
 /*

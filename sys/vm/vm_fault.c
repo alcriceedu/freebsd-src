@@ -1564,7 +1564,7 @@ vm_fault(vm_map_t map, vm_offset_t vaddr, vm_prot_t fault_type,
 	vm_paddr_t rv_pa, rv_pa_end, pa;
 	vm_pindex_t rv_pindex;
 	u_long *popmap;
-	int ahead, behind, faultcount, rv, i, j, psind;
+	int ahead, behind, faultcount, rv, i, j, psind, offset;
 	enum fault_status res;
 	enum fault_next_status res_next;
 	bool hardfault;
@@ -1782,30 +1782,20 @@ found:
 	VM_OBJECT_WLOCK(fs.object);
 	vm_object_busy(fs.object);
 
-	psind = 2; // XXX Eventually will be determined by reservation code
-
 	if (enable_syncpromo && fs.m != NULL && !fs.wired &&
 	    (fault_flags & VM_FAULT_WIRE) == 0 && fs.object != NULL &&
 	    fs.object->type == OBJT_DEFAULT &&
 	    fs.object->backing_object == NULL &&
 	    (fs.m->flags & PG_FICTITIOUS) == 0 &&
-	    rounddown2(vaddr, pagesizes[psind]) >= fs.entry->start &&
-	    roundup2(vaddr + 1, pagesizes[psind]) <= fs.entry->end &&
 	    pmap_ps_enabled(fs.map->pmap) &&
-	    vm_reserv_satisfy_sync_promotion(fs.m)) {
+	    vm_reserv_satisfy_sync_promotion(fs.m, vaddr, fs.entry->start, fs.entry->end, &psind, &rv_pindex, &popmap, &offset)) {
 		/*
-		 * Compute the pindex of the start and the physical
-		 * address of the start and end of the reservation.
+		 * Compute the physical address of the start and end of
+		 * the reservation.
 		 */
-		rv_pindex = vm_reserv_pindex_from_page(fs.m);
 		rv_pa = VM_PAGE_TO_PHYS(fs.m) - ((fs.pindex - rv_pindex)
 		    << PAGE_SHIFT);
 		rv_pa_end = rv_pa + L2_SIZE;
-
-		/*
-		 * Get the popmap from the reservation.
-		 */
-		popmap = vm_reserv_popmap_from_page(fs.m);
 
 		/*
 		 * Iterate over the popmap, ensuring that it is
@@ -1819,12 +1809,12 @@ found:
 			/*
 			 * Advance j until we reach the end of this run of 0s or 1s.
 			 */
-			while (j < 512 && (popmap[i / popmap_nbits] & (1UL << (i % popmap_nbits))) ==
-			    (popmap[j / popmap_nbits] & (1UL << (j % popmap_nbits))))
+			while (j < 512 && (popmap[(i + offset) / popmap_nbits] & (1UL << ((i + offset) % popmap_nbits))) ==
+			    (popmap[(j + offset) / popmap_nbits] & (1UL << ((j + offset) % popmap_nbits))))
 				j++;
 
 			if (i < j) {
-				if (!(popmap[i / popmap_nbits] & (1UL << (i % popmap_nbits)))) { // Run of 0s
+				if (!(popmap[(i + offset) / popmap_nbits] & (1UL << ((i + offset) % popmap_nbits)))) { // Run of 0s
 					/*
 					 * Verify that pindices [rv_pindex + i, rv_pindex + j)
 					 * are not in the vm_object.
