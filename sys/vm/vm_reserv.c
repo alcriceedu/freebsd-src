@@ -692,18 +692,49 @@ vm_reserv_has_pindex(vm_reserv_t rv, vm_pindex_t pindex)
 }
 
 bool
-vm_reserv_satisfy_sync_promotion(vm_page_t m)
+vm_reserv_satisfy_sync_promotion(vm_page_t m, vm_offset_t va, vm_offset_t start, vm_offset_t end, int *psind, vm_pindex_t *rv_pindex, popmap_t **popmap, int *offset)
 {
 	vm_reserv_t rv;
+	int carry, count;
 
 	rv = vm_reserv_from_page(m);
 
-	return (rv->rsind == 1 &&
-	    rv->object != NULL &&
-	    rv->object == m->object &&
-	    popmap_is_set(rv->popmap, m->pindex - rv->pindex) &&
-	    rv->inpartpopq &&
-	    rv->popcnt >= sync_popthreshold);
+	if (rv->object == NULL || rv->object != m->object || !rv->inpartpopq)
+		return (false);
+
+	// rv_pindex and popmap need to be adjusted by offset
+	*rv_pindex = rv->pindex;
+	*popmap = rv->popmap;
+	*offset = 0;
+
+	carry = 0;
+
+	// 64 KB
+	if (rounddown2(va, reserv_sizes[0]) >= start && roundup2(va + 1, reserv_sizes[0]) <= end) {
+		if (rv->rsind == 0) {
+			if (rv->popcnt >= sync_popthreshold_0) {
+				*psind = 1;
+			}
+		} else { /* rv->rsind == 1 */
+			*offset = atop(m->phys_addr - rv->pages->phys_addr);
+			count = bitcount16(((uint16_t *)rv->popmap)[*offset / 16])
+			if (count >= sync_popthreshold_0) {
+				*psind = 1;
+				carry = sync_popthreshold_0 - count;
+			}
+		}
+	}
+
+	// 2 MB
+	if (rounddown2(va, reserv_sizes[1]) >= start && roundup2(va + 1, reserv_sizes[1]) <= end) {
+		if (rv->rsind == 1) {
+			if (rv->popcnt + carry >= sync_popthreshold_1) {
+                                *psind = 2;
+                        }
+		}
+	}
+
+	return (*psind != 0);
 }
 
 vm_pindex_t
