@@ -1564,7 +1564,7 @@ vm_fault(vm_map_t map, vm_offset_t vaddr, vm_prot_t fault_type,
 	vm_paddr_t rv_pa, rv_pa_end, pa;
 	vm_pindex_t rv_pindex;
 	u_long *popmap;
-	int ahead, behind, faultcount, rv, i, j, psind, offset;
+	int ahead, behind, faultcount, rv, i, j, psind, offset, npages;
 	enum fault_status res;
 	enum fault_next_status res_next;
 	bool hardfault;
@@ -1795,21 +1795,22 @@ found:
 		 */
 		rv_pa = VM_PAGE_TO_PHYS(fs.m) - ((fs.pindex - rv_pindex)
 		    << PAGE_SHIFT);
-		rv_pa_end = rv_pa + L2_SIZE;
+		rv_pa_end = rv_pa + pagesizes[psind];
 
 		/*
 		 * Iterate over the popmap, ensuring that it is
 		 * consistent with the vm_object and allocating
 		 * pages as necessary.
 		 */
+		npages = atop(pagesizes[psind]);
 		m_obj = vm_page_find_least(fs.object, rv_pindex);
 		pa = rv_pa;
 		i = j = 0;
-		while (j < 512) {
+		while (j < npages) {
 			/*
 			 * Advance j until we reach the end of this run of 0s or 1s.
 			 */
-			while (j < 512 && (popmap[(i + offset) / popmap_nbits] & (1UL << ((i + offset) % popmap_nbits))) ==
+			while (j < npages && (popmap[(i + offset) / popmap_nbits] & (1UL << ((i + offset) % popmap_nbits))) ==
 			    (popmap[(j + offset) / popmap_nbits] & (1UL << ((j + offset) % popmap_nbits))))
 				j++;
 
@@ -1829,7 +1830,7 @@ found:
 					 */
 					m_ret = vm_page_alloc_contig(fs.object, rv_pindex + i,
 					    VM_ALLOC_NORMAL | VM_ALLOC_RESERVONLY | VM_ALLOC_ZERO | VM_ALLOC_NOBUSY,
-					    j - i, rv_pa, rv_pa_end, PAGE_SIZE, L2_SIZE, VM_MEMATTR_DEFAULT);
+					    j - i, rv_pa, rv_pa_end, PAGE_SIZE, pagesizes[psind], VM_MEMATTR_DEFAULT);
 
 					if (m_ret != NULL) {
 						/*
