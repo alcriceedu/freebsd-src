@@ -1791,6 +1791,7 @@ found:
 	    (fs.m->flags & PG_FICTITIOUS) == 0 &&
 	    rounddown2(vaddr, pagesizes[psind]) >= fs.entry->start &&
 	    roundup2(vaddr + 1, pagesizes[psind]) <= fs.entry->end &&
+	    (vaddr & (pagesizes[psind] - 1)) == (VM_PAGE_TO_PHYS(fs.m) & (pagesizes[psind] - 1)) &&
 	    pmap_ps_enabled(fs.map->pmap) &&
 	    vm_reserv_satisfy_sync_promotion(fs.m)) {
 		/*
