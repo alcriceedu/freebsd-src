@@ -215,6 +215,14 @@ static int sync_fault = 0;
 SYSCTL_INT(_vm, OID_AUTO, sync_fault, CTLFLAG_RWTUN,
     &sync_fault, 0, "synchronous superpage faulting");
 
+static int sync_fault_1 = 0;
+SYSCTL_INT(_vm, OID_AUTO, sync_fault_1, CTLFLAG_RWTUN,
+    &sync_fault_1, 0, "synchronous superpage faulting, psind == 1");
+
+static int sync_fault_2 = 0;
+SYSCTL_INT(_vm, OID_AUTO, sync_fault_2, CTLFLAG_RWTUN,
+    &sync_fault_2, 0, "synchronous superpage faulting, psind == 2");
+
 static inline void
 vm_fault_page_release(vm_page_t *mp)
 {
@@ -1881,6 +1889,10 @@ found:
 
 		if (rv == KERN_SUCCESS) {
 			sync_fault++;
+			if (psind == 1)
+				sync_fault_1++;
+			if (psind == 2)
+				sync_fault_2++;
 			vm_object_unbusy(fs.object);
 			VM_OBJECT_UNLOCK(fs.object);
 			goto skip_pmap;
