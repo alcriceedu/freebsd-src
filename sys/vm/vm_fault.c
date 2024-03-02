@@ -1885,7 +1885,7 @@ found:
 		 */
 		rv = pmap_enter(fs.map->pmap, rounddown2(vaddr, pagesizes[psind]),
 		    PHYS_TO_VM_PAGE(rounddown2(fs.m->phys_addr, pagesizes[psind])),
-		    fs.prot, fault_type | PMAP_ENTER_NOSLEEP | (fs.wired ? PMAP_ENTER_WIRED : 0), psind);
+		    fs.prot, fs.fault_type | PMAP_ENTER_NOSLEEP | (fs.wired ? PMAP_ENTER_WIRED : 0) | (fs.prot & VM_PROT_WRITE), psind);
 
 		if (rv == KERN_SUCCESS) {
 			sync_fault++;
