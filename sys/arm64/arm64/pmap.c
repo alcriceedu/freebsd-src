@@ -4638,7 +4638,7 @@ setl2:
 		newl2 &= ~ATTR_SW_DBM;
 		CTR2(KTR_PMAP, "pmap_promote_l2: protect for va %#lx"
 		    " in pmap %p", va & ~L2_OFFSET, pmap);
-		atmoic_add_long(pmap_l2_wprot, 1);
+		atomic_add_long(&pmap_l2_wprot, 1);
 	}
 
 	/*
@@ -4673,7 +4673,7 @@ setl3:
 			CTR2(KTR_PMAP, "pmap_promote_l2: protect for va %#lx"
 			    " in pmap %p", (oldl3 & ~ATTR_MASK & L2_OFFSET) |
 			    (va & ~L2_OFFSET), pmap);
-			atmoic_add_long(pmap_l2_wprot, 1);
+			atomic_add_long(&pmap_l2_wprot, 1);
 		}
 		if ((oldl3 & (ATTR_MASK & ~(ATTR_CONTIGUOUS | ATTR_AF))) !=
 		    (newl2 & (ATTR_MASK & ~(ATTR_CONTIGUOUS | ATTR_AF)))) {
@@ -4772,7 +4772,7 @@ set_first:
 		firstl3c &= ~ATTR_SW_DBM;
 		CTR2(KTR_PMAP, "pmap_promote_l3c: protect for va %#lx"
 		    " in pmap %p", va & ~L3C_OFFSET, pmap);
-		atmoic_add_long(pmap_l3c_wprot, 1);
+		atomic_add_long(&pmap_l3c_wprot, 1);
 	}
 
 	/*
@@ -4797,7 +4797,7 @@ set_l3:
 			CTR2(KTR_PMAP, "pmap_promote_l3c: protect for va %#lx"
 			    " in pmap %p", (oldl3 & ~ATTR_MASK & L3C_OFFSET) |
 			    (va & ~L3C_OFFSET), pmap);
-			atmoic_add_long(pmap_l3c_wprot, 1);
+			atomic_add_long(&pmap_l3c_wprot, 1);
 		}
 		if (oldl3 != pa) {
 			atomic_add_long(&pmap_l3c_p_failures, 1);
