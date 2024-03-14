@@ -4660,6 +4660,9 @@ setl3:
 			    ~ATTR_SW_DBM))
 				goto setl3;
 			oldl3 &= ~ATTR_SW_DBM;
+			CTR2(KTR_PMAP, "pmap_promote_l2: protect for va %#lx"
+			    " in pmap %p", (oldl3 & ~ATTR_MASK & L2_OFFSET) |
+			    (va & ~L2_OFFSET), pmap);
 		}
 		if ((oldl3 & (ATTR_MASK & ~(ATTR_CONTIGUOUS | ATTR_AF))) !=
 		    (newl2 & (ATTR_MASK & ~(ATTR_CONTIGUOUS | ATTR_AF)))) {
@@ -4756,6 +4759,8 @@ set_first:
 		if (!atomic_fcmpset_64(l3p, &firstl3c, firstl3c & ~ATTR_SW_DBM))
 			goto set_first;
 		firstl3c &= ~ATTR_SW_DBM;
+		CTR2(KTR_PMAP, "pmap_promote_l3c: protect for va %#lx"
+		    " in pmap %p", va & ~L3C_OFFSET, pmap);
 	}
 
 	/*
@@ -4777,6 +4782,9 @@ set_l3:
 			    ~ATTR_SW_DBM))
 				goto set_l3;
 			oldl3 &= ~ATTR_SW_DBM;
+			CTR2(KTR_PMAP, "pmap_promote_l3c: protect for va %#lx"
+			    " in pmap %p", (oldl3 & ~ATTR_MASK & L3C_OFFSET) |
+			    (va & ~L3C_OFFSET), pmap);
 		}
 		if (oldl3 != pa) {
 			atomic_add_long(&pmap_l3c_p_failures, 1);
