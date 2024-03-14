@@ -1652,6 +1652,10 @@ static u_long pmap_l2_promotions;
 SYSCTL_ULONG(_vm_pmap_l2, OID_AUTO, promotions, CTLFLAG_RD,
     &pmap_l2_promotions, 0, "2MB page promotions");
 
+static u_long pmap_l2_wprot; // XXX
+SYSCTL_ULONG(_vm_pmap_l2, OID_AUTO, wprot, CTLFLAG_RD,
+    &pmap_l2_wprot, 0, "2MB page promotion write-protects XXX");
+
 static SYSCTL_NODE(_vm_pmap, OID_AUTO, l3c, CTLFLAG_RD | CTLFLAG_MPSAFE, 0,
     "64KB page mapping counters");
 
@@ -1686,6 +1690,11 @@ SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, copies, CTLFLAG_RD,
 static u_long pmap_l2_fills;	// XXX
 SYSCTL_ULONG(_vm_pmap_l2, OID_AUTO, fills, CTLFLAG_RD,
     &pmap_l2_fills, 0, "XXX");
+
+static u_long pmap_l3c_wprot;	// XXX
+SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, wprot, CTLFLAG_RD,
+    &pmap_l3c_wprot, 0, "64KB page promotion write-protects XXX");
+
 
 /*
  * If the given value for "final_only" is false, then any cached intermediate-
@@ -4629,6 +4638,7 @@ setl2:
 		newl2 &= ~ATTR_SW_DBM;
 		CTR2(KTR_PMAP, "pmap_promote_l2: protect for va %#lx"
 		    " in pmap %p", va & ~L2_OFFSET, pmap);
+		atmoic_add_long(pmap_l2_wprot, 1);
 	}
 
 	/*
@@ -4663,6 +4673,7 @@ setl3:
 			CTR2(KTR_PMAP, "pmap_promote_l2: protect for va %#lx"
 			    " in pmap %p", (oldl3 & ~ATTR_MASK & L2_OFFSET) |
 			    (va & ~L2_OFFSET), pmap);
+			atmoic_add_long(pmap_l2_wprot, 1);
 		}
 		if ((oldl3 & (ATTR_MASK & ~(ATTR_CONTIGUOUS | ATTR_AF))) !=
 		    (newl2 & (ATTR_MASK & ~(ATTR_CONTIGUOUS | ATTR_AF)))) {
@@ -4761,6 +4772,7 @@ set_first:
 		firstl3c &= ~ATTR_SW_DBM;
 		CTR2(KTR_PMAP, "pmap_promote_l3c: protect for va %#lx"
 		    " in pmap %p", va & ~L3C_OFFSET, pmap);
+		atmoic_add_long(pmap_l3c_wprot, 1);
 	}
 
 	/*
@@ -4785,6 +4797,7 @@ set_l3:
 			CTR2(KTR_PMAP, "pmap_promote_l3c: protect for va %#lx"
 			    " in pmap %p", (oldl3 & ~ATTR_MASK & L3C_OFFSET) |
 			    (va & ~L3C_OFFSET), pmap);
+			atmoic_add_long(pmap_l3c_wprot, 1);
 		}
 		if (oldl3 != pa) {
 			atomic_add_long(&pmap_l3c_p_failures, 1);
