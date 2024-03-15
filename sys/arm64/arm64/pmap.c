@@ -1652,6 +1652,10 @@ static u_long pmap_l2_promotions;
 SYSCTL_ULONG(_vm_pmap_l2, OID_AUTO, promotions, CTLFLAG_RD,
     &pmap_l2_promotions, 0, "2MB page promotions");
 
+static u_long pmap_l2_promotions_wprot;
+SYSCTL_ULONG(_vm_pmap_l2, OID_AUTO, promotions_wprot, CTLFLAG_RD,
+    &pmap_l2_promotions_wprot, 0, "2MB page promotions after write-protect(s)");
+
 static u_long pmap_l2_wprot; // XXX
 SYSCTL_ULONG(_vm_pmap_l2, OID_AUTO, wprot, CTLFLAG_RD,
     &pmap_l2_wprot, 0, "2MB page promotion write-protects XXX");
@@ -1678,6 +1682,10 @@ SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, p_failures, CTLFLAG_RD,
 static u_long pmap_l3c_promotions;
 SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, promotions, CTLFLAG_RD,
     &pmap_l3c_promotions, 0, "64KB page promotions");
+
+static u_long pmap_l3c_promotions_wprot;
+SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, promotions_wprot, CTLFLAG_RD,
+    &pmap_l3c_promotions_wprot, 0, "64KB page promotions after write-protect(s)");
 
 static u_long pmap_l3c_removes;	// XXX
 SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, removes, CTLFLAG_RD,
@@ -4735,6 +4743,8 @@ setl3:
 	pmap_update_entry(pmap, l2, newl2 | L2_BLOCK, va & ~L2_OFFSET, L2_SIZE);
 
 	atomic_add_long(&pmap_l2_promotions, 1);
+	if (wp != 0)
+		atomic_add_long(&pmap_l2_promotions_wprot, 1);
 	CTR2(KTR_PMAP, "pmap_promote_l2: success for va %#lx in pmap %p", va,
 	    pmap);
 	return (true);
@@ -4849,6 +4859,8 @@ set_l3:
 	intr_restore(intr);
 
 	atomic_add_long(&pmap_l3c_promotions, 1);
+	if (wp != 0)
+                atomic_add_long(&pmap_l3c_promotions_wprot, 1);
 	CTR2(KTR_PMAP, "pmap_promote_l3c: success for va %#lx in pmap %p",
 	    va, pmap);
 }
