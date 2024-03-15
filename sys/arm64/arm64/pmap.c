@@ -1648,6 +1648,10 @@ static u_long pmap_l2_p_failures;
 SYSCTL_ULONG(_vm_pmap_l2, OID_AUTO, p_failures, CTLFLAG_RD,
     &pmap_l2_p_failures, 0, "2MB page promotion failures");
 
+static u_long pmap_l2_p_failures_wprot;
+SYSCTL_ULONG(_vm_pmap_l2, OID_AUTO, p_failures_wprot, CTLFLAG_RD,
+    &pmap_l2_p_failures_wprot, 0, "2MB page promotion failures after write-protect(s)");
+
 static u_long pmap_l2_promotions;
 SYSCTL_ULONG(_vm_pmap_l2, OID_AUTO, promotions, CTLFLAG_RD,
     &pmap_l2_promotions, 0, "2MB page promotions");
@@ -1678,6 +1682,10 @@ SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, mappings, CTLFLAG_RD,
 static u_long pmap_l3c_p_failures;
 SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, p_failures, CTLFLAG_RD,
     &pmap_l3c_p_failures, 0, "64KB page promotion failures");
+
+static u_long pmap_l3c_p_failures_wprot;
+SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, p_failures_wprot, CTLFLAG_RD,
+    &pmap_l3c_p_failures_wprot, 0, "64KB page promotion failures after write-protect(s)");
 
 static u_long pmap_l3c_promotions;
 SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, promotions, CTLFLAG_RD,
@@ -4674,6 +4682,8 @@ setl2:
 		if ((PTE_TO_PHYS(oldl3) | (oldl3 & ATTR_DESCR_MASK)) != pa) {
 			atomic_add_long(&pmap_l2_p_failures, 1);
 			atomic_add_long(&pmap_l2_wprot_f, wp);
+			if (wp != 0)
+				atomic_add_long(&pmap_l2_p_failures_wprot, 1);
 			CTR2(KTR_PMAP, "pmap_promote_l2: failure for va %#lx"
 			    " in pmap %p", va, pmap);
 			return (false);
@@ -4700,6 +4710,8 @@ setl3:
 		    (newl2 & (ATTR_MASK & ~(ATTR_CONTIGUOUS | ATTR_AF)))) {
 			atomic_add_long(&pmap_l2_p_failures, 1);
 			atomic_add_long(&pmap_l2_wprot_f, wp);
+			if (wp != 0)
+				atomic_add_long(&pmap_l2_p_failures_wprot, 1);
 			CTR2(KTR_PMAP, "pmap_promote_l2: failure for va %#lx"
 			    " in pmap %p", va, pmap);
 			return (false);
@@ -4731,6 +4743,8 @@ setl3:
 	if (pmap_insert_pt_page(pmap, mpte, true, all_l3e_AF != 0)) {
 		atomic_add_long(&pmap_l2_p_failures, 1);
 		atomic_add_long(&pmap_l2_wprot_f, wp);
+		if (wp != 0)
+			atomic_add_long(&pmap_l2_p_failures_wprot, 1);
 		CTR2(KTR_PMAP,
 		    "pmap_promote_l2: failure for va %#lx in pmap %p", va,
 		    pmap);
@@ -4832,6 +4846,8 @@ set_l3:
 		if (oldl3 != pa) {
 			atomic_add_long(&pmap_l3c_p_failures, 1);
 			atomic_add_long(&pmap_l3c_wprot_f, wp);
+			if (wp != 0)
+				atomic_add_long(&pmap_l3c_p_failures_wprot, 1);
 			CTR2(KTR_PMAP, "pmap_promote_l3c: failure for va %#lx"
 			    " in pmap %p", va, pmap);
 			return;
