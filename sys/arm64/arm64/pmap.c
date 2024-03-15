@@ -1656,6 +1656,10 @@ static u_long pmap_l2_wprot; // XXX
 SYSCTL_ULONG(_vm_pmap_l2, OID_AUTO, wprot, CTLFLAG_RD,
     &pmap_l2_wprot, 0, "2MB page promotion write-protects XXX");
 
+static u_long pmap_l2_wprot_f; // XXX
+SYSCTL_ULONG(_vm_pmap_l2, OID_AUTO, wprot_f, CTLFLAG_RD,
+    &pmap_l2_wprot_f, 0, "2MB page promotion failure write-protects XXX");
+
 static SYSCTL_NODE(_vm_pmap, OID_AUTO, l3c, CTLFLAG_RD | CTLFLAG_MPSAFE, 0,
     "64KB page mapping counters");
 
@@ -1695,6 +1699,9 @@ static u_long pmap_l3c_wprot;	// XXX
 SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, wprot, CTLFLAG_RD,
     &pmap_l3c_wprot, 0, "64KB page promotion write-protects XXX");
 
+static u_long pmap_l3c_wprot_f;	// XXX
+SYSCTL_ULONG(_vm_pmap_l3c, OID_AUTO, wprot_f, CTLFLAG_RD,
+    &pmap_l3c_wprot_f, 0, "64KB page promotion failure write-protects XXX");
 
 /*
  * If the given value for "final_only" is false, then any cached intermediate-
@@ -4582,6 +4589,7 @@ pmap_promote_l2(pmap_t pmap, pd_entry_t *l2, vm_offset_t va, vm_page_t mpte,
     struct rwlock **lockp)
 {
 	pt_entry_t all_l3e_AF, *firstl3, *l3, newl2, oldl3, pa;
+	int wp;
 
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
 
@@ -4609,6 +4617,8 @@ pmap_promote_l2(pmap_t pmap, pd_entry_t *l2, vm_offset_t va, vm_page_t mpte,
 		    " in pmap %p", va, pmap);
 		return (false);
 	}
+
+	wp = 0;
 
 	/*
 	 * Both here and in the below "for" loop, to allow for repromotion
@@ -4639,6 +4649,7 @@ setl2:
 		CTR2(KTR_PMAP, "pmap_promote_l2: protect for va %#lx"
 		    " in pmap %p", va & ~L2_OFFSET, pmap);
 		atomic_add_long(&pmap_l2_wprot, 1);
+		wp++;
 	}
 
 	/*
@@ -4654,6 +4665,7 @@ setl2:
 		oldl3 = pmap_load(l3);
 		if ((PTE_TO_PHYS(oldl3) | (oldl3 & ATTR_DESCR_MASK)) != pa) {
 			atomic_add_long(&pmap_l2_p_failures, 1);
+			atomic_add_long(&pmap_l2_wprot_f, wp);
 			CTR2(KTR_PMAP, "pmap_promote_l2: failure for va %#lx"
 			    " in pmap %p", va, pmap);
 			return (false);
@@ -4674,10 +4686,12 @@ setl3:
 			    " in pmap %p", (oldl3 & ~ATTR_MASK & L2_OFFSET) |
 			    (va & ~L2_OFFSET), pmap);
 			atomic_add_long(&pmap_l2_wprot, 1);
+			wp++;
 		}
 		if ((oldl3 & (ATTR_MASK & ~(ATTR_CONTIGUOUS | ATTR_AF))) !=
 		    (newl2 & (ATTR_MASK & ~(ATTR_CONTIGUOUS | ATTR_AF)))) {
 			atomic_add_long(&pmap_l2_p_failures, 1);
+			atomic_add_long(&pmap_l2_wprot_f, wp);
 			CTR2(KTR_PMAP, "pmap_promote_l2: failure for va %#lx"
 			    " in pmap %p", va, pmap);
 			return (false);
@@ -4708,6 +4722,7 @@ setl3:
 	    ("pmap_promote_l2: page table page's pindex is wrong"));
 	if (pmap_insert_pt_page(pmap, mpte, true, all_l3e_AF != 0)) {
 		atomic_add_long(&pmap_l2_p_failures, 1);
+		atomic_add_long(&pmap_l2_wprot_f, wp);
 		CTR2(KTR_PMAP,
 		    "pmap_promote_l2: failure for va %#lx in pmap %p", va,
 		    pmap);
@@ -4733,6 +4748,7 @@ pmap_promote_l3c(pmap_t pmap, pd_entry_t *l3p, vm_offset_t va)
 {
 	pd_entry_t firstl3c, *l3, oldl3, pa;
 	register_t intr;
+	int wp;
 
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
 
@@ -4756,6 +4772,8 @@ pmap_promote_l3c(pmap_t pmap, pd_entry_t *l3p, vm_offset_t va)
 		return;
 	}
 
+	wp = 0;
+
 	/*
 	 * If the first L3 entry is a clean read-write mapping, convert it
 	 * to a read-only mapping.
@@ -4773,6 +4791,7 @@ set_first:
 		CTR2(KTR_PMAP, "pmap_promote_l3c: protect for va %#lx"
 		    " in pmap %p", va & ~L3C_OFFSET, pmap);
 		atomic_add_long(&pmap_l3c_wprot, 1);
+		wp++;
 	}
 
 	/*
@@ -4798,9 +4817,11 @@ set_l3:
 			    " in pmap %p", (oldl3 & ~ATTR_MASK & L3C_OFFSET) |
 			    (va & ~L3C_OFFSET), pmap);
 			atomic_add_long(&pmap_l3c_wprot, 1);
+			wp++;
 		}
 		if (oldl3 != pa) {
 			atomic_add_long(&pmap_l3c_p_failures, 1);
+			atomic_add_long(&pmap_l3c_wprot_f, wp);
 			CTR2(KTR_PMAP, "pmap_promote_l3c: failure for va %#lx"
 			    " in pmap %p", va, pmap);
 			return;
