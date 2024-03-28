@@ -4790,7 +4790,7 @@ set_l3:
 	intr = intr_disable();
 
 	/*
-	 * Clear the valid bit for each L3 entry.
+	 * Clear the valid and accessed bits for each L3 entry.
 	 */
 	for (l3 = l3p; l3 < l3p + L3C_ENTRIES; l3++)
 		pmap_clear_bits(l3, ATTR_DESCR_VALID | ATTR_AF);
@@ -4799,7 +4799,9 @@ set_l3:
 	    ~L3C_OFFSET, true);
 
 	/*
-	 * Remake the mappings with the contiguous bit set.
+	 * Remake the mappings with the contiguous bit set
+	 * unconditionally and the accessed bit set if all of
+	 * the original L3 entries had their accessed bits set.
 	 */
 	for (l3 = l3p; l3 < l3p + L3C_ENTRIES; l3++)
 		pmap_set_bits(l3, ATTR_CONTIGUOUS | ATTR_DESCR_VALID
