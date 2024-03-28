@@ -4938,9 +4938,8 @@ pmap_enter(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 	pv_entry_t pv;
 	vm_paddr_t opa, pa;
 	vm_page_t mpte, om;
-	struct vm_phys_seg *seg;
 	boolean_t nosleep;
-	int lvl, rv;
+	int full_lvl, l3c_rv, lvl, rv;
 
 	KASSERT(ADDR_IS_CANONICAL(va),
 	    ("%s: Address not in canonical form: %lx", __func__, va));
@@ -5244,17 +5243,13 @@ validate:
 	 * and then to a level 2 superpage.
 	 */
 	if ((m->flags & PG_FICTITIOUS) == 0) {
-		seg = &vm_phys_segs[m->segind];
+		l3c_rv = false;
 		if ((mpte == NULL || mpte->ref_count >= L3C_ENTRIES) &&
-		    (m->phys_addr & ~L3C_OFFSET) >= seg->start &&
-		    seg->first_page[atop((m->phys_addr & ~L3C_OFFSET) -
-		    seg->start)].psind >= 1)
-			pmap_promote_l3c(pmap, l3, va);
+		    (full_lvl = vm_reserv_level_iffullpop(m)) >= 0)
+			l3c_rv = pmap_promote_l3c(pmap, l3, va);
 		if ((mpte == NULL || mpte->ref_count == NL3PG) &&
-		    (m->phys_addr & ~L2_OFFSET) >= seg->start &&
-		    seg->first_page[atop((m->phys_addr & ~L2_OFFSET) -
-		    seg->start)].psind >= 2)
-			(void)pmap_promote_l2(pmap, pde, va, mpte, &lock);
+		    full_lvl >= 1 && l3c_rv)
+			pmap_promote_l2(pmap, pde, va, mpte, &lock);
 	}
 #endif
 
