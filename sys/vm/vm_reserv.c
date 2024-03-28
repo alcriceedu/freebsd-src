@@ -1160,7 +1160,8 @@ vm_reserv_break(vm_reserv_t rv)
 	vm_reserv_remove(rv);
 	rv->pages->psind = 0;
 	if (rv->rsind == 1) { // XXX
-		for (m = rv->pages + 1; m - rv->pages < 32; m += 16) {
+		for (m = rv->pages + reserv_pages[0]; m < rv->pages + reserv_pages[1];
+		    m += reserv_pages[0]) {
 			m->psind = 0;
 		}
 	}
