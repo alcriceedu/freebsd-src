@@ -471,7 +471,7 @@ static int pmap_enter_l3c(pmap_t pmap, vm_offset_t va, pt_entry_t l3e, u_int fla
 static int pmap_insert_pt_page(pmap_t pmap, vm_page_t mpte, bool promoted,
     bool all_l3e_AF_set);
 static pt_entry_t pmap_load_l3c(pt_entry_t *l3p);
-static void pmap_promote_l3c(pmap_t pmap, pd_entry_t *l3p, vm_offset_t va);
+static bool pmap_promote_l3c(pmap_t pmap, pd_entry_t *l3p, vm_offset_t va);
 static void pmap_mask_set_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va,
     vm_offset_t *vap, vm_offset_t va_next, pt_entry_t mask, pt_entry_t nbits);
 static bool pmap_pv_insert_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m,
@@ -4714,7 +4714,7 @@ setl3:
 /*
  * XXX
  */
-static void
+static bool
 pmap_promote_l3c(pmap_t pmap, pd_entry_t *l3p, vm_offset_t va)
 {
 	pd_entry_t firstl3c, *l3, oldl3, pa;
@@ -4739,7 +4739,7 @@ pmap_promote_l3c(pmap_t pmap, pd_entry_t *l3p, vm_offset_t va)
 		atomic_add_long(&pmap_l3c_p_failures, 1);
 		CTR2(KTR_PMAP, "pmap_promote_l3c: failure for va %#lx"
 		    " in pmap %p", va, pmap);
-		return;
+		return (false);
 	}
 
 	/*
@@ -4782,7 +4782,7 @@ set_l3:
 			atomic_add_long(&pmap_l3c_p_failures, 1);
 			CTR2(KTR_PMAP, "pmap_promote_l3c: failure for va %#lx"
 			    " in pmap %p", va, pmap);
-			return;
+			return (false);
 		}
 		pa -= PAGE_SIZE;
 	}
@@ -4809,6 +4809,7 @@ set_l3:
 	atomic_add_long(&pmap_l3c_promotions, 1);
 	CTR2(KTR_PMAP, "pmap_promote_l3c: success for va %#lx in pmap %p",
 	    va, pmap);
+	return (true);
 }
 #endif /* VM_NRESERVLEVEL > 0 */
 
