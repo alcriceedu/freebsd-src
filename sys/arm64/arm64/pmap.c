@@ -4723,6 +4723,14 @@ pmap_promote_l3c(pmap_t pmap, pd_entry_t *l3p, vm_offset_t va)
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
 
 	/*
+	 * Currently, this function only supports promotion on stage 1 pmaps
+	 * because it tests stage 1 specific fields and performs a break-
+	 * before-make sequence that is incorrect for stage 2 pmaps.
+	 */
+	if (pmap->pm_stage != PM_STAGE1 || !pmap_ps_enabled(pmap))
+		return (false);
+
+	/*
 	 * Compute the address of the first L3 entry in the superpage
 	 * candidate.
 	 */
@@ -5237,13 +5245,9 @@ validate:
 #if VM_NRESERVLEVEL > 0
 	/*
 	 * Try to promote from level 3 pages to a level 3 contiguous superpage,
-	 * and then to a level 2 superpage. This currently only works on
-	 * stage 1 pmaps as pmap_promote_l2 looks at stage 1 specific fields
-	 * and performs a break-before-make sequence that is incorrect for a
-	 * stage 2 pmap.
+	 * and then to a level 2 superpage.
 	 */
-	if (pmap_ps_enabled(pmap) && pmap->pm_stage == PM_STAGE1 &&
-	    (m->flags & PG_FICTITIOUS) == 0) {
+	if ((m->flags & PG_FICTITIOUS) == 0) {
 		seg = &vm_phys_segs[m->segind];
 		if ((mpte == NULL || mpte->ref_count >= L3C_ENTRIES) &&
 		    (m->phys_addr & ~L3C_OFFSET) >= seg->start &&
