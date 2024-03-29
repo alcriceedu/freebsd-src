@@ -471,7 +471,7 @@ static int pmap_enter_l3c(pmap_t pmap, vm_offset_t va, pt_entry_t l3e, u_int fla
 static int pmap_insert_pt_page(pmap_t pmap, vm_page_t mpte, bool promoted,
     bool all_l3e_AF_set);
 static pt_entry_t pmap_load_l3c(pt_entry_t *l3p);
-static void pmap_promote_l3c(pmap_t pmap, pd_entry_t *l3p, vm_offset_t va);
+static bool pmap_promote_l3c(pmap_t pmap, pd_entry_t *l3p, vm_offset_t va);
 static void pmap_mask_set_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va,
     vm_offset_t *vap, vm_offset_t va_next, pt_entry_t mask, pt_entry_t nbits);
 static bool pmap_pv_insert_l3c(pmap_t pmap, vm_offset_t va, vm_page_t m,
@@ -4714,13 +4714,21 @@ setl3:
 /*
  * XXX
  */
-static void
+static bool
 pmap_promote_l3c(pmap_t pmap, pd_entry_t *l3p, vm_offset_t va)
 {
 	pd_entry_t firstl3c, *l3, oldl3, pa;
 	register_t intr;
 
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
+
+	/*
+	 * Currently, this function only supports promotion on stage 1 pmaps
+	 * because it tests stage 1 specific fields and performs a break-
+	 * before-make sequence that is incorrect for stage 2 pmaps.
+	 */
+	if (pmap->pm_stage != PM_STAGE1 || !pmap_ps_enabled(pmap))
+		return (false);
 
 	/*
 	 * Compute the address of the first L3 entry in the superpage
@@ -4739,7 +4747,7 @@ pmap_promote_l3c(pmap_t pmap, pd_entry_t *l3p, vm_offset_t va)
 		atomic_add_long(&pmap_l3c_p_failures, 1);
 		CTR2(KTR_PMAP, "pmap_promote_l3c: failure for va %#lx"
 		    " in pmap %p", va, pmap);
-		return;
+		return (false);
 	}
 
 	/*
@@ -4782,7 +4790,7 @@ set_l3:
 			atomic_add_long(&pmap_l3c_p_failures, 1);
 			CTR2(KTR_PMAP, "pmap_promote_l3c: failure for va %#lx"
 			    " in pmap %p", va, pmap);
-			return;
+			return (false);
 		}
 		pa -= PAGE_SIZE;
 	}
@@ -4809,6 +4817,7 @@ set_l3:
 	atomic_add_long(&pmap_l3c_promotions, 1);
 	CTR2(KTR_PMAP, "pmap_promote_l3c: success for va %#lx in pmap %p",
 	    va, pmap);
+	return (true);
 }
 #endif /* VM_NRESERVLEVEL > 0 */
 
@@ -4929,9 +4938,8 @@ pmap_enter(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 	pv_entry_t pv;
 	vm_paddr_t opa, pa;
 	vm_page_t mpte, om;
-	struct vm_phys_seg *seg;
 	boolean_t nosleep;
-	int lvl, rv;
+	int full_lvl, l3c_rv, lvl, rv;
 
 	KASSERT(ADDR_IS_CANONICAL(va),
 	    ("%s: Address not in canonical form: %lx", __func__, va));
@@ -5232,24 +5240,16 @@ validate:
 #if VM_NRESERVLEVEL > 0
 	/*
 	 * Try to promote from level 3 pages to a level 3 contiguous superpage,
-	 * and then to a level 2 superpage. This currently only works on
-	 * stage 1 pmaps as pmap_promote_l2 looks at stage 1 specific fields
-	 * and performs a break-before-make sequence that is incorrect for a
-	 * stage 2 pmap.
+	 * and then to a level 2 superpage.
 	 */
-	if (pmap_ps_enabled(pmap) && pmap->pm_stage == PM_STAGE1 &&
-	    (m->flags & PG_FICTITIOUS) == 0) {
-		seg = &vm_phys_segs[m->segind];
+	if ((m->flags & PG_FICTITIOUS) == 0) {
+		l3c_rv = false;
 		if ((mpte == NULL || mpte->ref_count >= L3C_ENTRIES) &&
-		    (m->phys_addr & ~L3C_OFFSET) >= seg->start &&
-		    seg->first_page[atop((m->phys_addr & ~L3C_OFFSET) -
-		    seg->start)].psind >= 1)
-			pmap_promote_l3c(pmap, l3, va);
+		    (full_lvl = vm_reserv_level_iffullpop(m)) >= 0)
+			l3c_rv = pmap_promote_l3c(pmap, l3, va);
 		if ((mpte == NULL || mpte->ref_count == NL3PG) &&
-		    (m->phys_addr & ~L2_OFFSET) >= seg->start &&
-		    seg->first_page[atop((m->phys_addr & ~L2_OFFSET) -
-		    seg->start)].psind >= 2)
-			(void)pmap_promote_l2(pmap, pde, va, mpte, &lock);
+		    full_lvl >= 1 && l3c_rv)
+			pmap_promote_l2(pmap, pde, va, mpte, &lock);
 	}
 #endif
 
