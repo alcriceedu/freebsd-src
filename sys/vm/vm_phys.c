@@ -253,6 +253,35 @@ vm_phys_domain_match(int prefer, vm_paddr_t low, vm_paddr_t high)
 #endif
 }
 
+void
+vm_phys_high_order_free_info(void *buf)
+{
+	struct vm_freelist *fl;
+	struct sbuf *sbuf = buf;
+	int dom, flind, oind, pind;
+
+	for (dom = 0; dom < vm_ndomains; dom++) {
+		sbuf_printf(sbuf,"\nDOMAIN %d:\n", dom);
+		for (flind = 0; flind < vm_nfreelists; flind++) {
+			sbuf_printf(sbuf, "\nFREE LIST %d:\n"
+			    "\n  ORDER (SIZE)  |  NUMBER"
+			    "\n              ", flind);
+			for (pind = 0; pind < VM_NFREEPOOL; pind++)
+				sbuf_printf(sbuf, "  |  POOL %d", pind);
+			for (oind = VM_NFREEORDER - 1; oind >= 9; oind--) {
+				sbuf_printf(sbuf, "  %2d (%6dM)", oind,
+				    1 << (PAGE_SHIFT - 20 + oind));
+				for (pind = 0; pind < VM_NFREEPOOL; pind++) {
+				fl = vm_phys_free_queues[dom][flind][pind];
+					sbuf_printf(sbuf, "  |  %6d",
+					    fl[oind].lcnt);
+				}
+				sbuf_printf(sbuf, "\n");
+			}
+		}
+	}
+}
+
 /*
  * Outputs the state of the physical memory allocator, specifically,
  * the amount of physical memory in each free list.

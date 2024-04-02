@@ -88,6 +88,8 @@
 #include <sys/mount.h>
 #include <sys/racct.h>
 #include <sys/resourcevar.h>
+#include <sys/sbuf.h>
+#include <sys/sysctl.h>
 #include <sys/sched.h>
 #include <sys/sdt.h>
 #include <sys/signalvar.h>
@@ -2083,6 +2085,31 @@ vm_pageout_lowmem(void)
 
 	return (ret);
 }
+
+static SYSCTL_NODE(_vm, OID_AUTO, daemon, CTLFLAG_RD | CTLFLAG_MPSAFE, 0,
+    "Page Daemon Info");
+static int sysctl_vm_daemon_high_order_free(SYSCTL_HANDLER_ARGS);
+SYSCTL_OID(_vm_daemon, OID_AUTO, high_order_free,
+    CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE, NULL, 0,
+    sysctl_vm_daemon_high_order_free, "A",
+    "Free Memory in Higher Order Buddy Queues");
+
+static int
+sysctl_vm_daemon_high_order_free(SYSCTL_HANDLER_ARGS)
+{
+	struct sbuf sbuf;
+	int error;
+
+	error = sysctl_wire_old_buffer(req, 0);
+	if (error != 0)
+		return (error);
+	sbuf_new_for_sysctl(&sbuf, NULL, 128 * vm_ndomains, req);
+	vm_phys_high_order_free_info(&sbuf);
+	error = sbuf_finish(&sbuf);
+	sbuf_delete(&sbuf);
+	return (error);
+}
+
 
 static void
 vm_pageout_worker(void *arg)
