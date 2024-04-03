@@ -289,7 +289,7 @@ vm_phys_high_order_free_info(void *buf)
 	int free_n_base_pages;
 
 	free_n_base_pages = vm_phys_high_order_free_count(-1);
-	sbuf_printf(sbuf," %d\n", free_n_base_pages);
+	sbuf_printf(sbuf,"%d\n", free_n_base_pages);
 	sbuf_printf(sbuf,"TOTAL in number of base pages: %d\n", free_n_base_pages);
 
 	for (dom = 0; dom < vm_ndomains; dom++) {

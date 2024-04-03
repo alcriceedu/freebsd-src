@@ -233,6 +233,16 @@ static COUNTER_U64_DEFINE_EARLY(vm_reserv_reclaimed);
 SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, reclaimed, CTLFLAG_RD,
     &vm_reserv_reclaimed, "Cumulative number of reclaimed reservations");
 
+static COUNTER_U64_DEFINE_EARLY(vm_reserv_alloc_failed);
+SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, alloc_failed, CTLFLAG_RD,
+    &vm_reserv_alloc_failed, "Cumulative number of reservation allocation failures");
+static COUNTER_U64_DEFINE_EARLY(vm_reserv_alloc_page_failed);
+SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, alloc_page_failed, CTLFLAG_RD,
+    &vm_reserv_alloc_page_failed, "Cumulative number of reservation allocation failures for single-page requests");
+static COUNTER_U64_DEFINE_EARLY(vm_reserv_alloc_contig_failed);
+SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, alloc_contig_failed, CTLFLAG_RD,
+    &vm_reserv_alloc_contig_failed, "Cumulative number of reservation allocation failures for contig requests");
+
 /*
  * The object lock pool is used to synchronize the rvq.  We can not use a
  * pool mutex because it is required before malloc works.
@@ -757,6 +767,8 @@ out:
 		vm_domain_free_unlock(vmd);
 		if (m == NULL) {
 			vm_domain_freecnt_inc(vmd, npages);
+			counter_u64_add(vm_reserv_alloc_failed, 1);
+			counter_u64_add(vm_reserv_alloc_contig_failed, 1);
 			return (NULL);
 		}
 	} else
@@ -904,6 +916,8 @@ out:
 		vm_domain_free_unlock(vmd);
 		if (m == NULL) {
 			vm_domain_freecnt_inc(vmd, 1);
+			counter_u64_add(vm_reserv_alloc_failed, 1);
+			counter_u64_add(vm_reserv_alloc_page_failed, 1);
 			return (NULL);
 		}
 	} else
