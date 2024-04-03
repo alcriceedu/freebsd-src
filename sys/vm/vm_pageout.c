@@ -2088,6 +2088,7 @@ vm_pageout_lowmem(void)
 
 static SYSCTL_NODE(_vm, OID_AUTO, daemon, CTLFLAG_RD | CTLFLAG_MPSAFE, 0,
     "Page Daemon Info");
+
 static int sysctl_vm_daemon_high_order_free(SYSCTL_HANDLER_ARGS);
 SYSCTL_OID(_vm_daemon, OID_AUTO, high_order_free,
     CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE, NULL, 0,
@@ -2109,6 +2110,26 @@ sysctl_vm_daemon_high_order_free(SYSCTL_HANDLER_ARGS)
 	sbuf_delete(&sbuf);
 	return (error);
 }
+
+static int sysctl_vm_daemon_free_count(SYSCTL_HANDLER_ARGS);
+SYSCTL_OID(_vm_daemon, OID_AUTO, free_count,
+    CTLTYPE_U32 | CTLFLAG_RD | CTLFLAG_MPSAFE, NULL, 0,
+    sysctl_vm_daemon_free_count, "IU",
+    "Total Free Memory in number of base pages");
+
+static int
+sysctl_vm_daemon_free_count(SYSCTL_HANDLER_ARGS)
+{
+	uint32_t v;
+	int i;
+
+	v = 0;
+	for (i = 0; i < vm_ndomains; i++)
+		v += VM_DOMAIN(i)->vmd_free_count;
+
+	return (SYSCTL_OUT(req, &v, sizeof(v)));
+}
+
 
 
 static void

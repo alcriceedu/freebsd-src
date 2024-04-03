@@ -87,6 +87,7 @@ void vm_phys_early_startup(void);
 int vm_phys_avail_largest(void);
 vm_paddr_t vm_phys_avail_size(int i);
 bool vm_phys_is_dumpable(vm_paddr_t pa);
+int vm_phys_high_order_free_count(int domain);
 void vm_phys_high_order_free_info(void *sbuf);
 
 static inline int

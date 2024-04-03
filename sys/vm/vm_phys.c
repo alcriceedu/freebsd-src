@@ -253,12 +253,44 @@ vm_phys_domain_match(int prefer, vm_paddr_t low, vm_paddr_t high)
 #endif
 }
 
+/*
+ * Returns the amount of free memory in the higher order buddy queues.
+ * Returns in terms of the number of base pages.
+ * Looks at the specified domain.
+ * If a negative domain number is specified, looks at all domains.
+ */
+int
+vm_phys_high_order_free_count(int domain)
+{
+	struct vm_freelist *fl;
+	int dom, flind, oind, pind;
+	int free_n_base_pages;
+
+	free_n_base_pages = 0;
+	for (dom = 0; dom < vm_ndomains && (dom == domain || domain < 0); dom++) {
+		for (flind = 0; flind < vm_nfreelists; flind++) {
+			for (oind = VM_NFREEORDER - 1; oind >= 9; oind--) {
+				for (pind = 0; pind < VM_NFREEPOOL; pind++) {
+					fl = vm_phys_free_queues[dom][flind][pind];
+					free_n_base_pages += (1 << oind) * fl[oind].lcnt;
+				}
+			}
+		}
+	}
+	return (free_n_base_pages);
+}
+
 void
 vm_phys_high_order_free_info(void *buf)
 {
 	struct vm_freelist *fl;
 	struct sbuf *sbuf = buf;
 	int dom, flind, oind, pind;
+	int free_n_base_pages;
+
+	free_n_base_pages = vm_phys_high_order_free_count(-1);
+	sbuf_printf(sbuf," %d\n", free_n_base_pages);
+	sbuf_printf(sbuf,"TOTAL in number of base pages: %d\n", free_n_base_pages);
 
 	for (dom = 0; dom < vm_ndomains; dom++) {
 		sbuf_printf(sbuf,"\nDOMAIN %d:\n", dom);
@@ -268,11 +300,12 @@ vm_phys_high_order_free_info(void *buf)
 			    "\n              ", flind);
 			for (pind = 0; pind < VM_NFREEPOOL; pind++)
 				sbuf_printf(sbuf, "  |  POOL %d", pind);
+			sbuf_printf(sbuf, "\n");
 			for (oind = VM_NFREEORDER - 1; oind >= 9; oind--) {
 				sbuf_printf(sbuf, "  %2d (%6dM)", oind,
 				    1 << (PAGE_SHIFT - 20 + oind));
 				for (pind = 0; pind < VM_NFREEPOOL; pind++) {
-				fl = vm_phys_free_queues[dom][flind][pind];
+					fl = vm_phys_free_queues[dom][flind][pind];
 					sbuf_printf(sbuf, "  |  %6d",
 					    fl[oind].lcnt);
 				}
