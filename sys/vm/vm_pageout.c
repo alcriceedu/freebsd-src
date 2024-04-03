@@ -110,6 +110,7 @@
 #include <vm/vm_pager.h>
 #include <vm/vm_phys.h>
 #include <vm/vm_pagequeue.h>
+#include <vm/vm_reserv.h>
 #include <vm/swap_pager.h>
 #include <vm/vm_extern.h>
 #include <vm/uma.h>
@@ -2126,6 +2127,38 @@ sysctl_vm_daemon_free_count(SYSCTL_HANDLER_ARGS)
 	v = 0;
 	for (i = 0; i < vm_ndomains; i++)
 		v += VM_DOMAIN(i)->vmd_free_count;
+
+	return (SYSCTL_OUT(req, &v, sizeof(v)));
+}
+
+static int sysctl_vm_daemon_partpop_free_count(SYSCTL_HANDLER_ARGS);
+SYSCTL_OID(_vm_daemon, OID_AUTO, partpop_free_count,
+    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MPSAFE, NULL, 0,
+    sysctl_vm_daemon_partpop_free_count, "I",
+    "Number of free base pages in partially populated reservations");
+
+static int
+sysctl_vm_daemon_partpop_free_count(SYSCTL_HANDLER_ARGS)
+{
+	int v;
+
+	v = vm_reserv_partpop_free_count(-1);
+
+	return (SYSCTL_OUT(req, &v, sizeof(v)));
+}
+
+static int sysctl_vm_daemon_partpop_num(SYSCTL_HANDLER_ARGS);
+SYSCTL_OID(_vm_daemon, OID_AUTO, partpop_num,
+    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MPSAFE, NULL, 0,
+    sysctl_vm_daemon_partpop_num, "I",
+    "Number of partially populated reservations");
+
+static int
+sysctl_vm_daemon_partpop_num(SYSCTL_HANDLER_ARGS)
+{
+	int v;
+
+	v = vm_reserv_partpop_num(-1);
 
 	return (SYSCTL_OUT(req, &v, sizeof(v)));
 }

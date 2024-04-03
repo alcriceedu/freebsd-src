@@ -294,6 +294,48 @@ sysctl_vm_reserv_fullpop(SYSCTL_HANDLER_ARGS)
 	return (sysctl_handle_int(oidp, &fullpop, 0, req));
 }
 
+int
+vm_reserv_partpop_free_count(int domain)
+{
+	vm_reserv_t rv;
+	int dom, level, unused_pages;
+
+	unused_pages = 0;
+	for (dom = 0; dom < vm_ndomains && (dom == domain || domain < 0); dom++) {
+		for (level = 0; level < VM_NRESERVLEVEL; level++) {
+			vm_reserv_domain_lock(dom);
+			TAILQ_FOREACH(rv, &vm_rvd[dom].partpop, partpopq) {
+				if (rv == &vm_rvd[dom].marker)
+					continue;
+				unused_pages += VM_LEVEL_0_NPAGES - rv->popcnt;
+			}
+			vm_reserv_domain_unlock(dom);
+		}
+	}
+	return (unused_pages);
+}
+
+int
+vm_reserv_partpop_num(int domain)
+{
+	vm_reserv_t rv;
+	int counter, dom, level;
+
+	counter = 0;
+	for (dom = 0; dom < vm_ndomains && (dom == domain || domain < 0); dom++) {
+		for (level = 0; level < VM_NRESERVLEVEL; level++) {
+			vm_reserv_domain_lock(dom);
+			TAILQ_FOREACH(rv, &vm_rvd[dom].partpop, partpopq) {
+				if (rv == &vm_rvd[dom].marker)
+					continue;
+				counter++;
+			}
+			vm_reserv_domain_unlock(dom);
+		}
+	}
+	return (counter);
+}
+
 /*
  * Describes the current state of the partially populated reservation queue.
  */
