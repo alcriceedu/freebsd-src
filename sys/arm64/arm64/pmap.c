@@ -4717,7 +4717,7 @@ setl3:
 static bool
 pmap_promote_l3c(pmap_t pmap, pd_entry_t *l3p, vm_offset_t va)
 {
-	pd_entry_t firstl3c, *l3, oldl3, pa;
+	pd_entry_t all_l3e_AF, firstl3c, *l3, oldl3, pa;
 	register_t intr;
 
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
@@ -4740,10 +4740,9 @@ pmap_promote_l3c(pmap_t pmap, pd_entry_t *l3p, vm_offset_t va)
 	firstl3c = pmap_load(l3p);
 
 	/*
-	 * Check that the first L3 entry is aligned and has its access
-	 * flag set.
+	 * Check that the first L3 entry is aligned.
 	 */
-	if (((firstl3c & (~ATTR_MASK | ATTR_AF)) & L3C_OFFSET) != ATTR_AF) {
+	if (((firstl3c & ~ATTR_MASK) & L3C_OFFSET) != 0) {
 		atomic_add_long(&pmap_l3c_p_failures, 1);
 		CTR2(KTR_PMAP, "pmap_promote_l3c: failure for va %#lx"
 		    " in pmap %p", va, pmap);
@@ -4770,6 +4769,7 @@ set_first:
 	 * Check that the rest of the L3 entries are compatible with the first,
 	 * and convert clean read-write mappings to read-only mappings.
 	 */
+	all_l3e_AF = firstl3c & ATTR_AF;
 	pa = firstl3c + L3C_SIZE - PAGE_SIZE;
 	for (l3 = l3p + L3C_ENTRIES - 1; l3 > l3p; l3--) {
 		oldl3 = pmap_load(l3);
@@ -4786,30 +4786,34 @@ set_l3:
 				goto set_l3;
 			oldl3 &= ~ATTR_SW_DBM;
 		}
-		if (oldl3 != pa) {
+		if ((oldl3 & ~ATTR_AF) != (pa & ~ATTR_AF)) {
 			atomic_add_long(&pmap_l3c_p_failures, 1);
 			CTR2(KTR_PMAP, "pmap_promote_l3c: failure for va %#lx"
 			    " in pmap %p", va, pmap);
 			return (false);
 		}
+		all_l3e_AF &= oldl3;
 		pa -= PAGE_SIZE;
 	}
 	intr = intr_disable();
 
 	/*
-	 * Clear the valid bit for each L3 entry.
+	 * Clear the valid and accessed bits for each L3 entry.
 	 */
 	for (l3 = l3p; l3 < l3p + L3C_ENTRIES; l3++)
-		pmap_clear_bits(l3, ATTR_DESCR_VALID);
+		pmap_clear_bits(l3, ATTR_DESCR_VALID | ATTR_AF);
 
 	pmap_invalidate_range(pmap, va & ~L3C_OFFSET, (va + L3C_SIZE) &
 	    ~L3C_OFFSET, true);
 
 	/*
-	 * Remake the mappings with the contiguous bit set.
+	 * Remake the mappings with the contiguous bit set
+	 * unconditionally and the accessed bit set if all of
+	 * the original L3 entries had their accessed bits set.
 	 */
 	for (l3 = l3p; l3 < l3p + L3C_ENTRIES; l3++)
-		pmap_set_bits(l3, ATTR_CONTIGUOUS | ATTR_DESCR_VALID);
+		pmap_set_bits(l3, ATTR_CONTIGUOUS | ATTR_DESCR_VALID
+		    | all_l3e_AF);
 
 	dsb(ishst);
 	intr_restore(intr);
@@ -5737,6 +5741,7 @@ static vm_page_t
 pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va, vm_page_t m,
     vm_prot_t prot, vm_page_t mpte, struct rwlock **lockp)
 {
+	struct vm_phys_seg *seg;
 	pd_entry_t *pde;
 	pt_entry_t *l1, *l2, *l3, l3_val;
 	vm_paddr_t pa;
@@ -5868,21 +5873,35 @@ pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va, vm_page_t m,
 
 #if VM_NRESERVLEVEL > 0
 	/*
-	 * If both the PTP and the reservation are fully populated, then
-	 * attempt promotion.
+	 * Try to promote from level 3 pages to a level 3 contiguous superpage,
+	 * and then to a level 2 superpage. This currently only works on
+	 * stage 1 pmaps as pmap_promote_l2 looks at stage 1 specific fields
+	 * and performs a break-before-make sequence that is incorrect for a
+	 * stage 2 pmap.
 	 */
-	if ((mpte == NULL || mpte->ref_count == NL3PG) &&
-	    (m->flags & PG_FICTITIOUS) == 0 &&
-	    vm_reserv_level_iffullpop(m) == 0) {
-		if (l2 == NULL)
-			l2 = pmap_pde(pmap, va, &lvl);
+	if (pmap_ps_enabled(pmap) && pmap->pm_stage == PM_STAGE1 &&
+	    (m->flags & PG_FICTITIOUS) == 0) {
+		seg = &vm_phys_segs[m->segind];
+		if ((mpte == NULL || mpte->ref_count >= L3C_ENTRIES) &&
+		    (m->phys_addr & ~L3C_OFFSET) >= seg->start &&
+		    seg->first_page[atop((m->phys_addr & ~L3C_OFFSET) -
+		    seg->start)].psind >= 1)
+			pmap_promote_l3c(pmap, l3, va);
+		if ((mpte == NULL || mpte->ref_count == NL3PG) &&
+		    (m->phys_addr & ~L2_OFFSET) >= seg->start &&
+		    seg->first_page[atop((m->phys_addr & ~L2_OFFSET) -
+		    seg->start)].psind >= 2) {
+			if (l2 == NULL)
+				l2 = pmap_pde(pmap, va, &lvl);
 
-		/*
-		 * If promotion succeeds, then the next call to this function
-		 * should not be given the unmapped PTP as a hint.
-		 */
-		if (pmap_promote_l2(pmap, l2, va, mpte, lockp))
-			mpte = NULL;
+			/*
+			 * If promotion succeeds, then the next call to this
+			 * function should not be given the unmapped PTP as
+			 * a hint.
+			 */
+			if (pmap_promote_l2(pmap, l2, va, mpte, lockp))
+				mpte = NULL;
+		}
 	}
 #endif
 
