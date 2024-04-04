@@ -2090,6 +2090,7 @@ vm_pageout_lowmem(void)
 static SYSCTL_NODE(_vm, OID_AUTO, daemon, CTLFLAG_RD | CTLFLAG_MPSAFE, 0,
     "Page Daemon Info");
 
+#if VM_NRESERVLEVEL > 0
 static int sysctl_vm_daemon_high_order_free(SYSCTL_HANDLER_ARGS);
 SYSCTL_OID(_vm_daemon, OID_AUTO, high_order_free,
     CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE, NULL, 0,
@@ -2163,6 +2164,18 @@ sysctl_vm_daemon_partpop_num(SYSCTL_HANDLER_ARGS)
 	return (SYSCTL_OUT(req, &v, sizeof(v)));
 }
 
+static COUNTER_U64_DEFINE_EARLY(vm_daemon_reserv_reclaim);
+SYSCTL_COUNTER_U64(_vm_daemon, OID_AUTO, reserv_reclaim, CTLFLAG_RD,
+    &vm_daemon_reserv_reclaim, "Cumulative number of times that the page daemon tried to proactively reclaim reservations to recover physical contiguity before it's too late");
+static int __read_frequently vm_daemon_reserv_reclaim_ratio = 5;
+SYSCTL_INT(_vm_daemon, OID_AUTO, reserv_reclaim_ratio, CTLFLAG_RDTUN | CTLFLAG_NOFETCH,
+    &vm_daemon_reserv_reclaim_ratio, 0, "When total free memory is this times as much as higher-order free memory or more, try to proactively reclaim reservations");
+static int __read_frequently vm_daemon_reserv_reclaim_disable_low_count = 51200;
+SYSCTL_INT(_vm_daemon, OID_AUTO, reserv_reclaim_disable_low_count, CTLFLAG_RDTUN | CTLFLAG_NOFETCH,
+    &vm_daemon_reserv_reclaim_disable_low_count, 0, "When total free memory is less than this many base pages, don't bother trying to proactively reclaim reservations");
+#endif
+
+
 
 
 static void
@@ -2170,12 +2183,13 @@ vm_pageout_worker(void *arg)
 {
 	struct vm_domain *vmd;
 	u_int ofree;
-	int addl_shortage, domain, shortage;
+	int addl_shortage, domain, shortage, reserv_shortage;
 	bool target_met;
 
 	domain = (uintptr_t)arg;
 	vmd = VM_DOMAIN(domain);
 	shortage = 0;
+	reserv_shortage = 0;
 	target_met = true;
 
 	/*
@@ -2250,6 +2264,16 @@ vm_pageout_worker(void *arg)
 		 */
 		shortage = vm_pageout_active_target(vmd) + addl_shortage;
 		vm_pageout_scan_active(vmd, shortage);
+
+#if VM_NRESERVLEVEL > 0
+		if (vmd->vmd_free_count >=
+		    vm_daemon_reserv_reclaim_disable_low_count) {
+			reserv_shortage = (((int)vmd->vmd_free_count) - vm_phys_high_order_free_count(domain) * vm_daemon_reserv_reclaim_ratio) / (1 << VM_LEVEL_0_ORDER);
+			if (reserv_shortage > 0) {
+				counter_u64_add(vm_daemon_reserv_reclaim, 1);
+			}
+		}
+#endif
 	}
 }
 
@@ -2419,6 +2443,9 @@ vm_pageout_init(void)
 	 */
 	if (vm_page_max_user_wired == 0)
 		vm_page_max_user_wired = 4 * freecount / 5;
+
+	TUNABLE_INT_FETCH("vm.daemon.reserv_reclaim_ratio", &vm_daemon_reserv_reclaim_ratio);
+	TUNABLE_INT_FETCH("vm.daemon.reserv_reclaim_disable_low_count", &vm_daemon_reserv_reclaim_disable_low_count);
 }
 
 /*
