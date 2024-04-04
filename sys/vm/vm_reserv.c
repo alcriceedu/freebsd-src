@@ -236,6 +236,12 @@ SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, reclaimed, CTLFLAG_RD,
 static COUNTER_U64_DEFINE_EARLY(vm_reserv_alloc_failed);
 SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, alloc_failed, CTLFLAG_RD,
     &vm_reserv_alloc_failed, "Cumulative number of reservation allocation failures");
+static COUNTER_U64_DEFINE_EARLY(vm_reserv_alloc_page_success_new);
+SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, alloc_page_success_new, CTLFLAG_RD,
+    &vm_reserv_alloc_page_success_new, "Cumulative number of reservation allocation successes for single-page requests");
+static COUNTER_U64_DEFINE_EARLY(vm_reserv_alloc_page_success_exist);
+SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, alloc_page_success_exist, CTLFLAG_RD,
+    &vm_reserv_alloc_page_success_exist, "Cumulative number of page allocation successes from reservations for single-page requests");
 static COUNTER_U64_DEFINE_EARLY(vm_reserv_alloc_page_failed);
 SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, alloc_page_failed, CTLFLAG_RD,
     &vm_reserv_alloc_page_failed, "Cumulative number of reservation allocation failures for single-page requests");
@@ -771,8 +777,11 @@ out:
 			counter_u64_add(vm_reserv_alloc_contig_failed, 1);
 			return (NULL);
 		}
-	} else
+	} else {
+		counter_u64_add(vm_reserv_alloc_failed, 1);
+		counter_u64_add(vm_reserv_alloc_contig_failed, 1);
 		return (NULL);
+	}
 	KASSERT(vm_page_domain(m) == domain,
 	    ("vm_reserv_alloc_contig: Page domain does not match requested."));
 
@@ -859,6 +868,7 @@ vm_reserv_alloc_page(vm_object_t object, vm_pindex_t pindex, int domain,
 			vm_reserv_populate(rv, index);
 out:
 		vm_reserv_unlock(rv);
+		counter_u64_add(vm_reserv_alloc_page_success_exist, 1);
 		return (m);
 	}
 
@@ -920,8 +930,11 @@ out:
 			counter_u64_add(vm_reserv_alloc_page_failed, 1);
 			return (NULL);
 		}
-	} else
+	} else {
+		counter_u64_add(vm_reserv_alloc_failed, 1);
+		counter_u64_add(vm_reserv_alloc_page_failed, 1);
 		return (NULL);
+	}
 	rv = vm_reserv_from_page(m);
 	vm_reserv_lock(rv);
 	KASSERT(rv->pages == m,
@@ -931,6 +944,7 @@ out:
 	vm_reserv_populate(rv, index);
 	vm_reserv_unlock(rv);
 
+	counter_u64_add(vm_reserv_alloc_page_success_new, 1);
 	return (&rv->pages[index]);
 }
 
