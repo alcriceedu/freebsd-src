@@ -1223,6 +1223,82 @@ vm_reserv_reclaim_inactive(int domain)
 }
 
 /*
+ * Migrate the allocated pages of the given partially populated reservation
+ * elsewhere, releasing the entire reservation to the physical memory
+ * allocator.  This helps recover physical contiguity.
+ * Returns true if successful and false otherwise.
+ */
+static bool
+vm_reserv_migrate(vm_reserv_t rv)
+{
+
+	vm_reserv_assert_locked(rv);
+	CTR5(KTR_VM, "%s: rv %p object %p popcnt %d inpartpop %d",
+	    __FUNCTION__, rv, rv->object, rv->popcnt, rv->inpartpopq);
+	KASSERT(!rv->inpartpopq,
+	    ("vm_reserv_migrate: reserv %p's inpartpopq is TRUE", rv));
+	// TODO Now actually migrate vm_reserv_break(rv);
+	return (false);
+}
+
+int
+vm_reserv_partpop_reclaim(int domain, int shortage)
+{
+	vm_reserv_t rv;
+	int dom, level, reclaimed, attempts;
+
+	reclaimed = 0;
+	attempts = 0;
+	for (dom = 0; dom < vm_ndomains && (dom == domain || domain < 0); dom++) {
+		for (level = 0; level < VM_NRESERVLEVEL; level++) {
+RESCAN_FOR_RECLAIM:
+			vm_reserv_domain_lock(dom);
+			TAILQ_FOREACH(rv, &vm_rvd[dom].partpop, partpopq) {
+				/*
+				 * Skip the marker node.
+				 * Skip if the reservation is too populated;
+				 * migrating it would be costly.
+				 * A locked reservation is likely being updated
+				 * or reclaimed, so just skip ahead.
+				 */
+				attempts++;
+				if (rv != &vm_rvd[dom].marker &&
+				// TODO make this a sysctl tunable
+				    rv->popcnt <= 64 &&
+				    vm_reserv_trylock(rv)) {
+					vm_reserv_dequeue(rv);
+					vm_reserv_domain_unlock(dom);
+					if (!vm_reserv_migrate(rv)) {
+						/*
+						 * Put the reserv back into the
+						 * partpopq.
+						 */
+						vm_reserv_domain_lock(dom);
+						rv->inpartpopq = TRUE;
+						TAILQ_INSERT_HEAD(&vm_rvd[dom].partpop, rv, partpopq);
+						vm_reserv_domain_unlock(dom);
+					} else {
+						reclaimed++;
+					}
+					vm_reserv_unlock(rv);
+					/*
+					 * Don't try too many times.
+					 * Bound the number of attempts.
+					 */
+					if (reclaimed < shortage && attempts < shortage * 2)
+						goto RESCAN_FOR_RECLAIM;
+					else
+						goto OUT;
+				}
+			}
+			vm_reserv_domain_unlock(dom);
+		}
+	}
+OUT:
+	return (reclaimed);
+}
+
+/*
  * Determine whether this reservation has free pages that satisfy the given
  * request for contiguous physical memory.  Start searching from the lower
  * bound, defined by lo, and stop at the upper bound, hi.  Return the index

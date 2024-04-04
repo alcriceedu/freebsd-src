@@ -2167,6 +2167,9 @@ sysctl_vm_daemon_partpop_num(SYSCTL_HANDLER_ARGS)
 static COUNTER_U64_DEFINE_EARLY(vm_daemon_reserv_reclaim);
 SYSCTL_COUNTER_U64(_vm_daemon, OID_AUTO, reserv_reclaim, CTLFLAG_RD,
     &vm_daemon_reserv_reclaim, "Cumulative number of times that the page daemon tried to proactively reclaim reservations to recover physical contiguity before it's too late");
+static COUNTER_U64_DEFINE_EARLY(vm_daemon_reserv_reclaim_count);
+SYSCTL_COUNTER_U64(_vm_daemon, OID_AUTO, reserv_reclaim_count, CTLFLAG_RD,
+    &vm_daemon_reserv_reclaim_count, "Cumulative number of reservations proactively reclaimed");
 static int __read_frequently vm_daemon_reserv_reclaim_ratio = 5;
 SYSCTL_INT(_vm_daemon, OID_AUTO, reserv_reclaim_ratio, CTLFLAG_RDTUN | CTLFLAG_NOFETCH,
     &vm_daemon_reserv_reclaim_ratio, 0, "When total free memory is this times as much as higher-order free memory or more, try to proactively reclaim reservations");
@@ -2183,7 +2186,7 @@ vm_pageout_worker(void *arg)
 {
 	struct vm_domain *vmd;
 	u_int ofree;
-	int addl_shortage, domain, shortage, reserv_shortage;
+	int addl_shortage, domain, shortage, reserv_shortage, reserv_reclaimed;
 	bool target_met;
 
 	domain = (uintptr_t)arg;
@@ -2271,6 +2274,8 @@ vm_pageout_worker(void *arg)
 			reserv_shortage = (((int)vmd->vmd_free_count) - vm_phys_high_order_free_count(domain) * vm_daemon_reserv_reclaim_ratio) / (1 << VM_LEVEL_0_ORDER);
 			if (reserv_shortage > 0) {
 				counter_u64_add(vm_daemon_reserv_reclaim, 1);
+				reserv_reclaimed = vm_reserv_partpop_reclaim(domain, reserv_shortage);
+				counter_u64_add(vm_daemon_reserv_reclaim_count, reserv_reclaimed);
 			}
 		}
 #endif

@@ -68,6 +68,7 @@ vm_paddr_t	vm_reserv_startup(vm_offset_t *vaddr, vm_paddr_t end);
 vm_page_t	vm_reserv_to_superpage(vm_page_t m);
 int		vm_reserv_partpop_free_count(int domain);
 int		vm_reserv_partpop_num(int domain);
+int		vm_reserv_partpop_reclaim(int domain, int shortage);
 
 
 #endif	/* VM_NRESERVLEVEL > 0 */
