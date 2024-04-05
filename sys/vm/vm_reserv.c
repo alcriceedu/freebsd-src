@@ -1226,12 +1226,14 @@ vm_reserv_reclaim_inactive(int domain)
  * Breaks a reservation near the head of the partially populated reservation
  * queue, releasing its free pages to the physical memory allocator.  Breaking
  * happens only if popcnt is no greater than the upper bound.  Returns
- * TRUE if a reservation is broken and FALSE otherwise.
+ * the number of free base pages donated to the physical memory allocator.
+ * Therefore, it returns 0 if no reservation is broken.
  */
-bool
+int
 vm_reserv_reclaim_inactive_popcnt_upper(int domain, int popcnt)
 {
 	vm_reserv_t rv;
+	int ret;
 
 	vm_reserv_domain_lock(domain);
 	TAILQ_FOREACH(rv, &vm_rvd[domain].partpop, partpopq) {
@@ -1252,10 +1254,11 @@ vm_reserv_reclaim_inactive_popcnt_upper(int domain, int popcnt)
 	vm_reserv_domain_unlock(domain);
 	if (rv != NULL) {
 		vm_reserv_reclaim(rv);
+		ret = VM_LEVEL_0_NPAGES - rv->popcnt;
 		vm_reserv_unlock(rv);
-		return (true);
+		return (ret);
 	}
-	return (false);
+	return (0);
 }
 
 /*
@@ -1277,6 +1280,9 @@ vm_reserv_migrate(vm_reserv_t rv)
 	return (false);
 }
 
+/*
+ * Returns the number of reservations reclaimed.
+ */
 int
 vm_reserv_partpop_reclaim(int domain, int shortage)
 {
