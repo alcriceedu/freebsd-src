@@ -2176,6 +2176,21 @@ SYSCTL_INT(_vm_daemon, OID_AUTO, reserv_reclaim_ratio, CTLFLAG_RDTUN | CTLFLAG_N
 static int __read_frequently vm_daemon_reserv_reclaim_disable_low_count = 51200;
 SYSCTL_INT(_vm_daemon, OID_AUTO, reserv_reclaim_disable_low_count, CTLFLAG_RDTUN | CTLFLAG_NOFETCH,
     &vm_daemon_reserv_reclaim_disable_low_count, 0, "When total free memory is less than this many base pages, don't bother trying to proactively reclaim reservations");
+static int __read_frequently vm_daemon_reserv_reclaim_enabled = 0;
+SYSCTL_INT(_vm_daemon, OID_AUTO, reserv_reclaim_enabled, CTLFLAG_RDTUN | CTLFLAG_NOFETCH,
+    &vm_daemon_reserv_reclaim_enabled, 0, "Proactive reservation reclamation enabled?");
+static int __read_frequently vm_daemon_reserv_early_break_enabled = 0;
+SYSCTL_INT(_vm_daemon, OID_AUTO, reserv_early_break_enabled, CTLFLAG_RDTUN | CTLFLAG_NOFETCH,
+    &vm_daemon_reserv_early_break_enabled, 0, "Early reservation breaking enabled?");
+static int __read_frequently vm_daemon_reserv_early_break_ratio = 4;
+SYSCTL_INT(_vm_daemon, OID_AUTO, reserv_early_break_ratio, CTLFLAG_RDTUN | CTLFLAG_NOFETCH,
+    &vm_daemon_reserv_early_break_ratio, 0, "When total memory is this times as much as total free memory or more, try to do early reservation breaking");
+static COUNTER_U64_DEFINE_EARLY(vm_daemon_reserv_early_break);
+SYSCTL_COUNTER_U64(_vm_daemon, OID_AUTO, reserv_early_break, CTLFLAG_RD,
+    &vm_daemon_reserv_early_break, "Number of reservations that the page daemon has successfully broken early to help maintain physical contiguity before it's too late");
+static int __read_frequently vm_daemon_reserv_early_break_damp_factor = 4;
+SYSCTL_INT(_vm_daemon, OID_AUTO, reserv_early_break_damp_factor, CTLFLAG_RDTUN | CTLFLAG_NOFETCH,
+    &vm_daemon_reserv_early_break_damp_factor, 0, "The lower this is, the more aggressive early reservation breaking is");
 #endif
 
 
@@ -2186,7 +2201,8 @@ vm_pageout_worker(void *arg)
 {
 	struct vm_domain *vmd;
 	u_int ofree;
-	int addl_shortage, domain, shortage, reserv_shortage, reserv_reclaimed;
+	int addl_shortage, domain, shortage;
+	int reserv_shortage, reserv_reclaimed, break_count;
 	bool target_met;
 
 	domain = (uintptr_t)arg;
@@ -2269,13 +2285,30 @@ vm_pageout_worker(void *arg)
 		vm_pageout_scan_active(vmd, shortage);
 
 #if VM_NRESERVLEVEL > 0
-		if (vmd->vmd_free_count >=
+		if (vm_daemon_reserv_reclaim_enabled &&
+		    vmd->vmd_free_count >=
 		    vm_daemon_reserv_reclaim_disable_low_count) {
 			reserv_shortage = (((int)vmd->vmd_free_count) - vm_phys_high_order_free_count(domain) * vm_daemon_reserv_reclaim_ratio) / (1 << VM_LEVEL_0_ORDER);
 			if (reserv_shortage > 0) {
 				counter_u64_add(vm_daemon_reserv_reclaim, 1);
 				reserv_reclaimed = vm_reserv_partpop_reclaim(domain, reserv_shortage);
 				counter_u64_add(vm_daemon_reserv_reclaim_count, reserv_reclaimed);
+			}
+		}
+		if (vm_daemon_reserv_early_break_enabled &&
+		    vmd->vmd_free_count * vm_daemon_reserv_early_break_ratio <
+		    vmd->vmd_page_count) {
+			break_count = vm_reserv_partpop_num(domain);
+			// TODO make this sysctl tunable?
+			if (break_count > 256) {
+				break_count /= vm_daemon_reserv_early_break_damp_factor;
+			} else {
+				break_count = 0;
+			}
+			for (; break_count > 0; break_count--) {
+				if (vm_reserv_reclaim_inactive(domain)) {
+					counter_u64_add(vm_daemon_reserv_early_break, 1);
+				}
 			}
 		}
 #endif
@@ -2451,6 +2484,10 @@ vm_pageout_init(void)
 
 	TUNABLE_INT_FETCH("vm.daemon.reserv_reclaim_ratio", &vm_daemon_reserv_reclaim_ratio);
 	TUNABLE_INT_FETCH("vm.daemon.reserv_reclaim_disable_low_count", &vm_daemon_reserv_reclaim_disable_low_count);
+	TUNABLE_INT_FETCH("vm.daemon.reserv_reclaim_enabled", &vm_daemon_reserv_reclaim_enabled);
+	TUNABLE_INT_FETCH("vm.daemon.reserv_early_break_enabled", &vm_daemon_reserv_early_break_enabled);
+	TUNABLE_INT_FETCH("vm.daemon.reserv_early_break_ratio", &vm_daemon_reserv_early_break_ratio);
+	TUNABLE_INT_FETCH("vm.daemon.reserv_early_break_damp_factor", &vm_daemon_reserv_early_break_damp_factor);
 }
 
 /*
