@@ -2191,6 +2191,9 @@ SYSCTL_COUNTER_U64(_vm_daemon, OID_AUTO, reserv_early_break, CTLFLAG_RD,
 static int __read_frequently vm_daemon_reserv_early_break_damp_factor = 4;
 SYSCTL_INT(_vm_daemon, OID_AUTO, reserv_early_break_damp_factor, CTLFLAG_RWTUN | CTLFLAG_NOFETCH,
     &vm_daemon_reserv_early_break_damp_factor, 0, "The lower this is, the more aggressive early reservation breaking is");
+static int __read_frequently vm_daemon_reserv_early_break_popcnt_thld = 64;
+SYSCTL_INT(_vm_daemon, OID_AUTO, reserv_early_break_popcnt_thld, CTLFLAG_RWTUN | CTLFLAG_NOFETCH,
+    &vm_daemon_reserv_early_break_popcnt_thld, 0, "popcnt needs to be no greater than this for the reservation to be selected for early breaking");
 #endif
 
 
@@ -2306,7 +2309,7 @@ vm_pageout_worker(void *arg)
 				break_count = 0;
 			}
 			for (; break_count > 0; break_count--) {
-				if (vm_reserv_reclaim_inactive(domain)) {
+				if (vm_reserv_reclaim_inactive_popcnt_upper(domain, vm_daemon_reserv_early_break_popcnt_thld)) {
 					counter_u64_add(vm_daemon_reserv_early_break, 1);
 				}
 			}
@@ -2488,6 +2491,7 @@ vm_pageout_init(void)
 	TUNABLE_INT_FETCH("vm.daemon.reserv_early_break_enabled", &vm_daemon_reserv_early_break_enabled);
 	TUNABLE_INT_FETCH("vm.daemon.reserv_early_break_ratio", &vm_daemon_reserv_early_break_ratio);
 	TUNABLE_INT_FETCH("vm.daemon.reserv_early_break_damp_factor", &vm_daemon_reserv_early_break_damp_factor);
+	TUNABLE_INT_FETCH("vm.daemon.reserv_early_break_popcnt_thld", &vm_daemon_reserv_early_break_popcnt_thld);
 }
 
 /*

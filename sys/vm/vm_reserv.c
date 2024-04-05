@@ -1223,6 +1223,42 @@ vm_reserv_reclaim_inactive(int domain)
 }
 
 /*
+ * Breaks a reservation near the head of the partially populated reservation
+ * queue, releasing its free pages to the physical memory allocator.  Breaking
+ * happens only if popcnt is no greater than the upper bound.  Returns
+ * TRUE if a reservation is broken and FALSE otherwise.
+ */
+bool
+vm_reserv_reclaim_inactive_popcnt_upper(int domain, int popcnt)
+{
+	vm_reserv_t rv;
+
+	vm_reserv_domain_lock(domain);
+	TAILQ_FOREACH(rv, &vm_rvd[domain].partpop, partpopq) {
+		/*
+		 * A locked reservation is likely being updated or reclaimed,
+		 * so just skip ahead.
+		 */
+		if (rv != &vm_rvd[domain].marker && vm_reserv_trylock(rv)) {
+			if (rv->popcnt <= popcnt) {
+				vm_reserv_dequeue(rv);
+				break;
+			} else {
+				vm_reserv_unlock(rv);
+				continue;
+			}
+		}
+	}
+	vm_reserv_domain_unlock(domain);
+	if (rv != NULL) {
+		vm_reserv_reclaim(rv);
+		vm_reserv_unlock(rv);
+		return (true);
+	}
+	return (false);
+}
+
+/*
  * Migrate the allocated pages of the given partially populated reservation
  * elsewhere, releasing the entire reservation to the physical memory
  * allocator.  This helps recover physical contiguity.
@@ -1263,9 +1299,9 @@ RESCAN_FOR_RECLAIM:
 				 */
 				attempts++;
 				if (rv != &vm_rvd[dom].marker &&
-				// TODO make this a sysctl tunable
-				    rv->popcnt <= 64 &&
-				    vm_reserv_trylock(rv)) {
+				    vm_reserv_trylock(rv) &&
+				    // TODO make this a sysctl tunable
+				    rv->popcnt <= 64) {
 					vm_reserv_dequeue(rv);
 					vm_reserv_domain_unlock(dom);
 					if (!vm_reserv_migrate(rv)) {
