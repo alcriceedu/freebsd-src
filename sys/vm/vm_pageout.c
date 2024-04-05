@@ -2171,25 +2171,25 @@ static COUNTER_U64_DEFINE_EARLY(vm_daemon_reserv_reclaim_count);
 SYSCTL_COUNTER_U64(_vm_daemon, OID_AUTO, reserv_reclaim_count, CTLFLAG_RD,
     &vm_daemon_reserv_reclaim_count, "Cumulative number of reservations proactively reclaimed");
 static int __read_frequently vm_daemon_reserv_reclaim_ratio = 5;
-SYSCTL_INT(_vm_daemon, OID_AUTO, reserv_reclaim_ratio, CTLFLAG_RDTUN | CTLFLAG_NOFETCH,
+SYSCTL_INT(_vm_daemon, OID_AUTO, reserv_reclaim_ratio, CTLFLAG_RWTUN | CTLFLAG_NOFETCH,
     &vm_daemon_reserv_reclaim_ratio, 0, "When total free memory is this times as much as higher-order free memory or more, try to proactively reclaim reservations");
 static int __read_frequently vm_daemon_reserv_reclaim_disable_low_count = 51200;
-SYSCTL_INT(_vm_daemon, OID_AUTO, reserv_reclaim_disable_low_count, CTLFLAG_RDTUN | CTLFLAG_NOFETCH,
+SYSCTL_INT(_vm_daemon, OID_AUTO, reserv_reclaim_disable_low_count, CTLFLAG_RWTUN | CTLFLAG_NOFETCH,
     &vm_daemon_reserv_reclaim_disable_low_count, 0, "When total free memory is less than this many base pages, don't bother trying to proactively reclaim reservations");
 static int __read_frequently vm_daemon_reserv_reclaim_enabled = 0;
-SYSCTL_INT(_vm_daemon, OID_AUTO, reserv_reclaim_enabled, CTLFLAG_RDTUN | CTLFLAG_NOFETCH,
+SYSCTL_INT(_vm_daemon, OID_AUTO, reserv_reclaim_enabled, CTLFLAG_RWTUN | CTLFLAG_NOFETCH,
     &vm_daemon_reserv_reclaim_enabled, 0, "Proactive reservation reclamation enabled?");
 static int __read_frequently vm_daemon_reserv_early_break_enabled = 0;
-SYSCTL_INT(_vm_daemon, OID_AUTO, reserv_early_break_enabled, CTLFLAG_RDTUN | CTLFLAG_NOFETCH,
+SYSCTL_INT(_vm_daemon, OID_AUTO, reserv_early_break_enabled, CTLFLAG_RWTUN | CTLFLAG_NOFETCH,
     &vm_daemon_reserv_early_break_enabled, 0, "Early reservation breaking enabled?");
 static int __read_frequently vm_daemon_reserv_early_break_ratio = 4;
-SYSCTL_INT(_vm_daemon, OID_AUTO, reserv_early_break_ratio, CTLFLAG_RDTUN | CTLFLAG_NOFETCH,
+SYSCTL_INT(_vm_daemon, OID_AUTO, reserv_early_break_ratio, CTLFLAG_RWTUN | CTLFLAG_NOFETCH,
     &vm_daemon_reserv_early_break_ratio, 0, "When total memory is this times as much as total free memory or more, try to do early reservation breaking");
 static COUNTER_U64_DEFINE_EARLY(vm_daemon_reserv_early_break);
 SYSCTL_COUNTER_U64(_vm_daemon, OID_AUTO, reserv_early_break, CTLFLAG_RD,
     &vm_daemon_reserv_early_break, "Number of reservations that the page daemon has successfully broken early to help maintain physical contiguity before it's too late");
 static int __read_frequently vm_daemon_reserv_early_break_damp_factor = 4;
-SYSCTL_INT(_vm_daemon, OID_AUTO, reserv_early_break_damp_factor, CTLFLAG_RDTUN | CTLFLAG_NOFETCH,
+SYSCTL_INT(_vm_daemon, OID_AUTO, reserv_early_break_damp_factor, CTLFLAG_RWTUN | CTLFLAG_NOFETCH,
     &vm_daemon_reserv_early_break_damp_factor, 0, "The lower this is, the more aggressive early reservation breaking is");
 #endif
 
