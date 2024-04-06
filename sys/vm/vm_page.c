@@ -200,6 +200,10 @@ static int pgcache_zone_max_pcpu;
 SYSCTL_INT(_vm, OID_AUTO, pgcache_zone_max_pcpu,
     CTLFLAG_RDTUN | CTLFLAG_NOFETCH, &pgcache_zone_max_pcpu, 0,
     "Per-CPU page cache size");
+static int vm_pcpu_pgcache_enabled = 1;
+SYSCTL_INT(_vm, OID_AUTO, pcpu_pgcache_enabled,
+    CTLFLAG_RDTUN | CTLFLAG_NOFETCH, &vm_pcpu_pgcache_enabled, 0,
+    "Per-CPU page cache enabled?");
 
 /*
  * The cache page zone is initialized later since we need to be able to allocate
@@ -213,6 +217,12 @@ vm_page_init_cache_zones(void *dummy __unused)
 	int cache, domain, maxcache, pool;
 
 	TUNABLE_INT_FETCH("vm.pgcache_zone_max_pcpu", &pgcache_zone_max_pcpu);
+	TUNABLE_INT_FETCH("vm.pcpu_pgcache_enabled", &vm_pcpu_pgcache_enabled);
+	if (vm_pcpu_pgcache_enabled) {
+		printf("Per-CPU page cache enabled\n");
+	} else {
+		printf("Per-CPU page cache disabled\n");
+	}
 	maxcache = pgcache_zone_max_pcpu * mp_ncpus;
 	for (domain = 0; domain < vm_ndomains; domain++) {
 		vmd = VM_DOMAIN(domain);
@@ -220,10 +230,11 @@ vm_page_init_cache_zones(void *dummy __unused)
 			pgcache = &vmd->vmd_pgcache[pool];
 			pgcache->domain = domain;
 			pgcache->pool = pool;
-			pgcache->zone = uma_zcache_create("vm pgcache",
+			pgcache->zone = vm_pcpu_pgcache_enabled ?
+			    uma_zcache_create("vm pgcache",
 			    PAGE_SIZE, NULL, NULL, NULL, NULL,
 			    vm_page_zone_import, vm_page_zone_release, pgcache,
-			    UMA_ZONE_VM);
+			    UMA_ZONE_VM) : NULL;
 
 			/*
 			 * Limit each pool's zone to 0.1% of the pages in the
