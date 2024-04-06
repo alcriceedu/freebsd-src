@@ -4944,7 +4944,7 @@ pmap_enter(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 	vm_page_t mpte, om;
 	struct vm_phys_seg *seg;
 	boolean_t nosleep;
-	int lvl, rv;
+	int l3c_rv, lvl, rv;
 
 	KASSERT(ADDR_IS_CANONICAL(va),
 	    ("%s: Address not in canonical form: %lx", __func__, va));
@@ -5249,15 +5249,16 @@ validate:
 	 */
 	if ((m->flags & PG_FICTITIOUS) == 0) {
 		seg = &vm_phys_segs[m->segind];
+		l3c_rv = false;
 		if ((mpte == NULL || mpte->ref_count >= L3C_ENTRIES) &&
 		    (m->phys_addr & ~L3C_OFFSET) >= seg->start &&
 		    seg->first_page[atop((m->phys_addr & ~L3C_OFFSET) -
 		    seg->start)].psind >= 1)
-			pmap_promote_l3c(pmap, l3, va);
+			l3c_rv = pmap_promote_l3c(pmap, l3, va);
 		if ((mpte == NULL || mpte->ref_count == NL3PG) &&
 		    (m->phys_addr & ~L2_OFFSET) >= seg->start &&
 		    seg->first_page[atop((m->phys_addr & ~L2_OFFSET) -
-		    seg->start)].psind >= 2)
+		    seg->start)].psind >= 2 && l3c_rv)
 			(void)pmap_promote_l2(pmap, pde, va, mpte, &lock);
 	}
 #endif
@@ -5750,7 +5751,7 @@ pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va, vm_page_t m,
 	pd_entry_t *pde;
 	pt_entry_t *l1, *l2, *l3, l3_val;
 	vm_paddr_t pa;
-	int lvl;
+	int l3c_rv, lvl;
 
 	KASSERT(!VA_IS_CLEANMAP(va) ||
 	    (m->oflags & VPO_UNMANAGED) != 0,
@@ -5887,15 +5888,16 @@ pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va, vm_page_t m,
 	if (pmap_ps_enabled(pmap) && pmap->pm_stage == PM_STAGE1 &&
 	    (m->flags & PG_FICTITIOUS) == 0) {
 		seg = &vm_phys_segs[m->segind];
+		l3c_rv = false;
 		if ((mpte == NULL || mpte->ref_count >= L3C_ENTRIES) &&
 		    (m->phys_addr & ~L3C_OFFSET) >= seg->start &&
 		    seg->first_page[atop((m->phys_addr & ~L3C_OFFSET) -
 		    seg->start)].psind >= 1)
-			pmap_promote_l3c(pmap, l3, va);
+			l3c_rv = pmap_promote_l3c(pmap, l3, va);
 		if ((mpte == NULL || mpte->ref_count == NL3PG) &&
 		    (m->phys_addr & ~L2_OFFSET) >= seg->start &&
 		    seg->first_page[atop((m->phys_addr & ~L2_OFFSET) -
-		    seg->start)].psind >= 2) {
+		    seg->start)].psind >= 2 && l3c_rv) {
 			if (l2 == NULL)
 				l2 = pmap_pde(pmap, va, &lvl);
 
