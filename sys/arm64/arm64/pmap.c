@@ -4740,9 +4740,14 @@ pmap_promote_l3c(pmap_t pmap, pd_entry_t *l3p, vm_offset_t va)
 	firstl3c = pmap_load(l3p);
 
 	/*
-	 * Check that the first L3 entry is aligned.
+	 * Examine the first L3 entry. Abort if this L3E is ineligible for
+	 * promotion...
 	 */
-	if (((firstl3c & ~ATTR_MASK) & L3C_OFFSET) != 0) {
+	if ((firstl3c & ATTR_SW_NO_PROMOTE) != 0)
+		return (false);
+	/* ...is not properly aligned... */
+	if ((PTE_TO_PHYS(firstl3c) & L3C_OFFSET) != 0 ||
+	    ((firstl3c & ATTR_DESCR_MASK) != L3_PAGE)) { /* ...or is invalid. */
 		atomic_add_long(&pmap_l3c_p_failures, 1);
 		CTR2(KTR_PMAP, "pmap_promote_l3c: failure for va %#lx"
 		    " in pmap %p", va, pmap);
@@ -4763,6 +4768,8 @@ set_first:
 		if (!atomic_fcmpset_64(l3p, &firstl3c, firstl3c & ~ATTR_SW_DBM))
 			goto set_first;
 		firstl3c &= ~ATTR_SW_DBM;
+		CTR2(KTR_PMAP, "pmap_promote_l3c: protect for va %#lx"
+		    " in pmap %p", va & ~L3C_OFFSET, pmap);
 	}
 
 	/*
@@ -4770,9 +4777,16 @@ set_first:
 	 * and convert clean read-write mappings to read-only mappings.
 	 */
 	all_l3e_AF = firstl3c & ATTR_AF;
-	pa = firstl3c + L3C_SIZE - PAGE_SIZE;
+	pa = (PTE_TO_PHYS(firstl3c) | (firstl3c & ATTR_DESCR_MASK))
+	    + L3C_SIZE - PAGE_SIZE;
 	for (l3 = l3p + L3C_ENTRIES - 1; l3 > l3p; l3--) {
 		oldl3 = pmap_load(l3);
+		if ((PTE_TO_PHYS(oldl3) | (oldl3 & ATTR_DESCR_MASK)) != pa) {
+			atomic_add_long(&pmap_l3c_p_failures, 1);
+			CTR2(KTR_PMAP, "pmap_promote_l3c: failure for va %#lx"
+			    " in pmap %p", va, pmap);
+			return (false);
+		}
 set_l3:
 		if ((oldl3 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
 		    (ATTR_S1_AP(ATTR_S1_AP_RO) | ATTR_SW_DBM)) {
@@ -4785,8 +4799,12 @@ set_l3:
 			    ~ATTR_SW_DBM))
 				goto set_l3;
 			oldl3 &= ~ATTR_SW_DBM;
+			CTR2(KTR_PMAP, "pmap_promote_l3c: protect for va %#lx"
+			    " in pmap %p", (oldl3 & ~ATTR_MASK & L3C_OFFSET) |
+			    (va & ~L3C_OFFSET), pmap);
 		}
-		if ((oldl3 & ~ATTR_AF) != (pa & ~ATTR_AF)) {
+		if ((oldl3 & (ATTR_MASK & ~ATTR_AF)) !=
+		    (firstl3c & (ATTR_MASK & ~ATTR_AF))) {
 			atomic_add_long(&pmap_l3c_p_failures, 1);
 			CTR2(KTR_PMAP, "pmap_promote_l3c: failure for va %#lx"
 			    " in pmap %p", va, pmap);
@@ -4795,6 +4813,7 @@ set_l3:
 		all_l3e_AF &= oldl3;
 		pa -= PAGE_SIZE;
 	}
+
 	intr = intr_disable();
 
 	/*
@@ -4812,8 +4831,8 @@ set_l3:
 	 * the original L3 entries had their accessed bits set.
 	 */
 	for (l3 = l3p; l3 < l3p + L3C_ENTRIES; l3++)
-		pmap_set_bits(l3, ATTR_CONTIGUOUS | ATTR_DESCR_VALID
-		    | all_l3e_AF);
+		pmap_set_bits(l3, ATTR_CONTIGUOUS | ATTR_DESCR_VALID |
+		    all_l3e_AF);
 
 	dsb(ishst);
 	intr_restore(intr);
