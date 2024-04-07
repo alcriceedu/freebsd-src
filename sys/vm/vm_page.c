@@ -242,7 +242,8 @@ vm_page_init_cache_zones(void *dummy __unused)
 			 */
 			cache = maxcache != 0 ? maxcache :
 			    vmd->vmd_page_count / 1000;
-			uma_zone_set_maxcache(pgcache->zone, cache);
+			if (pgcache->zone)
+				uma_zone_set_maxcache(pgcache->zone, cache);
 		}
 	}
 }
