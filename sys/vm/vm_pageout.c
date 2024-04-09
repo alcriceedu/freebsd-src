@@ -2310,7 +2310,9 @@ vm_pageout_worker(void *arg)
 				 */
 				reclaimed = vm_reserv_reclaim_inactive_popcnt_upper(domain, vm_daemon_reserv_early_break_popcnt_thld);
 				break_count -= reclaimed;
-				counter_u64_add(vm_daemon_reserv_early_break, 1);
+				if (reclaimed > 0) {
+					counter_u64_add(vm_daemon_reserv_early_break, 1);
+				}
 			}
 		}
 #endif
