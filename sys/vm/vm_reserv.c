@@ -1284,7 +1284,7 @@ vm_reserv_migrate(vm_reserv_t rv)
  * Returns the number of reservations reclaimed.
  */
 int
-vm_reserv_partpop_reclaim(int domain, int shortage)
+vm_reserv_partpop_reclaim(int domain, int shortage, int popcnt_thld)
 {
 	vm_reserv_t rv;
 	int dom, level, reclaimed, attempts;
@@ -1305,22 +1305,22 @@ RESCAN_FOR_RECLAIM:
 				 */
 				attempts++;
 				if (rv != &vm_rvd[dom].marker &&
-				    vm_reserv_trylock(rv) &&
-				    // TODO make this a sysctl tunable
-				    rv->popcnt <= 64) {
-					vm_reserv_dequeue(rv);
-					vm_reserv_domain_unlock(dom);
-					if (!vm_reserv_migrate(rv)) {
-						/*
-						 * Put the reserv back into the
-						 * partpopq.
-						 */
-						vm_reserv_domain_lock(dom);
-						rv->inpartpopq = TRUE;
-						TAILQ_INSERT_HEAD(&vm_rvd[dom].partpop, rv, partpopq);
+				    vm_reserv_trylock(rv)) {
+					if (rv->popcnt <= popcnt_thld) {
+						vm_reserv_dequeue(rv);
 						vm_reserv_domain_unlock(dom);
-					} else {
-						reclaimed++;
+						if (!vm_reserv_migrate(rv)) {
+							/*
+							 * Put the reserv back into the
+							 * partpopq.
+							 */
+							vm_reserv_domain_lock(dom);
+							rv->inpartpopq = TRUE;
+							TAILQ_INSERT_HEAD(&vm_rvd[dom].partpop, rv, partpopq);
+							vm_reserv_domain_unlock(dom);
+						} else {
+							reclaimed++;
+						}
 					}
 					vm_reserv_unlock(rv);
 					/*

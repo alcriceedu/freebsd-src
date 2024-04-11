@@ -61,7 +61,8 @@ vm_page_t	vm_reserv_reclaim_contig(int domain, u_long npages,
 		    vm_paddr_t low, vm_paddr_t high, u_long alignment,
 		    vm_paddr_t boundary);
 bool		vm_reserv_reclaim_inactive(int domain);
-int		vm_reserv_reclaim_inactive_popcnt_upper(int domain, int popcnt);
+int		vm_reserv_reclaim_inactive_popcnt_upper(int domain,
+		    int popcnt);
 void		vm_reserv_rename(vm_page_t m, vm_object_t new_object,
 		    vm_object_t old_object, vm_pindex_t old_object_offset);
 int		vm_reserv_size(int level);
@@ -69,7 +70,8 @@ vm_paddr_t	vm_reserv_startup(vm_offset_t *vaddr, vm_paddr_t end);
 vm_page_t	vm_reserv_to_superpage(vm_page_t m);
 int		vm_reserv_partpop_free_count(int domain);
 int		vm_reserv_partpop_num(int domain);
-int		vm_reserv_partpop_reclaim(int domain, int shortage);
+int		vm_reserv_partpop_reclaim(int domain, int shortage,
+		    int popcnt_thld);
 
 
 #endif	/* VM_NRESERVLEVEL > 0 */
