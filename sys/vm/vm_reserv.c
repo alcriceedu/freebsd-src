@@ -1266,6 +1266,8 @@ vm_reserv_reclaim_inactive_popcnt_upper(int domain, int popcnt)
  * elsewhere, releasing the entire reservation to the physical memory
  * allocator.  This helps recover physical contiguity.
  * Returns true if successful and false otherwise.
+ * If the function returns false, then the reservation should be valid for
+ * insertion back into the partpopq.
  */
 static bool
 vm_reserv_migrate(vm_reserv_t rv)
@@ -1293,46 +1295,60 @@ vm_reserv_partpop_reclaim(int domain, int shortage, int popcnt_thld)
 	attempts = 0;
 	for (dom = 0; dom < vm_ndomains && (dom == domain || domain < 0); dom++) {
 		for (level = 0; level < VM_NRESERVLEVEL; level++) {
-			vm_reserv_domain_lock(dom);
-			TAILQ_FOREACH(rv, &vm_rvd[dom].partpop, partpopq) {
-				/*
-				 * Skip the marker node.
-				 * Skip if the reservation is too populated;
-				 * migrating it would be costly.
-				 * A locked reservation is likely being updated
-				 * or reclaimed, so just skip ahead.
-				 */
-				if (rv != &vm_rvd[dom].marker &&
-				    vm_reserv_trylock(rv)) {
+			while (true) {
+				/* Find a victim. */
+				vm_reserv_domain_lock(dom);
+				TAILQ_FOREACH(rv, &vm_rvd[dom].partpop, partpopq) {
 					/*
-					 * Don't try too many times.
-					 * Bound the number of attempts.
+					 * Skip the marker node.
+					 * Skip if the reservation is too
+					 * populated; migrating it would be
+					 * costly.
+					 * A locked reservation is likely being
+					 * updated or reclaimed, so just skip
+					 * ahead.
 					 */
-					attempts++;
-					if (rv->popcnt <= popcnt_thld) {
-						vm_reserv_dequeue(rv);
-						vm_reserv_domain_unlock(dom);
-						status = vm_reserv_migrate(rv);
-						vm_reserv_domain_lock(dom);
-						if (!status) {
-							/*
-							 * Put the reserv back into the
-							 * partpopq.
-							 */
-							rv->inpartpopq = TRUE;
-							TAILQ_INSERT_HEAD(&vm_rvd[dom].partpop, rv, partpopq);
+					if (rv != &vm_rvd[dom].marker &&
+					    vm_reserv_trylock(rv)) {
+						if (rv->popcnt <= popcnt_thld) {
+							vm_reserv_dequeue(rv);
+							break;
 						} else {
-							reclaimed++;
+							vm_reserv_unlock(rv);
 						}
 					}
-					vm_reserv_unlock(rv);
-					if (!(reclaimed < shortage && attempts < shortage * 2)) {
-						vm_reserv_domain_unlock(dom);
-						goto OUT;
-					}
+				}
+				vm_reserv_domain_unlock(dom);
+				if (rv == NULL) {
+					/*
+					 * We've reached the end of partpopq.
+					 */
+					break;
+				}
+
+				/*
+				 * Don't try too many times.
+				 * Bound the number of attempts.
+				 */
+				attempts++;
+				/* Evacuate the victim. */
+				status = vm_reserv_migrate(rv);
+				if (!status) {
+					/*
+					 * Put the reserv back into the partpopq.
+					 */
+					vm_reserv_domain_lock(dom);
+					rv->inpartpopq = TRUE;
+					TAILQ_INSERT_HEAD(&vm_rvd[dom].partpop, rv, partpopq);
+					vm_reserv_domain_unlock(dom);
+				} else {
+					reclaimed++;
+				}
+				vm_reserv_unlock(rv);
+				if (!(reclaimed < shortage && attempts < shortage)) {
+					goto OUT;
 				}
 			}
-			vm_reserv_domain_unlock(dom);
 		}
 	}
 OUT:
