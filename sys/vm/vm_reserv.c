@@ -1287,15 +1287,13 @@ int
 vm_reserv_partpop_reclaim(int domain, int shortage, int popcnt_thld)
 {
 	vm_reserv_t rv;
-	int dom, level, reclaimed, attempts;
+	int dom, level, reclaimed, attempts, status;
 
 	reclaimed = 0;
 	attempts = 0;
 	for (dom = 0; dom < vm_ndomains && (dom == domain || domain < 0); dom++) {
 		for (level = 0; level < VM_NRESERVLEVEL; level++) {
-RESCAN_FOR_RECLAIM:
 			vm_reserv_domain_lock(dom);
-RESCAN_FOR_RECLAIM_LOCKED:
 			TAILQ_FOREACH(rv, &vm_rvd[dom].partpop, partpopq) {
 				/*
 				 * Skip the marker node.
@@ -1314,36 +1312,23 @@ RESCAN_FOR_RECLAIM_LOCKED:
 					if (rv->popcnt <= popcnt_thld) {
 						vm_reserv_dequeue(rv);
 						vm_reserv_domain_unlock(dom);
-						if (!vm_reserv_migrate(rv)) {
+						status = vm_reserv_migrate(rv);
+						vm_reserv_domain_lock(dom);
+						if (!status) {
 							/*
 							 * Put the reserv back into the
 							 * partpopq.
 							 */
-							vm_reserv_domain_lock(dom);
 							rv->inpartpopq = TRUE;
 							TAILQ_INSERT_HEAD(&vm_rvd[dom].partpop, rv, partpopq);
-							vm_reserv_domain_unlock(dom);
 						} else {
 							reclaimed++;
 						}
-						vm_reserv_unlock(rv);
-						if (reclaimed < shortage && attempts < shortage * 2)
-							goto RESCAN_FOR_RECLAIM;
-						else
-							goto OUT;
-					} else {
-						vm_reserv_unlock(rv);
-						/*
-						 * No need to check reclaimed
-						 * count.  It didn't change if
-						 * we are in this branch.
-						 */
-						if (attempts < shortage * 2)
-							goto RESCAN_FOR_RECLAIM_LOCKED;
-						else {
-							vm_reserv_domain_unlock(dom);
-							goto OUT;
-						}
+					}
+					vm_reserv_unlock(rv);
+					if (!(reclaimed < shortage && attempts < shortage * 2)) {
+						vm_reserv_domain_unlock(dom);
+						goto OUT;
 					}
 				}
 			}
