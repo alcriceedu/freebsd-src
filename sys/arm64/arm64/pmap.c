@@ -5488,6 +5488,19 @@ pmap_zero_page(vm_page_t m)
 }
 
 /*
+ *	pmap_zero_pages zeros the specified contiguous range of
+ * 	hardware pages by mapping them into KVM and using bzero
+ *	to clear their contents.
+ */
+void
+pmap_zero_pages(vm_page_t m, int npages)
+{
+	vm_offset_t va = PHYS_TO_DMAP(VM_PAGE_TO_PHYS(m));
+
+	bzero((char *)va, npages << PAGE_SHIFT);
+}
+
+/*
  *	pmap_zero_page_area zeros the specified hardware page by mapping
  *	the page into KVM and using bzero to clear its contents.
  *

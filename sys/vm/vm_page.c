@@ -2015,7 +2015,7 @@ vm_page_alloc_domain_after(vm_object_t object, vm_pindex_t pindex, int domain,
 
 #define	VPA_FLAGS	(VM_ALLOC_CLASS_MASK | VM_ALLOC_WAITFAIL |	\
 			 VM_ALLOC_NOWAIT | VM_ALLOC_NOBUSY |		\
-			 VM_ALLOC_SBUSY | VM_ALLOC_WIRED |		\
+			 VM_ALLOC_SBUSY | VM_ALLOC_WIRED | VM_ALLOC_RESERVONLY | \
 			 VM_ALLOC_NODUMP | VM_ALLOC_ZERO | VM_ALLOC_COUNT_MASK)
 	KASSERT((req & ~VPA_FLAGS) == 0,
 	    ("invalid request %#x", req));
@@ -2040,6 +2040,8 @@ again:
 	    (m = vm_reserv_alloc_page(object, pindex, domain, req, mpred)) !=
 	    NULL) {
 		goto found;
+	} else if ((req & VM_ALLOC_RESERVONLY) != 0) {
+		return (NULL);
 	}
 #endif
 	vmd = VM_DOMAIN(domain);
@@ -2259,6 +2261,8 @@ vm_page_alloc_contig_domain(vm_object_t object, vm_pindex_t pindex, int domain,
 		    (m_ret = vm_reserv_alloc_contig(object, pindex, domain, req,
 		    mpred, npages, low, high, alignment, boundary)) != NULL) {
 			break;
+		} else if ((req & VM_ALLOC_RESERVONLY) != 0) {
+			return (NULL);
 		}
 #endif
 		if ((m_ret = vm_page_find_contig_domain(domain, req, npages,
@@ -4221,6 +4225,24 @@ vm_page_activate(vm_page_t m)
 {
 
 	vm_page_mvqueue(m, PQ_ACTIVE, PGA_REQUEUE);
+}
+
+/*
+ * Activate and validate pages in a contiguous range.
+ */
+void
+vm_page_activate_and_validate_pages(vm_page_t m_left, int npages)
+{
+	vm_page_t m_tmp;
+
+	/*
+	 * Most pages have not been faulted in, so we simply scan
+	 * over all of the pages.
+	 */
+	for (m_tmp = m_left; m_tmp < &m_left[npages]; m_tmp++) {
+		m_tmp->valid = VM_PAGE_BITS_ALL;
+		vm_page_activate(m_tmp);
+	}
 }
 
 /*

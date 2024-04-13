@@ -233,6 +233,10 @@ static COUNTER_U64_DEFINE_EARLY(vm_reserv_reclaimed);
 SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, reclaimed, CTLFLAG_RD,
     &vm_reserv_reclaimed, "Cumulative number of reclaimed reservations");
 
+static int sync_popthreshold = 64;
+SYSCTL_INT(_vm_reserv, OID_AUTO, sync_popthreshold, CTLFLAG_RWTUN,
+    &sync_popthreshold, 0, "sync promotion pop threshold");
+
 /*
  * The object lock pool is used to synchronize the rvq.  We can not use a
  * pool mutex because it is required before malloc works.
@@ -502,6 +506,40 @@ vm_reserv_has_pindex(vm_reserv_t rv, vm_pindex_t pindex)
 {
 
 	return (((pindex - rv->pindex) & ~(VM_LEVEL_0_NPAGES - 1)) == 0);
+}
+
+bool
+vm_reserv_satisfy_sync_promotion(vm_page_t m)
+{
+	vm_reserv_t rv;
+
+	rv = vm_reserv_from_page(m);
+
+	return (rv->object != NULL &&
+	    rv->object == m->object &&
+	    bit_test(rv->popmap, m->pindex - rv->pindex) &&
+	    rv->inpartpopq &&
+	    rv->popcnt >= sync_popthreshold);
+}
+
+vm_pindex_t
+vm_reserv_pindex_from_page(vm_page_t m)
+{
+	vm_reserv_t rv;
+
+	rv = vm_reserv_from_page(m);
+
+	return (rv->pindex);
+}
+
+bitstr_t *
+vm_reserv_popmap_from_page(vm_page_t m)
+{
+	vm_reserv_t rv;
+
+	rv = vm_reserv_from_page(m);
+
+	return (rv->popmap);
 }
 
 /*
