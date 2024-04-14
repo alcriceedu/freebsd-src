@@ -4770,7 +4770,7 @@ setl3:
 static bool
 pmap_promote_l3c(pmap_t pmap, pd_entry_t *l3p, vm_offset_t va)
 {
-	pd_entry_t all_l3e_AF, firstl3c, *l3, oldl3, pa;
+	pd_entry_t all_l3e_AF, any_l3e_DBM, firstl3c, *l3, oldl3, pa;
 	register_t intr;
 	int wp;
 
@@ -4808,73 +4808,66 @@ pmap_promote_l3c(pmap_t pmap, pd_entry_t *l3p, vm_offset_t va)
 		return (false);
 	}
 
-	wp = 0;
-
 	/*
-	 * If the first L3 entry is a clean read-write mapping, convert it
-	 * to a read-only mapping.
-	 */
-set_first:
-	if ((firstl3c & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
-	    (ATTR_S1_AP(ATTR_S1_AP_RO) | ATTR_SW_DBM)) {
-		/*
-		 * When the mapping is clean, i.e., ATTR_S1_AP_RO is set,
-		 * ATTR_SW_DBM can be cleared without a TLB invalidation.
-		 */
-		if (!atomic_fcmpset_64(l3p, &firstl3c, firstl3c & ~ATTR_SW_DBM))
-			goto set_first;
-		firstl3c &= ~ATTR_SW_DBM;
-		CTR2(KTR_PMAP, "pmap_promote_l3c: protect for va %#lx"
-		    " in pmap %p", va & ~L3C_OFFSET, pmap);
-		atomic_add_long(&pmap_l3c_wprot, 1);
-		wp++;
-	}
-
-	/*
-	 * Check that the rest of the L3 entries are compatible with the first,
-	 * and convert clean read-write mappings to read-only mappings.
+	 * Check that the rest of the L3 entries are compatible with the first.
 	 */
 	all_l3e_AF = firstl3c & ATTR_AF;
+	any_l3e_DBM = firstl3c & ATTR_SW_DBM;
 	pa = (PTE_TO_PHYS(firstl3c) | (firstl3c & ATTR_DESCR_MASK))
 	    + L3C_SIZE - PAGE_SIZE;
 	for (l3 = l3p + L3C_ENTRIES - 1; l3 > l3p; l3--) {
 		oldl3 = pmap_load(l3);
-		if ((PTE_TO_PHYS(oldl3) | (oldl3 & ATTR_DESCR_MASK)) != pa) {
+		if ((PTE_TO_PHYS(oldl3) | (oldl3 & ATTR_DESCR_MASK)) != pa ||
+		    (oldl3 & (ATTR_MASK & ~(ATTR_AF | ATTR_SW_DBM))) !=
+                    (firstl3c & (ATTR_MASK & ~(ATTR_AF | ATTR_SW_DBM)))) {
 			atomic_add_long(&pmap_l3c_p_failures, 1);
-			CTR2(KTR_PMAP, "pmap_promote_l3c: failure for va %#lx"
-			    " in pmap %p", va, pmap);
-			return (false);
-		}
-set_l3:
-		if ((oldl3 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
-		    (ATTR_S1_AP(ATTR_S1_AP_RO) | ATTR_SW_DBM)) {
-			/*
-			 * When the mapping is clean, i.e., ATTR_S1_AP_RO is
-			 * set, ATTR_SW_DBM can be cleared without a TLB
-			 * invalidation.
-			 */
-			if (!atomic_fcmpset_64(l3, &oldl3, oldl3 &
-			    ~ATTR_SW_DBM))
-				goto set_l3;
-			oldl3 &= ~ATTR_SW_DBM;
-			CTR2(KTR_PMAP, "pmap_promote_l3c: protect for va %#lx"
-			    " in pmap %p", (oldl3 & ~ATTR_MASK & L3C_OFFSET) |
-			    (va & ~L3C_OFFSET), pmap);
-			atomic_add_long(&pmap_l3c_wprot, 1);
-			wp++;
-		}
-		if ((oldl3 & (ATTR_MASK & ~ATTR_AF)) !=
-		    (firstl3c & (ATTR_MASK & ~ATTR_AF))) {
-			atomic_add_long(&pmap_l3c_p_failures, 1);
-			atomic_add_long(&pmap_l3c_wprot_f, wp);
-			if (wp != 0)
-				atomic_add_long(&pmap_l3c_p_failures_wprot, 1);
 			CTR2(KTR_PMAP, "pmap_promote_l3c: failure for va %#lx"
 			    " in pmap %p", va, pmap);
 			return (false);
 		}
 		all_l3e_AF &= oldl3;
+		any_l3e_DBM |= oldl3 & ATTR_SW_DBM;
 		pa -= PAGE_SIZE;
+	}
+
+	wp = 0;
+
+	/*
+	 * If at least one of the L3 entries is a clean read-write mapping and the
+	 * remaining entries are all either clean read-write or read-only mappings,
+	 * convert all of the entries to read-only mappings.
+	 */
+	if ((firstl3c & ATTR_S1_AP_RW_BIT) == ATTR_S1_AP(ATTR_S1_AP_RO) && any_l3e_DBM) {
+		for (l3 = l3p; l3 < l3p + L3C_ENTRIES; l3++) {
+			oldl3 = pmap_load(l3);
+set_l3:
+			/*
+			 * Fail if an entry was asynchronously dirtied.
+			 */
+			if ((oldl3 & ATTR_S1_AP_RW_BIT) != ATTR_S1_AP(ATTR_S1_AP_RO)) {
+				atomic_add_long(&pmap_l3c_p_failures, 1);
+				atomic_add_long(&pmap_l3c_wprot_f, wp);
+				if (wp != 0)
+					atomic_add_long(&pmap_l3c_p_failures_wprot, 1);
+				CTR2(KTR_PMAP, "pmap_promote_l3c: failure for va %#lx"
+				    " in pmap %p", va, pmap);
+				return (false);
+			}
+			if ((oldl3 & ATTR_SW_DBM) == ATTR_SW_DBM) {
+				/*
+				 * When the mapping is clean, i.e., ATTR_S1_AP_RO is
+				 * set, ATTR_SW_DBM can be cleared without a TLB
+				 * invalidation.
+				 */
+				if (!atomic_fcmpset_64(l3, &oldl3, oldl3 & ~ATTR_SW_DBM))
+					goto set_l3;
+				CTR2(KTR_PMAP, "pmap_promote_l3c: protect for va %#lx"
+				    " in pmap %p", (oldl3 & ~ATTR_MASK & L3C_OFFSET) |
+				    (va & ~L3C_OFFSET), pmap);
+				atomic_add_long(&pmap_l3c_wprot, 1);
+				wp++;
+			}
+		}
 	}
 
 	intr = intr_disable();
