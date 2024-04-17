@@ -1335,7 +1335,7 @@ vm_reserv_partpop_reclaim(int domain, int shortage, int popcnt_thld)
 				status = vm_reserv_migrate(rv);
 				if (!status) {
 					/*
-					 * Put the reserv back into the partpopq.
+					 * Put the reserv back into partpopq.
 					 */
 					vm_reserv_domain_lock(dom);
 					rv->inpartpopq = TRUE;

@@ -162,6 +162,12 @@ SYSCTL_OID(_vm, OID_AUTO, phys_free,
     sysctl_vm_phys_free, "A",
     "Phys Free Info");
 
+static int sysctl_vm_phys_frag_idx(SYSCTL_HANDLER_ARGS);
+SYSCTL_OID(_vm, OID_AUTO, phys_frag_idx,
+    CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE, NULL, 0,
+    sysctl_vm_phys_frag_idx, "A",
+    "Phys Frag Index");
+
 static int sysctl_vm_phys_segs(SYSCTL_HANDLER_ARGS);
 SYSCTL_OID(_vm, OID_AUTO, phys_segs,
     CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE, NULL, 0,
@@ -269,7 +275,7 @@ vm_phys_high_order_free_count(int domain)
 	free_n_base_pages = 0;
 	for (dom = 0; dom < vm_ndomains && (dom == domain || domain < 0); dom++) {
 		for (flind = 0; flind < vm_nfreelists; flind++) {
-			for (oind = VM_NFREEORDER - 1; oind >= 9; oind--) {
+			for (oind = VM_NFREEORDER - 1; oind >= VM_LEVEL_0_ORDER; oind--) {
 				for (pind = 0; pind < VM_NFREEPOOL; pind++) {
 					fl = vm_phys_free_queues[dom][flind][pind];
 					free_n_base_pages += (1 << oind) * fl[oind].lcnt;
@@ -301,7 +307,7 @@ vm_phys_high_order_free_info(void *buf)
 			for (pind = 0; pind < VM_NFREEPOOL; pind++)
 				sbuf_printf(sbuf, "  |  POOL %d", pind);
 			sbuf_printf(sbuf, "\n");
-			for (oind = VM_NFREEORDER - 1; oind >= 9; oind--) {
+			for (oind = VM_NFREEORDER - 1; oind >= VM_LEVEL_0_ORDER; oind--) {
 				sbuf_printf(sbuf, "  %2d (%6dM)", oind,
 				    1 << (PAGE_SHIFT - 20 + oind));
 				for (pind = 0; pind < VM_NFREEPOOL; pind++) {
@@ -357,6 +363,106 @@ sysctl_vm_phys_free(SYSCTL_HANDLER_ARGS)
 	error = sbuf_finish(&sbuf);
 	sbuf_delete(&sbuf);
 	return (error);
+}
+
+struct vm_phys_info {
+	uint64_t free_pages;
+	uint64_t free_blocks;
+};
+
+/*
+ * Returns total number of free pages and blocks.
+ */
+static void
+vm_phys_get_info(struct vm_phys_info *info, int domain)
+{
+	struct vm_freelist *fl;
+	int pind, oind, flind;
+
+	info->free_pages = info->free_blocks = 0;
+	for (flind = 0; flind < vm_nfreelists; flind++) {
+		for (oind = VM_NFREEORDER - 1; oind >= 0; oind--) {
+			for (pind = 0; pind < VM_NFREEPOOL; pind++) {
+				fl = vm_phys_free_queues[domain][flind][pind];
+				info->free_pages += fl[oind].lcnt << oind;
+				info->free_blocks += fl[oind].lcnt;
+			}
+		}
+	}
+}
+
+static int
+vm_phys_fragmentation_index(int order, int domain)
+{
+	struct vm_phys_info info;
+
+	vm_domain_free_assert_locked(VM_DOMAIN(domain));
+	vm_phys_get_info(&info, domain);
+
+	if (info.free_blocks == 0) {
+		return (0);
+	}
+
+	return (1000 -
+	    ((info.free_pages * 1000) / (1 << order) / info.free_blocks));
+}
+
+/*
+ * Outputs the physical memory fragmentation index for each domain.
+ */
+static int
+sysctl_vm_phys_frag_idx(SYSCTL_HANDLER_ARGS)
+{
+	struct sbuf sbuf;
+	int64_t idx;
+	int oind, dom, error;
+
+	error = sysctl_wire_old_buffer(req, 0);
+	if (error != 0)
+		return (error);
+	sbuf_new_for_sysctl(&sbuf, NULL, 128 * vm_ndomains, req);
+
+	for (dom = 0; dom < vm_ndomains; dom++) {
+
+		sbuf_printf(&sbuf, "\nDOMAIN %d\n", dom);
+		sbuf_printf(&sbuf, "\n  ORDER (SIZE) |  FI\n");
+		sbuf_printf(&sbuf, "--\n");
+
+		vm_domain_free_lock(VM_DOMAIN(dom));
+		for (oind = VM_NFREEORDER - 1; oind >= 0; oind--) {
+			idx = vm_phys_fragmentation_index(oind, dom);
+			sbuf_printf(&sbuf, "  %2d (%6dK) ", oind,
+			    1 << (PAGE_SHIFT - 10 + oind));
+			sbuf_printf(&sbuf, "|  %ld \n", idx);
+		}
+		vm_domain_free_unlock(VM_DOMAIN(dom));
+	}
+
+	error = sbuf_finish(&sbuf);
+	sbuf_delete(&sbuf);
+	return (error);
+}
+
+/*
+ * Negative domain returns the average across all domains.
+ */
+int
+vm_phys_frag_idx_2m(int domain)
+{
+	int dom, idx, i;
+
+	i = idx = 0;
+	for (dom = 0; dom < vm_ndomains && (dom == domain || domain < 0); dom++) {
+		i += 1;
+		vm_domain_free_lock(VM_DOMAIN(dom));
+		idx += vm_phys_fragmentation_index(VM_LEVEL_0_ORDER, dom);
+		vm_domain_free_unlock(VM_DOMAIN(dom));
+	}
+	if (i != 0) {
+		idx /= i;
+	}
+
+	return (idx);
 }
 
 /*

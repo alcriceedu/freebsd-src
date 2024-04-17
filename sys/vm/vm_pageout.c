@@ -2164,6 +2164,22 @@ sysctl_vm_daemon_partpop_num(SYSCTL_HANDLER_ARGS)
 	return (SYSCTL_OUT(req, &v, sizeof(v)));
 }
 
+static int sysctl_vm_daemon_phys_frag_idx_2m(SYSCTL_HANDLER_ARGS);
+SYSCTL_OID(_vm_daemon, OID_AUTO, phys_frag_idx_2m,
+    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MPSAFE, NULL, 0,
+    sysctl_vm_daemon_phys_frag_idx_2m, "I",
+    "Fragmentation index assuming a 2M block size");
+
+static int
+sysctl_vm_daemon_phys_frag_idx_2m(SYSCTL_HANDLER_ARGS)
+{
+	int v;
+
+	v = vm_phys_frag_idx_2m(-1);
+
+	return (SYSCTL_OUT(req, &v, sizeof(v)));
+}
+
 static COUNTER_U64_DEFINE_EARLY(vm_daemon_reserv_reclaim);
 SYSCTL_COUNTER_U64(_vm_daemon, OID_AUTO, reserv_reclaim, CTLFLAG_RD,
     &vm_daemon_reserv_reclaim, "Cumulative number of times that the page daemon tried to proactively reclaim reservations to recover physical contiguity before it's too late");
