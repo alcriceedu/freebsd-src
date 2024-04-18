@@ -4770,9 +4770,9 @@ setl3:
 static bool
 pmap_promote_l3c(pmap_t pmap, pd_entry_t *l3p, vm_offset_t va)
 {
-	pd_entry_t all_l3e_AF, firstl3c, *l3, oldl3, pa;
+	pd_entry_t all_l3e_AF, firstl3c, *l3, wp_mask, oldl3, pa;
 	register_t intr;
-	int wp;
+	int wp, wp_start;
 
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
 
@@ -4810,6 +4810,8 @@ pmap_promote_l3c(pmap_t pmap, pd_entry_t *l3p, vm_offset_t va)
 
 	wp = 0;
 
+	wp_mask = 0;
+
 	/*
 	 * If the first L3 entry is a clean read-write mapping, convert it
 	 * to a read-only mapping.
@@ -4824,6 +4826,8 @@ set_first:
 		if (!atomic_fcmpset_64(l3p, &firstl3c, firstl3c & ~ATTR_SW_DBM))
 			goto set_first;
 		firstl3c &= ~ATTR_SW_DBM;
+		wp_mask = ATTR_SW_DBM;
+		wp_start = 1;
 		CTR2(KTR_PMAP, "pmap_promote_l3c: protect for va %#lx"
 		    " in pmap %p", va & ~L3C_OFFSET, pmap);
 		atomic_add_long(&pmap_l3c_wprot, 1);
@@ -4846,7 +4850,7 @@ set_first:
 			return (false);
 		}
 set_l3:
-		if ((oldl3 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM)) ==
+		if ((oldl3 & (ATTR_S1_AP_RW_BIT | ATTR_SW_DBM) & ~wp_mask) ==
 		    (ATTR_S1_AP(ATTR_S1_AP_RO) | ATTR_SW_DBM)) {
 			/*
 			 * When the mapping is clean, i.e., ATTR_S1_AP_RO is
@@ -4857,13 +4861,15 @@ set_l3:
 			    ~ATTR_SW_DBM))
 				goto set_l3;
 			oldl3 &= ~ATTR_SW_DBM;
+			wp_mask = ATTR_SW_DBM;
+			wp_start = l3 - l3p + 1;
 			CTR2(KTR_PMAP, "pmap_promote_l3c: protect for va %#lx"
 			    " in pmap %p", (oldl3 & ~ATTR_MASK & L3C_OFFSET) |
 			    (va & ~L3C_OFFSET), pmap);
 			atomic_add_long(&pmap_l3c_wprot, 1);
 			wp++;
 		}
-		if ((oldl3 & (ATTR_MASK & ~ATTR_AF)) !=
+		if ((oldl3 & (ATTR_MASK & ~ATTR_AF) & ~wp_mask) !=
 		    (firstl3c & (ATTR_MASK & ~ATTR_AF))) {
 			atomic_add_long(&pmap_l3c_p_failures, 1);
 			atomic_add_long(&pmap_l3c_wprot_f, wp);
@@ -4875,6 +4881,37 @@ set_l3:
 		}
 		all_l3e_AF &= oldl3;
 		pa -= PAGE_SIZE;
+	}
+
+	if (wp_mask != 0) {
+		for (l3 = l3p + wp_start; l3 < l3p + L3C_ENTRIES; l3++) {
+			oldl3 = pmap_load(l3);
+clear_DBM:
+			if ((oldl3 & ATTR_S1_AP_RW_BIT) != ATTR_S1_AP(ATTR_S1_AP_RO)) {
+				atomic_add_long(&pmap_l3c_p_failures, 1);
+				atomic_add_long(&pmap_l3c_wprot_f, wp);
+				if (wp != 0)
+					atomic_add_long(&pmap_l3c_p_failures_wprot, 1);
+				CTR2(KTR_PMAP, "pmap_promote_l3c: failure for va %#lx"
+				    " in pmap %p", (oldl3 & ~ATTR_MASK & L3C_OFFSET) |
+                                    (va & ~L3C_OFFSET), pmap);
+				return (false);
+			} else if ((oldl3 & ATTR_SW_DBM) == ATTR_SW_DBM) {
+				/*
+				 * When the mapping is clean, i.e., ATTR_S1_AP_RO is
+				 * set, ATTR_SW_DBM can be cleared without a TLB
+				 * invalidation.
+				 */
+				if (!atomic_fcmpset_64(l3, &oldl3, oldl3 &
+				    ~ATTR_SW_DBM))
+					goto clear_DBM;
+				CTR2(KTR_PMAP, "pmap_promote_l3c: protect for va %#lx"
+				    " in pmap %p", (oldl3 & ~ATTR_MASK & L3C_OFFSET) |
+				    (va & ~L3C_OFFSET), pmap);
+				atomic_add_long(&pmap_l3c_wprot, 1);
+				wp++;
+			}
+		}
 	}
 
 	intr = intr_disable();
