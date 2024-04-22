@@ -1285,7 +1285,7 @@ vm_reserv_reclaim_inactive_popcnt_upper(int domain, int popcnt)
  * insertion back into the partpopq.
  */
 static bool
-vm_reserv_migrate_locked(vm_reserv_t rv)
+vm_reserv_migrate_locked(int domain, vm_reserv_t rv)
 {
 	vm_object_t object;
 	vm_page_t m;
@@ -1302,7 +1302,7 @@ vm_reserv_migrate_locked(vm_reserv_t rv)
 	/*
 	 * Racily check for page wirings.
 	 * Pages could still get wired between now and when we actually
-	 * acquire the object lock.
+	 * acquire the object lock in vm_page_reclaim_run().
 	 * But let's try to reduce the number of failures due to wired pages.
 	 */
 	for (m = rv->pages; m < rv->pages + (1 << VM_LEVEL_0_ORDER); m++) {
@@ -1316,7 +1316,7 @@ vm_reserv_migrate_locked(vm_reserv_t rv)
 	if(object != NULL && (object->flags & (OBJ_FICTITIOUS | OBJ_UNMANAGED)) == 0)
 	{
 		vm_reserv_unlock(rv);
-		error = vm_page_reclaim_run(VM_ALLOC_NORMAL, (1 << VM_LEVEL_0_ORDER), rv->pages, 0);
+		error = vm_page_reclaim_run(VM_ALLOC_NORMAL, domain, (1 << VM_LEVEL_0_ORDER), rv->pages, 0);
 		vm_reserv_lock(rv);
 		if (error) {
 			switch (error) {
@@ -1388,7 +1388,7 @@ vm_reserv_partpop_reclaim(int domain, int shortage, int popcnt_thld)
 				 */
 				attempts++;
 				/* Evacuate the victim. */
-				status = vm_reserv_migrate_locked(rv);
+				status = vm_reserv_migrate_locked(domain, rv);
 				if (!status) {
 					/*
 					 * Put the reserv back into partpopq.
