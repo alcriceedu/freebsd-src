@@ -2821,7 +2821,7 @@ retry:
  *
  *	"req_class" must be an allocation class.
  */
-static int
+int
 vm_page_reclaim_run(int req_class, int domain, u_long npages, vm_page_t m_run,
     vm_paddr_t high)
 {
