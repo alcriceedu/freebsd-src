@@ -2307,6 +2307,9 @@ vm_pageout_worker(void *arg)
 		if (vm_daemon_reserv_reclaim_enabled &&
 		    vmd->vmd_free_count >=
 		    vm_daemon_reserv_reclaim_disable_low_count) {
+			//if (vmd->vmd_free_count < npages_to_reclaim + vmd->vmd_free_reserved)
+				//goto done;
+
 			reserv_shortage = (((int)vmd->vmd_free_count) - vm_phys_high_order_free_count(domain) * vm_daemon_reserv_reclaim_ratio) / (1 << VM_LEVEL_0_ORDER);
 			if (reserv_shortage > 0) {
 				counter_u64_add(vm_daemon_reserv_reclaim, 1);

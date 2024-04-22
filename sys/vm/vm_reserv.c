@@ -248,6 +248,21 @@ SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, alloc_page_failed, CTLFLAG_RD,
 static COUNTER_U64_DEFINE_EARLY(vm_reserv_alloc_contig_failed);
 SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, alloc_contig_failed, CTLFLAG_RD,
     &vm_reserv_alloc_contig_failed, "Cumulative number of reservation allocation failures for contig requests");
+static COUNTER_U64_DEFINE_EARLY(vm_reserv_migrate_attempts);
+SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, migrate_attempts, CTLFLAG_RD,
+    &vm_reserv_migrate_attempts, "Cumulative number of times we attempted relocation-based reservation breaking");
+static COUNTER_U64_DEFINE_EARLY(vm_reserv_migrate_wired_early_exit);
+SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, migrate_wired_early_exit, CTLFLAG_RD,
+    &vm_reserv_migrate_wired_early_exit, "Cumulative number of times we aborted relocation-based reservation breaking due to wired pages");
+static COUNTER_U64_DEFINE_EARLY(vm_reserv_migrate_error_inval);
+SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, migrate_error_inval, CTLFLAG_RD,
+    &vm_reserv_migrate_error_inval, "Cumulative number of times we got EINVAL from reclaim_run() during relocation-based reservation breaking");
+static COUNTER_U64_DEFINE_EARLY(vm_reserv_migrate_error_busy);
+SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, migrate_error_busy, CTLFLAG_RD,
+    &vm_reserv_migrate_error_busy, "Cumulative number of times we got EBUSY from reclaim_run() during relocation-based reservation breaking");
+static COUNTER_U64_DEFINE_EARLY(vm_reserv_migrate_error_nomem);
+SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, migrate_error_nomem, CTLFLAG_RD,
+    &vm_reserv_migrate_error_nomem, "Cumulative number of times we got ENOMEM from reclaim_run() during relocation-based reservation breaking");
 
 /*
  * The object lock pool is used to synchronize the rvq.  We can not use a
@@ -1270,16 +1285,57 @@ vm_reserv_reclaim_inactive_popcnt_upper(int domain, int popcnt)
  * insertion back into the partpopq.
  */
 static bool
-vm_reserv_migrate(vm_reserv_t rv)
+vm_reserv_migrate_locked(vm_reserv_t rv)
 {
+	vm_object_t object;
+	vm_page_t m;
+	int error;
 
 	vm_reserv_assert_locked(rv);
 	CTR5(KTR_VM, "%s: rv %p object %p popcnt %d inpartpop %d",
 	    __FUNCTION__, rv, rv->object, rv->popcnt, rv->inpartpopq);
 	KASSERT(!rv->inpartpopq,
 	    ("vm_reserv_migrate: reserv %p's inpartpopq is TRUE", rv));
-	// TODO Now actually migrate vm_reserv_break(rv);
-	return (false);
+	counter_u64_add(vm_reserv_migrate_attempts, 1);
+
+	error = 0;
+	/*
+	 * Racily check for page wirings.
+	 * Pages could still get wired between now and when we actually
+	 * acquire the object lock.
+	 * But let's try to reduce the number of failures due to wired pages.
+	 */
+	for (m = rv->pages; m < rv->pages + (1 << VM_LEVEL_0_ORDER); m++) {
+		if (vm_page_wired(m)) {
+			counter_u64_add(vm_reserv_migrate_wired_early_exit, 1);
+			return (false);
+		}
+	}
+
+	object = rv->object;
+	if(object != NULL && (object->flags & (OBJ_FICTITIOUS | OBJ_UNMANAGED)) == 0)
+	{
+		vm_reserv_unlock(rv);
+		error = vm_page_reclaim_run(VM_ALLOC_NORMAL, (1 << VM_LEVEL_0_ORDER), rv->pages, 0);
+		vm_reserv_lock(rv);
+		if (error) {
+			switch (error) {
+				case EINVAL:
+					counter_u64_add(vm_reserv_migrate_error_inval, 1);
+				case EBUSY:
+					counter_u64_add(vm_reserv_migrate_error_busy, 1);
+				case ENOMEM:
+					counter_u64_add(vm_reserv_migrate_error_nomem, 1);
+			}
+		}
+		/*
+		 * At this point, if we succeeded, then all the memory
+		 * belonging to the reservation has been returned to the buddy
+		 * allocator.  This is because vm_page_reclaim_run() =>
+		 * vm_page_free_prep() => vm_reserv_free_page().
+		 */
+	}
+	return (error ? (false) : (true));
 }
 
 /*
@@ -1332,12 +1388,13 @@ vm_reserv_partpop_reclaim(int domain, int shortage, int popcnt_thld)
 				 */
 				attempts++;
 				/* Evacuate the victim. */
-				status = vm_reserv_migrate(rv);
+				status = vm_reserv_migrate_locked(rv);
 				if (!status) {
 					/*
 					 * Put the reserv back into partpopq.
 					 */
 					vm_reserv_domain_lock(dom);
+					MPASS(rv->popcnt > 0);
 					rv->inpartpopq = TRUE;
 					TAILQ_INSERT_HEAD(&vm_rvd[dom].partpop, rv, partpopq);
 					vm_reserv_domain_unlock(dom);

@@ -176,8 +176,6 @@ static void vm_page_insert_radixdone(vm_page_t m, vm_object_t object,
     vm_page_t mpred);
 static void vm_page_mvqueue(vm_page_t m, const uint8_t queue,
     const uint16_t nflag);
-static int vm_page_reclaim_run(int req_class, int domain, u_long npages,
-    vm_page_t m_run, vm_paddr_t high);
 static void vm_page_release_toq(vm_page_t m, uint8_t nqueue, bool noreuse);
 static int vm_domain_alloc_fail(struct vm_domain *vmd, vm_object_t object,
     int req);
