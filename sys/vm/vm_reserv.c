@@ -1403,7 +1403,7 @@ vm_reserv_partpop_reclaim(int domain, int shortage, int popcnt_thld)
 				 */
 				attempts++;
 				/* Evacuate the victim. */
-				status = vm_reserv_migrate_locked(domain, rv);
+				status = vm_reserv_migrate_locked(dom, rv);
 				if (!status) {
 					/*
 					 * vm_page_reclaim_run() doesn't hold
