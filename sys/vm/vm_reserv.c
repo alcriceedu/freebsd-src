@@ -263,9 +263,12 @@ SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, migrate_error_busy, CTLFLAG_RD,
 static COUNTER_U64_DEFINE_EARLY(vm_reserv_migrate_error_nomem);
 SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, migrate_error_nomem, CTLFLAG_RD,
     &vm_reserv_migrate_error_nomem, "Cumulative number of times we got ENOMEM from reclaim_run() during relocation-based reservation breaking");
-static COUNTER_U64_DEFINE_EARLY(vm_reserv_migrate_object_null);
-SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, migrate_object_null, CTLFLAG_RD,
-    &vm_reserv_migrate_object_null, "Cumulative number of times rv->object became NULL during relocation-based reservation breaking");
+static COUNTER_U64_DEFINE_EARLY(vm_reserv_migrate_object_null_or_flags);
+SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, migrate_object_null_or_flags, CTLFLAG_RD,
+    &vm_reserv_migrate_object_null_or_flags, "Cumulative number of times we aborted relocation-based reservation breaking due to rv->object being NULL or having any of the flags (OBJ_FICTITIOUS | OBJ_UNMANAGED)");
+static COUNTER_U64_DEFINE_EARLY(vm_reserv_migrate_object_turned_null);
+SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, migrate_object_turned_null, CTLFLAG_RD,
+    &vm_reserv_migrate_object_turned_null, "Cumulative number of times rv->object became NULL during relocation-based reservation breaking");
 
 /*
  * The object lock pool is used to synchronize the rvq.  We can not use a
@@ -1322,7 +1325,7 @@ vm_reserv_migrate_locked(int domain, vm_reserv_t rv)
 		error = vm_page_reclaim_run(VM_ALLOC_NORMAL, domain, (1 << VM_LEVEL_0_ORDER), rv->pages, 0);
 		vm_reserv_lock(rv);
 		if (rv->object == NULL) {
-			counter_u64_add(vm_reserv_migrate_object_null, 1);
+			counter_u64_add(vm_reserv_migrate_object_turned_null, 1);
 		}
 		if (error) {
 			switch (error) {
@@ -1343,6 +1346,9 @@ vm_reserv_migrate_locked(int domain, vm_reserv_t rv)
 		 * allocator.  This is because vm_page_reclaim_run() =>
 		 * vm_page_free_prep() => vm_reserv_free_page().
 		 */
+	} else {
+		counter_u64_add(vm_reserv_migrate_object_null_or_flags, 1);
+		return (false);
 	}
 	return (error ? (false) : (true));
 }
