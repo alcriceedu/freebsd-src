@@ -1322,10 +1322,13 @@ vm_reserv_migrate_locked(int domain, vm_reserv_t rv)
 			switch (error) {
 				case EINVAL:
 					counter_u64_add(vm_reserv_migrate_error_inval, 1);
+					break;
 				case EBUSY:
 					counter_u64_add(vm_reserv_migrate_error_busy, 1);
+					break;
 				case ENOMEM:
 					counter_u64_add(vm_reserv_migrate_error_nomem, 1);
+					break;
 			}
 		}
 		/*
