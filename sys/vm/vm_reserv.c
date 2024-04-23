@@ -263,6 +263,9 @@ SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, migrate_error_busy, CTLFLAG_RD,
 static COUNTER_U64_DEFINE_EARLY(vm_reserv_migrate_error_nomem);
 SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, migrate_error_nomem, CTLFLAG_RD,
     &vm_reserv_migrate_error_nomem, "Cumulative number of times we got ENOMEM from reclaim_run() during relocation-based reservation breaking");
+static COUNTER_U64_DEFINE_EARLY(vm_reserv_migrate_object_null);
+SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, migrate_object_null, CTLFLAG_RD,
+    &vm_reserv_migrate_object_null, "Cumulative number of times rv->object became NULL during relocation-based reservation breaking");
 
 /*
  * The object lock pool is used to synchronize the rvq.  We can not use a
@@ -1318,6 +1321,9 @@ vm_reserv_migrate_locked(int domain, vm_reserv_t rv)
 		vm_reserv_unlock(rv);
 		error = vm_page_reclaim_run(VM_ALLOC_NORMAL, domain, (1 << VM_LEVEL_0_ORDER), rv->pages, 0);
 		vm_reserv_lock(rv);
+		if (rv->object == NULL) {
+			counter_u64_add(vm_reserv_migrate_object_null, 1);
+		}
 		if (error) {
 			switch (error) {
 				case EINVAL:
@@ -1394,13 +1400,24 @@ vm_reserv_partpop_reclaim(int domain, int shortage, int popcnt_thld)
 				status = vm_reserv_migrate_locked(domain, rv);
 				if (!status) {
 					/*
-					 * Put the reserv back into partpopq.
+					 * vm_page_reclaim_run() doesn't hold
+					 * the reservation lock or the object
+					 * lock all the time.  So we may end up
+					 * in a case where relocation failed
+					 * because rv->object became NULL
+					 * halfway through the reclaim run.
 					 */
-					vm_reserv_domain_lock(dom);
-					MPASS(rv->popcnt > 0);
-					rv->inpartpopq = TRUE;
-					TAILQ_INSERT_HEAD(&vm_rvd[dom].partpop, rv, partpopq);
-					vm_reserv_domain_unlock(dom);
+					MPASS(rv->object == NULL || rv->popcnt > 0);
+					if (rv->object) {
+						/*
+						 * Put the reserv back into
+						 * partpopq.
+						 */
+						vm_reserv_domain_lock(dom);
+						rv->inpartpopq = TRUE;
+						TAILQ_INSERT_HEAD(&vm_rvd[dom].partpop, rv, partpopq);
+						vm_reserv_domain_unlock(dom);
+					}
 				} else {
 					reclaimed++;
 				}
