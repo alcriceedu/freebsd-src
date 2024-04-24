@@ -229,6 +229,13 @@ SYSCTL_OID(_vm_reserv, OID_AUTO, partpopq,
     sysctl_vm_reserv_partpopq, "A",
     "Partially populated reservation queues");
 
+static int sysctl_vm_reserv_scan(SYSCTL_HANDLER_ARGS);
+
+SYSCTL_OID(_vm, OID_AUTO, reserv_scan,
+    CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE, NULL, 0,
+    sysctl_vm_reserv_scan, "A",
+    "Scan and report information about vm_reserv_array");
+
 static COUNTER_U64_DEFINE_EARLY(vm_reserv_reclaimed);
 SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, reclaimed, CTLFLAG_RD,
     &vm_reserv_reclaimed, "Cumulative number of reclaimed reservations");
@@ -405,6 +412,49 @@ sysctl_vm_reserv_partpopq(SYSCTL_HANDLER_ARGS)
 			    unused_pages * ((int)PAGE_SIZE / 1024), counter);
 		}
 	}
+	error = sbuf_finish(&sbuf);
+	sbuf_delete(&sbuf);
+	return (error);
+}
+
+static int
+sysctl_vm_reserv_scan(SYSCTL_HANDLER_ARGS)
+{
+	struct sbuf sbuf;
+	struct vm_phys_seg *seg;
+	struct vm_reserv *rv;
+	vm_paddr_t paddr;
+	int error, segind;
+
+	error = sysctl_wire_old_buffer(req, 0);
+	if (error != 0)
+		return (error);
+	sbuf_new_for_sysctl(&sbuf, NULL, 128, req);
+
+	sbuf_printf(&sbuf, "[\n");
+	for (segind = 0; segind < vm_phys_nsegs; segind++) {
+		seg = &vm_phys_segs[segind];
+		paddr = roundup2(seg->start, PAGE_SIZE);
+		rv = seg->first_reserv + (paddr >> VM_LEVEL_0_SHIFT) -
+		    (seg->start >> VM_LEVEL_0_SHIFT);
+		sbuf_printf(&sbuf, "    [");
+		while (paddr + VM_LEVEL_0_SIZE > paddr && paddr +
+		    VM_LEVEL_0_SIZE <= seg->end) {
+			sbuf_printf(&sbuf, "{");
+			sbuf_printf(&sbuf, "\"phys_addr\": %#jx,", (uintmax_t)paddr);
+			sbuf_printf(&sbuf, "\"object\": %p,", rv->object);
+			sbuf_printf(&sbuf, "\"pindex\": %#jx,", (uintmax_t)rv->pindex);
+			sbuf_printf(&sbuf, "\"pages\": %p,", rv->pages);
+			sbuf_printf(&sbuf, "\"popcnt\": %d,", rv->popcnt);
+			sbuf_printf(&sbuf, "\"inpartpopq\": %d,", rv->inpartpopq);
+			sbuf_printf(&sbuf, "},");
+			paddr += VM_LEVEL_0_SIZE;
+			rv++;
+		}
+		sbuf_printf(&sbuf, "],\n");
+	}
+	sbuf_printf(&sbuf, "]\n");
+
 	error = sbuf_finish(&sbuf);
 	sbuf_delete(&sbuf);
 	return (error);
