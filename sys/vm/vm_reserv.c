@@ -263,9 +263,9 @@ SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, migrate_error_busy, CTLFLAG_RD,
 static COUNTER_U64_DEFINE_EARLY(vm_reserv_migrate_error_nomem);
 SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, migrate_error_nomem, CTLFLAG_RD,
     &vm_reserv_migrate_error_nomem, "Cumulative number of times we got ENOMEM from reclaim_run() during relocation-based reservation breaking");
-static COUNTER_U64_DEFINE_EARLY(vm_reserv_migrate_object_null_or_flags);
-SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, migrate_object_null_or_flags, CTLFLAG_RD,
-    &vm_reserv_migrate_object_null_or_flags, "Cumulative number of times we aborted relocation-based reservation breaking due to rv->object being NULL or having any of the flags (OBJ_FICTITIOUS | OBJ_UNMANAGED)");
+static COUNTER_U64_DEFINE_EARLY(vm_reserv_migrate_object_flags);
+SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, migrate_object_flags, CTLFLAG_RD,
+    &vm_reserv_migrate_object_flags, "Cumulative number of times we aborted relocation-based reservation breaking due to rv->object having any of the flags (OBJ_FICTITIOUS | OBJ_UNMANAGED)");
 static COUNTER_U64_DEFINE_EARLY(vm_reserv_migrate_object_turned_null);
 SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, migrate_object_turned_null, CTLFLAG_RD,
     &vm_reserv_migrate_object_turned_null, "Cumulative number of times rv->object became NULL during relocation-based reservation breaking");
@@ -1314,19 +1314,35 @@ vm_reserv_migrate_locked(int domain, vm_reserv_t rv)
 	for (m = rv->pages; m < rv->pages + (1 << VM_LEVEL_0_ORDER); m++) {
 		if (vm_page_wired(m)) {
 			counter_u64_add(vm_reserv_migrate_wired_early_exit, 1);
-			return (false);
+			goto REINSERT;
 		}
 	}
 
 	object = rv->object;
-	if(object != NULL && (object->flags & (OBJ_FICTITIOUS | OBJ_UNMANAGED)) == 0)
+	MPASS(object != NULL);
+	if((object->flags & (OBJ_FICTITIOUS | OBJ_UNMANAGED)) == 0)
 	{
+		/*
+		 * At this point, we are probably going to relocate at least
+		 * some pages within the reservation.  So there's no way that
+		 * we are going to get a superpage.  As such, the object should
+		 * probably no longer be allocating pages from this
+		 * reservation.  In other words, the reservation is logically
+		 * broken at this point.  So let's just "reclaim" it for
+		 * bookkeeping purposes.  Crucially, this will dissociate the
+		 * reservation with the owning object.  This prevents
+		 * concurrent page faults from allocating from this
+		 * reservation.  So we essentially freeze the popcnt of the
+		 * reservation.  This also prevents a concurrent allocation
+		 * from putting the reservation back into the partpopq.
+		 */
+		vm_reserv_reclaim(rv);
 		vm_reserv_unlock(rv);
 		error = vm_page_reclaim_run(VM_ALLOC_NORMAL, domain, (1 << VM_LEVEL_0_ORDER), rv->pages, 0);
-		vm_reserv_lock(rv);
-		if (rv->object == NULL) {
-			counter_u64_add(vm_reserv_migrate_object_turned_null, 1);
-		}
+		//vm_reserv_lock(rv);
+		//if (rv->object == NULL) {
+			//counter_u64_add(vm_reserv_migrate_object_turned_null, 1);
+		//}
 		if (error) {
 			switch (error) {
 				case EINVAL:
@@ -1346,10 +1362,21 @@ vm_reserv_migrate_locked(int domain, vm_reserv_t rv)
 		 * allocator.  This is because vm_page_reclaim_run() =>
 		 * vm_page_free_prep() => vm_reserv_free_page().
 		 */
+		goto DONE;
 	} else {
-		counter_u64_add(vm_reserv_migrate_object_null_or_flags, 1);
-		return (false);
+		counter_u64_add(vm_reserv_migrate_object_flags, 1);
+		goto REINSERT;
 	}
+REINSERT:
+	/*
+	 * Put the reserv back into partpopq.
+	 */
+	vm_reserv_domain_lock(domain);
+	rv->inpartpopq = TRUE;
+	TAILQ_INSERT_HEAD(&vm_rvd[domain].partpop, rv, partpopq);
+	vm_reserv_domain_unlock(domain);
+	return (false);
+DONE:
 	return (error ? (false) : (true));
 }
 
@@ -1386,6 +1413,7 @@ vm_reserv_partpop_reclaim(int domain, int shortage, int popcnt_thld)
 							break;
 						} else {
 							vm_reserv_unlock(rv);
+							continue;
 						}
 					}
 				}
@@ -1413,21 +1441,21 @@ vm_reserv_partpop_reclaim(int domain, int shortage, int popcnt_thld)
 					 * because rv->object became NULL
 					 * halfway through the reclaim run.
 					 */
-					MPASS(rv->object == NULL || rv->popcnt > 0);
-					if (rv->object) {
+					//MPASS(rv->object == NULL || rv->popcnt > 0);
+					//if (rv->object) {
 						/*
 						 * Put the reserv back into
 						 * partpopq.
 						 */
-						vm_reserv_domain_lock(dom);
-						rv->inpartpopq = TRUE;
-						TAILQ_INSERT_HEAD(&vm_rvd[dom].partpop, rv, partpopq);
-						vm_reserv_domain_unlock(dom);
-					}
+						//vm_reserv_domain_lock(dom);
+						//rv->inpartpopq = TRUE;
+						//TAILQ_INSERT_HEAD(&vm_rvd[dom].partpop, rv, partpopq);
+						//vm_reserv_domain_unlock(dom);
+					//}
 				} else {
 					reclaimed++;
 				}
-				vm_reserv_unlock(rv);
+				//vm_reserv_unlock(rv);
 				if (!(reclaimed < shortage && attempts < shortage)) {
 					goto OUT;
 				}
