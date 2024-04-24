@@ -480,6 +480,7 @@ sysctl_vm_page_scan(SYSCTL_HANDLER_ARGS)
 		    PAGE_SIZE <= seg->end) {
 			m = PHYS_TO_VM_PAGE(paddr);
 			sbuf_printf(&sbuf, "{");
+			sbuf_printf(&sbuf, "\"m\": %p,", m);
 			sbuf_printf(&sbuf, "\"phys_addr\": %#jx,", (uintmax_t)m->phys_addr);
 			sbuf_printf(&sbuf, "\"object\": %p,", m->object);
 			sbuf_printf(&sbuf, "\"pindex\": %#jx,", (uintmax_t)m->pindex);
