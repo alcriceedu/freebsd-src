@@ -160,6 +160,12 @@ static int sysctl_vm_page_blacklist(SYSCTL_HANDLER_ARGS);
 SYSCTL_PROC(_vm, OID_AUTO, page_blacklist, CTLTYPE_STRING | CTLFLAG_RD |
     CTLFLAG_MPSAFE, NULL, 0, sysctl_vm_page_blacklist, "A", "Blacklist pages");
 
+static int sysctl_vm_page_scan(SYSCTL_HANDLER_ARGS);
+SYSCTL_OID(_vm, OID_AUTO, page_scan,
+    CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE, NULL, 0,
+    sysctl_vm_page_scan, "A",
+    "Scan and report information about physical pages");
+
 static COUNTER_U64_DEFINE_EARLY(vm_page_reclaim_busy1);
 SYSCTL_COUNTER_U64(_vm_stats, OID_AUTO, vm_page_reclaim_busy1, CTLFLAG_RD,
     &vm_page_reclaim_busy1, "Cumulative number of times the first EBUSY in vm_page_reclaim_run()");
@@ -446,6 +452,50 @@ sysctl_vm_page_blacklist(SYSCTL_HANDLER_ARGS)
 		    (uintmax_t)m->phys_addr);
 		first = 0;
 	}
+	error = sbuf_finish(&sbuf);
+	sbuf_delete(&sbuf);
+	return (error);
+}
+
+static int
+sysctl_vm_page_scan(SYSCTL_HANDLER_ARGS)
+{
+	struct sbuf sbuf;
+	struct vm_phys_seg *seg;
+	vm_page_t m;
+	vm_paddr_t paddr;
+	int error, segind;
+
+	error = sysctl_wire_old_buffer(req, 0);
+	if (error != 0)
+		return (error);
+	sbuf_new_for_sysctl(&sbuf, NULL, 128, req);
+
+	sbuf_printf(&sbuf, "[\n");
+	for (segind = 0; segind < vm_phys_nsegs; segind++) {
+		seg = &vm_phys_segs[segind];
+		paddr = roundup2(seg->start, PAGE_SIZE);
+		sbuf_printf(&sbuf, "    [");
+		while (paddr + PAGE_SIZE > paddr && paddr +
+		    PAGE_SIZE <= seg->end) {
+			m = PHYS_TO_VM_PAGE(paddr);
+			sbuf_printf(&sbuf, "{");
+			sbuf_printf(&sbuf, "\"phys_addr\": %#jx,", (uintmax_t)m->phys_addr);
+			sbuf_printf(&sbuf, "\"object\": %p,", m->object);
+			sbuf_printf(&sbuf, "\"pindex\": %#jx,", (uintmax_t)m->pindex);
+			sbuf_printf(&sbuf, "\"pindex\": %x,", m->ref_count);
+			sbuf_printf(&sbuf, "\"vm_page_wired()\": %d,", vm_page_wired(m));
+			sbuf_printf(&sbuf, "\"order\": %u,", m->order);
+			sbuf_printf(&sbuf, "\"flags\": %x,", m->flags);
+			sbuf_printf(&sbuf, "\"oflags\": %x,", m->oflags);
+			sbuf_printf(&sbuf, "\"psind\": %d,", m->psind);
+			sbuf_printf(&sbuf, "},");
+			paddr += PAGE_SIZE;
+		}
+		sbuf_printf(&sbuf, "],\n");
+	}
+	sbuf_printf(&sbuf, "]\n");
+
 	error = sbuf_finish(&sbuf);
 	sbuf_delete(&sbuf);
 	return (error);

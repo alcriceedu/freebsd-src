@@ -1287,8 +1287,10 @@ vm_reserv_reclaim_inactive_popcnt_upper(int domain, int popcnt)
  * elsewhere, releasing the entire reservation to the physical memory
  * allocator.  This helps recover physical contiguity.
  * Returns true if successful and false otherwise.
- * If the function returns false, then the reservation should be valid for
- * insertion back into the partpopq.
+ * On return, the reservation would be unlocked.  If possible, it will have
+ * been re-inserted into the partpopq if we weren't able to initiate migration
+ * on the reservation.  Once migration has started, there's no turning back.
+ * The reservation is basically broken.
  */
 static bool
 vm_reserv_migrate_locked(int domain, vm_reserv_t rv)
@@ -1360,7 +1362,7 @@ vm_reserv_migrate_locked(int domain, vm_reserv_t rv)
 		 * At this point, if we succeeded, then all the memory
 		 * belonging to the reservation has been returned to the buddy
 		 * allocator.  This is because vm_page_reclaim_run() =>
-		 * vm_page_free_prep() => vm_reserv_free_page().
+		 * vm_page_free_prep().
 		 */
 		goto DONE;
 	} else {
