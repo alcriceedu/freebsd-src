@@ -1375,6 +1375,7 @@ REINSERT:
 	rv->inpartpopq = TRUE;
 	TAILQ_INSERT_HEAD(&vm_rvd[domain].partpop, rv, partpopq);
 	vm_reserv_domain_unlock(domain);
+	vm_reserv_unlock(rv);
 	return (false);
 DONE:
 	return (error ? (false) : (true));
