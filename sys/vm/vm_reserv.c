@@ -441,12 +441,12 @@ sysctl_vm_reserv_scan(SYSCTL_HANDLER_ARGS)
 		while (paddr + VM_LEVEL_0_SIZE > paddr && paddr +
 		    VM_LEVEL_0_SIZE <= seg->end) {
 			sbuf_printf(&sbuf, "\n        {");
-			sbuf_printf(&sbuf, "\"phys_addr\": %#jx,", (uintmax_t)paddr);
-			sbuf_printf(&sbuf, "\"object\": %p,", rv->object);
-			sbuf_printf(&sbuf, "\"pindex\": %#jx,", (uintmax_t)rv->pindex);
-			sbuf_printf(&sbuf, "\"pages\": %p,", rv->pages);
-			sbuf_printf(&sbuf, "\"popcnt\": %d,", rv->popcnt);
-			sbuf_printf(&sbuf, "\"inpartpopq\": %d,", rv->inpartpopq);
+			sbuf_printf(&sbuf, "\"pa\": %#jx,", (uintmax_t)paddr);
+			sbuf_printf(&sbuf, "\"o\": %p,", rv->object);
+			sbuf_printf(&sbuf, "\"pi\": %#jx,", (uintmax_t)rv->pindex);
+			sbuf_printf(&sbuf, "\"pg\": %p,", rv->pages);
+			sbuf_printf(&sbuf, "\"pop\": %d,", rv->popcnt);
+			sbuf_printf(&sbuf, "\"inq\": %d,", rv->inpartpopq);
 			sbuf_printf(&sbuf, "},");
 			paddr += VM_LEVEL_0_SIZE;
 			rv++;

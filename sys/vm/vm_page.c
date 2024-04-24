@@ -484,22 +484,22 @@ sysctl_vm_page_scan(SYSCTL_HANDLER_ARGS)
 			}
 			sbuf_printf(&sbuf, "\n        {");
 			sbuf_printf(&sbuf, "\"m\": %p,", m);
-			sbuf_printf(&sbuf, "\"phys_addr\": %#jx,", (uintmax_t)m->phys_addr);
-			sbuf_printf(&sbuf, "\"object\": %p,", m->object);
+			sbuf_printf(&sbuf, "\"pa\": %#jx,", (uintmax_t)m->phys_addr);
+			sbuf_printf(&sbuf, "\"o\": %p,", m->object);
 			if (m->object) {
-				sbuf_printf(&sbuf, "\"object->size\": %#jx,", (uintmax_t)m->object->size);
-				sbuf_printf(&sbuf, "\"object->ref_count\": %u,", m->object->ref_count);
-				sbuf_printf(&sbuf, "\"object->type\": %x,", m->object->type);
-				sbuf_printf(&sbuf, "\"object->flags\": %x,", m->object->flags);
-				sbuf_printf(&sbuf, "\"object->resident_page_count\": %d,", m->object->resident_page_count);
+				sbuf_printf(&sbuf, "\"o->sz\": %#jx,", (uintmax_t)m->object->size);
+				sbuf_printf(&sbuf, "\"o->rc\": %u,", m->object->ref_count);
+				sbuf_printf(&sbuf, "\"o->t\": %#x,", m->object->type);
+				sbuf_printf(&sbuf, "\"o->f\": %#x,", m->object->flags);
+				sbuf_printf(&sbuf, "\"o->rpc\": %d,", m->object->resident_page_count);
 			}
-			sbuf_printf(&sbuf, "\"pindex\": %#jx,", (uintmax_t)m->pindex);
-			sbuf_printf(&sbuf, "\"pindex\": %x,", m->ref_count);
-			sbuf_printf(&sbuf, "\"vm_page_wired()\": %d,", vm_page_wired(m));
-			sbuf_printf(&sbuf, "\"order\": %u,", m->order);
-			sbuf_printf(&sbuf, "\"flags\": %x,", m->flags);
-			sbuf_printf(&sbuf, "\"oflags\": %x,", m->oflags);
-			sbuf_printf(&sbuf, "\"psind\": %d,", m->psind);
+			sbuf_printf(&sbuf, "\"pi\": %#jx,", (uintmax_t)m->pindex);
+			sbuf_printf(&sbuf, "\"rc\": %#x,", m->ref_count);
+			sbuf_printf(&sbuf, "\"vpw\": %d,", vm_page_wired(m));
+			sbuf_printf(&sbuf, "\"ord\": %u,", m->order);
+			sbuf_printf(&sbuf, "\"f\": %#x,", m->flags);
+			sbuf_printf(&sbuf, "\"of\": %#x,", m->oflags);
+			sbuf_printf(&sbuf, "\"ps\": %d,", m->psind);
 			sbuf_printf(&sbuf, "},");
 			if (m->object) {
 				VM_OBJECT_RUNLOCK(m->object);
