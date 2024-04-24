@@ -437,10 +437,10 @@ sysctl_vm_reserv_scan(SYSCTL_HANDLER_ARGS)
 		paddr = roundup2(seg->start, PAGE_SIZE);
 		rv = seg->first_reserv + (paddr >> VM_LEVEL_0_SHIFT) -
 		    (seg->start >> VM_LEVEL_0_SHIFT);
-		sbuf_printf(&sbuf, "    [");
+		sbuf_printf(&sbuf, "\n    [");
 		while (paddr + VM_LEVEL_0_SIZE > paddr && paddr +
 		    VM_LEVEL_0_SIZE <= seg->end) {
-			sbuf_printf(&sbuf, "{");
+			sbuf_printf(&sbuf, "\n        {");
 			sbuf_printf(&sbuf, "\"phys_addr\": %#jx,", (uintmax_t)paddr);
 			sbuf_printf(&sbuf, "\"object\": %p,", rv->object);
 			sbuf_printf(&sbuf, "\"pindex\": %#jx,", (uintmax_t)rv->pindex);
@@ -451,9 +451,9 @@ sysctl_vm_reserv_scan(SYSCTL_HANDLER_ARGS)
 			paddr += VM_LEVEL_0_SIZE;
 			rv++;
 		}
-		sbuf_printf(&sbuf, "],\n");
+		sbuf_printf(&sbuf, "\n    ],");
 	}
-	sbuf_printf(&sbuf, "]\n");
+	sbuf_printf(&sbuf, "\n]\n");
 
 	error = sbuf_finish(&sbuf);
 	sbuf_delete(&sbuf);

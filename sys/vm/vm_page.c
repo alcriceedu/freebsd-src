@@ -471,18 +471,18 @@ sysctl_vm_page_scan(SYSCTL_HANDLER_ARGS)
 		return (error);
 	sbuf_new_for_sysctl(&sbuf, NULL, 128, req);
 
-	sbuf_printf(&sbuf, "\n[\n");
+	sbuf_printf(&sbuf, "\n[");
 	for (segind = 0; segind < vm_phys_nsegs; segind++) {
 		seg = &vm_phys_segs[segind];
 		paddr = roundup2(seg->start, PAGE_SIZE);
-		sbuf_printf(&sbuf, "    [");
+		sbuf_printf(&sbuf, "\n    [");
 		while (paddr + PAGE_SIZE > paddr && paddr +
 		    PAGE_SIZE <= seg->end) {
 			m = PHYS_TO_VM_PAGE(paddr);
 			if (m->object) {
 				VM_OBJECT_RLOCK(m->object);
 			}
-			sbuf_printf(&sbuf, "{");
+			sbuf_printf(&sbuf, "\n        {");
 			sbuf_printf(&sbuf, "\"m\": %p,", m);
 			sbuf_printf(&sbuf, "\"phys_addr\": %#jx,", (uintmax_t)m->phys_addr);
 			sbuf_printf(&sbuf, "\"object\": %p,", m->object);
@@ -506,9 +506,9 @@ sysctl_vm_page_scan(SYSCTL_HANDLER_ARGS)
 			}
 			paddr += PAGE_SIZE;
 		}
-		sbuf_printf(&sbuf, "],\n");
+		sbuf_printf(&sbuf, "\n    ],");
 	}
-	sbuf_printf(&sbuf, "]\n");
+	sbuf_printf(&sbuf, "\n]\n");
 
 	error = sbuf_finish(&sbuf);
 	sbuf_delete(&sbuf);
