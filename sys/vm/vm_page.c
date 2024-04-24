@@ -160,6 +160,28 @@ static int sysctl_vm_page_blacklist(SYSCTL_HANDLER_ARGS);
 SYSCTL_PROC(_vm, OID_AUTO, page_blacklist, CTLTYPE_STRING | CTLFLAG_RD |
     CTLFLAG_MPSAFE, NULL, 0, sysctl_vm_page_blacklist, "A", "Blacklist pages");
 
+static COUNTER_U64_DEFINE_EARLY(vm_page_reclaim_busy1);
+SYSCTL_COUNTER_U64(_vm_stats, OID_AUTO, vm_page_reclaim_busy1, CTLFLAG_RD,
+    &vm_page_reclaim_busy1, "Cumulative number of times the first EBUSY in vm_page_reclaim_run()");
+static COUNTER_U64_DEFINE_EARLY(vm_page_reclaim_busy2);
+SYSCTL_COUNTER_U64(_vm_stats, OID_AUTO, vm_page_reclaim_busy2, CTLFLAG_RD,
+    &vm_page_reclaim_busy2, "Cumulative number of times the second EBUSY in vm_page_reclaim_run()");
+static COUNTER_U64_DEFINE_EARLY(vm_page_reclaim_busy3);
+SYSCTL_COUNTER_U64(_vm_stats, OID_AUTO, vm_page_reclaim_busy3, CTLFLAG_RD,
+    &vm_page_reclaim_busy3, "Cumulative number of times the third EBUSY in vm_page_reclaim_run()");
+static COUNTER_U64_DEFINE_EARLY(vm_page_reclaim_busy4);
+SYSCTL_COUNTER_U64(_vm_stats, OID_AUTO, vm_page_reclaim_busy4, CTLFLAG_RD,
+    &vm_page_reclaim_busy4, "Cumulative number of times the fourth EBUSY in vm_page_reclaim_run()");
+static COUNTER_U64_DEFINE_EARLY(vm_page_reclaim_inval1);
+SYSCTL_COUNTER_U64(_vm_stats, OID_AUTO, vm_page_reclaim_inval1, CTLFLAG_RD,
+    &vm_page_reclaim_inval1, "Cumulative number of times the first EINVAL in vm_page_reclaim_run()");
+static COUNTER_U64_DEFINE_EARLY(vm_page_reclaim_inval2);
+SYSCTL_COUNTER_U64(_vm_stats, OID_AUTO, vm_page_reclaim_inval2, CTLFLAG_RD,
+    &vm_page_reclaim_inval2, "Cumulative number of times the second EINVAL in vm_page_reclaim_run()");
+static COUNTER_U64_DEFINE_EARLY(vm_page_reclaim_inval3);
+SYSCTL_COUNTER_U64(_vm_stats, OID_AUTO, vm_page_reclaim_inval3, CTLFLAG_RD,
+    &vm_page_reclaim_inval3, "Cumulative number of times the third EINVAL in vm_page_reclaim_run()");
+
 static uma_zone_t fakepg_zone;
 
 static void vm_page_alloc_check(vm_page_t m);
@@ -2846,8 +2868,10 @@ vm_page_reclaim_run(int req_class, int domain, u_long npages, vm_page_t m_run,
 		 * Racily check for wirings.  Races are handled once the object
 		 * lock is held and the page is unmapped.
 		 */
-		if (vm_page_wired(m))
+		if (vm_page_wired(m)) {
+			counter_u64_add(vm_page_reclaim_busy1, 1);
 			error = EBUSY;
+		}
 		else if ((object = atomic_load_ptr(&m->object)) != NULL) {
 			/*
 			 * The page is relocated if and only if it could be
@@ -2857,14 +2881,19 @@ vm_page_reclaim_run(int req_class, int domain, u_long npages, vm_page_t m_run,
 			/* Don't care: PG_NODUMP, PG_ZERO. */
 			if (m->object != object ||
 			    ((object->flags & OBJ_SWAP) == 0 &&
-			    object->type != OBJT_VNODE))
+			    object->type != OBJT_VNODE)) {
+				counter_u64_add(vm_page_reclaim_inval1, 1);
 				error = EINVAL;
-			else if (object->memattr != VM_MEMATTR_DEFAULT)
+			}
+			else if (object->memattr != VM_MEMATTR_DEFAULT) {
+				counter_u64_add(vm_page_reclaim_inval2, 1);
 				error = EINVAL;
+			}
 			else if (vm_page_queue(m) != PQ_NONE &&
 			    vm_page_tryxbusy(m) != 0) {
 				if (vm_page_wired(m)) {
 					vm_page_xunbusy(m);
+					counter_u64_add(vm_page_reclaim_busy2, 1);
 					error = EBUSY;
 					goto unlock;
 				}
@@ -2926,6 +2955,7 @@ vm_page_reclaim_run(int req_class, int domain, u_long npages, vm_page_t m_run,
 					    !vm_page_try_remove_all(m)) {
 						vm_page_xunbusy(m);
 						vm_page_free(m_new);
+						counter_u64_add(vm_page_reclaim_busy3, 1);
 						error = EBUSY;
 						goto unlock;
 					}
@@ -2966,8 +2996,10 @@ vm_page_reclaim_run(int req_class, int domain, u_long npages, vm_page_t m_run,
 					KASSERT(m->dirty == 0,
 					    ("page %p is dirty", m));
 				}
-			} else
+			} else {
+				counter_u64_add(vm_page_reclaim_busy4, 1);
 				error = EBUSY;
+			}
 unlock:
 			VM_OBJECT_WUNLOCK(object);
 		} else {
@@ -2991,8 +3023,10 @@ unlock:
 				order = 0;
 #endif
 			vm_domain_free_unlock(vmd);
-			if (order == VM_NFREEORDER)
+			if (order == VM_NFREEORDER) {
+				counter_u64_add(vm_page_reclaim_inval3, 1);
 				error = EINVAL;
+			}
 		}
 	}
 	if ((m = SLIST_FIRST(&free)) != NULL) {
