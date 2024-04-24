@@ -164,7 +164,7 @@ static int sysctl_vm_page_scan(SYSCTL_HANDLER_ARGS);
 SYSCTL_OID(_vm, OID_AUTO, page_scan,
     CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE, NULL, 0,
     sysctl_vm_page_scan, "A",
-    "Scan and report information about physical pages");
+    "Scan and report information about vm_page_array");
 
 static COUNTER_U64_DEFINE_EARLY(vm_page_reclaim_busy1);
 SYSCTL_COUNTER_U64(_vm_stats, OID_AUTO, vm_page_reclaim_busy1, CTLFLAG_RD,
@@ -471,7 +471,7 @@ sysctl_vm_page_scan(SYSCTL_HANDLER_ARGS)
 		return (error);
 	sbuf_new_for_sysctl(&sbuf, NULL, 128, req);
 
-	sbuf_printf(&sbuf, "[\n");
+	sbuf_printf(&sbuf, "\n[\n");
 	for (segind = 0; segind < vm_phys_nsegs; segind++) {
 		seg = &vm_phys_segs[segind];
 		paddr = roundup2(seg->start, PAGE_SIZE);
@@ -479,10 +479,20 @@ sysctl_vm_page_scan(SYSCTL_HANDLER_ARGS)
 		while (paddr + PAGE_SIZE > paddr && paddr +
 		    PAGE_SIZE <= seg->end) {
 			m = PHYS_TO_VM_PAGE(paddr);
+			if (m->object) {
+				VM_OBJECT_RLOCK(m->object);
+			}
 			sbuf_printf(&sbuf, "{");
 			sbuf_printf(&sbuf, "\"m\": %p,", m);
 			sbuf_printf(&sbuf, "\"phys_addr\": %#jx,", (uintmax_t)m->phys_addr);
 			sbuf_printf(&sbuf, "\"object\": %p,", m->object);
+			if (m->object) {
+				sbuf_printf(&sbuf, "\"object->size\": %#jx,", (uintmax_t)m->object->size);
+				sbuf_printf(&sbuf, "\"object->ref_count\": %u,", m->object->ref_count);
+				sbuf_printf(&sbuf, "\"object->type\": %x,", m->object->type);
+				sbuf_printf(&sbuf, "\"object->flags\": %x,", m->object->flags);
+				sbuf_printf(&sbuf, "\"object->resident_page_count\": %d,", m->object->resident_page_count);
+			}
 			sbuf_printf(&sbuf, "\"pindex\": %#jx,", (uintmax_t)m->pindex);
 			sbuf_printf(&sbuf, "\"pindex\": %x,", m->ref_count);
 			sbuf_printf(&sbuf, "\"vm_page_wired()\": %d,", vm_page_wired(m));
@@ -491,6 +501,9 @@ sysctl_vm_page_scan(SYSCTL_HANDLER_ARGS)
 			sbuf_printf(&sbuf, "\"oflags\": %x,", m->oflags);
 			sbuf_printf(&sbuf, "\"psind\": %d,", m->psind);
 			sbuf_printf(&sbuf, "},");
+			if (m->object) {
+				VM_OBJECT_RUNLOCK(m->object);
+			}
 			paddr += PAGE_SIZE;
 		}
 		sbuf_printf(&sbuf, "],\n");
