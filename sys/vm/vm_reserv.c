@@ -425,33 +425,46 @@ sysctl_vm_reserv_scan(SYSCTL_HANDLER_ARGS)
 	struct vm_reserv *rv;
 	vm_paddr_t paddr;
 	int error, segind;
+	bool first_seg, first_page;
 
 	error = sysctl_wire_old_buffer(req, 0);
 	if (error != 0)
 		return (error);
 	sbuf_new_for_sysctl(&sbuf, NULL, 128, req);
 
-	sbuf_printf(&sbuf, "[\n");
+	sbuf_printf(&sbuf, "\n[");
+	first_seg = true;
 	for (segind = 0; segind < vm_phys_nsegs; segind++) {
 		seg = &vm_phys_segs[segind];
 		paddr = roundup2(seg->start, PAGE_SIZE);
 		rv = seg->first_reserv + (paddr >> VM_LEVEL_0_SHIFT) -
 		    (seg->start >> VM_LEVEL_0_SHIFT);
-		sbuf_printf(&sbuf, "\n    [");
+		if (first_seg) {
+			sbuf_printf(&sbuf, "\n    [");
+		} else {
+			sbuf_printf(&sbuf, ",\n    [");
+		}
+		first_page = true;
 		while (paddr + VM_LEVEL_0_SIZE > paddr && paddr +
 		    VM_LEVEL_0_SIZE <= seg->end) {
-			sbuf_printf(&sbuf, "\n        {");
+			if (first_page) {
+				sbuf_printf(&sbuf, "\n        {");
+			} else {
+				sbuf_printf(&sbuf, ",\n        {");
+			}
 			sbuf_printf(&sbuf, "\"pa\": %#jx,", (uintmax_t)paddr);
 			sbuf_printf(&sbuf, "\"o\": %p,", rv->object);
 			sbuf_printf(&sbuf, "\"pi\": %#jx,", (uintmax_t)rv->pindex);
 			sbuf_printf(&sbuf, "\"pg\": %p,", rv->pages);
 			sbuf_printf(&sbuf, "\"pop\": %d,", rv->popcnt);
 			sbuf_printf(&sbuf, "\"inq\": %d,", rv->inpartpopq);
-			sbuf_printf(&sbuf, "},");
+			sbuf_printf(&sbuf, "}");
 			paddr += VM_LEVEL_0_SIZE;
 			rv++;
+			first_page = false;
 		}
-		sbuf_printf(&sbuf, "\n    ],");
+		sbuf_printf(&sbuf, "\n    ]");
+		first_seg = false;
 	}
 	sbuf_printf(&sbuf, "\n]\n");
 
