@@ -452,12 +452,12 @@ sysctl_vm_reserv_scan(SYSCTL_HANDLER_ARGS)
 			} else {
 				sbuf_printf(&sbuf, ",\n        {");
 			}
-			sbuf_printf(&sbuf, "\"pa\": %#jx,", (uintmax_t)paddr);
-			sbuf_printf(&sbuf, "\"o\": %p,", rv->object);
-			sbuf_printf(&sbuf, "\"pi\": %#jx,", (uintmax_t)rv->pindex);
-			sbuf_printf(&sbuf, "\"pg\": %p,", rv->pages);
-			sbuf_printf(&sbuf, "\"pop\": %d,", rv->popcnt);
-			sbuf_printf(&sbuf, "\"inq\": %d,", rv->inpartpopq);
+			sbuf_printf(&sbuf, "\"pa\":\"%#jx\",", (uintmax_t)paddr);
+			sbuf_printf(&sbuf, "\"o\":\"%p\",", rv->object);
+			sbuf_printf(&sbuf, "\"pi\":\"%#jx\",", (uintmax_t)rv->pindex);
+			sbuf_printf(&sbuf, "\"pg\":\"%p\",", rv->pages);
+			sbuf_printf(&sbuf, "\"pop\":%d,", rv->popcnt);
+			sbuf_printf(&sbuf, "\"inq\":%d", rv->inpartpopq);
 			sbuf_printf(&sbuf, "}");
 			paddr += VM_LEVEL_0_SIZE;
 			rv++;
