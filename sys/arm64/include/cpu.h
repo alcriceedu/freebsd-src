@@ -32,8 +32,6 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- *	from: @(#)cpu.h 5.4 (Berkeley) 5/9/91
  *	from: FreeBSD: src/sys/i386/include/cpu.h,v 1.62 2001/06/29
  */
 
@@ -134,6 +132,20 @@
 #define	CPU_PART_KRYO400_GOLD	0x804
 #define	CPU_PART_KRYO400_SILVER	0x805
 
+/* Apple part numbers */
+#define CPU_PART_M1_ICESTORM      0x022
+#define CPU_PART_M1_FIRESTORM     0x023
+#define CPU_PART_M1_ICESTORM_PRO  0x024
+#define CPU_PART_M1_FIRESTORM_PRO 0x025
+#define CPU_PART_M1_ICESTORM_MAX  0x028
+#define CPU_PART_M1_FIRESTORM_MAX 0x029
+#define CPU_PART_M2_BLIZZARD      0x032
+#define CPU_PART_M2_AVALANCHE     0x033
+#define CPU_PART_M2_BLIZZARD_PRO  0x034
+#define CPU_PART_M2_AVALANCHE_PRO 0x035
+#define CPU_PART_M2_BLIZZARD_MAX  0x038
+#define CPU_PART_M2_AVALANCHE_MAX 0x039
+
 #define	CPU_IMPL(midr)	(((midr) >> 24) & 0xff)
 #define	CPU_PART(midr)	(((midr) >> 4) & 0xfff)
 #define	CPU_VAR(midr)	(((midr) >> 20) & 0xf)
@@ -193,6 +205,9 @@ extern uint64_t __cpu_affinity[];
 
 struct arm64_addr_mask;
 extern struct arm64_addr_mask elf64_addr_mask;
+
+typedef void (*cpu_reset_hook_t)(void);
+extern cpu_reset_hook_t cpu_reset_hook;
 
 void	cpu_halt(void) __dead2;
 void	cpu_reset(void) __dead2;

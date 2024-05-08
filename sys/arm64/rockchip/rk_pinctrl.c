@@ -26,7 +26,6 @@
  *
  */
 
-#include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/bus.h>
@@ -49,7 +48,7 @@
 
 #include <dev/fdt/fdt_pinctrl.h>
 
-#include <dev/extres/syscon/syscon.h>
+#include <dev/syscon/syscon.h>
 
 #include "gpio_if.h"
 #include "syscon_if.h"

@@ -35,8 +35,6 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- *	@(#)kern_prot.c	8.6 (Berkeley) 1/21/94
  */
 
 /*
@@ -73,6 +71,8 @@
 #include <sys/socketvar.h>
 #include <sys/syscallsubr.h>
 #include <sys/sysctl.h>
+
+#include <vm/uma.h>
 
 #ifdef REGRESSION
 FEATURE(regression,
@@ -1465,11 +1465,14 @@ cr_bsd_visible(struct ucred *u1, struct ucred *u2)
 {
 	int error;
 
-	if ((error = cr_canseeotheruids(u1, u2)))
+	error = cr_canseeotheruids(u1, u2);
+	if (error != 0)
 		return (error);
-	if ((error = cr_canseeothergids(u1, u2)))
+	error = cr_canseeothergids(u1, u2);
+	if (error != 0)
 		return (error);
-	if ((error = cr_canseejailproc(u1, u2)))
+	error = cr_canseejailproc(u1, u2);
+	if (error != 0)
 		return (error);
 	return (0);
 }

@@ -28,10 +28,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)vm.h	8.2 (Berkeley) 12/13/93
- *	@(#)vm_prot.h	8.1 (Berkeley) 6/11/93
- *	@(#)vm_inherit.h	8.1 (Berkeley) 6/11/93
- *
  * Copyright (c) 1987, 1990 Carnegie-Mellon University.
  * All rights reserved.
  *
@@ -157,6 +153,12 @@ struct kva_md_info {
 #define	SWAP_RESERVE_FORCE_ON		(1 << 0)
 #define	SWAP_RESERVE_RLIMIT_ON		(1 << 1)
 #define	SWAP_RESERVE_ALLOW_NONWIRED	(1 << 2)
+
+#ifdef NUMA
+#define	__numa_used
+#else
+#define	__numa_used	__unused
+#endif
 
 #ifdef _KERNEL
 struct ucred;

@@ -29,12 +29,6 @@
  * SUCH DAMAGE.
  */
 
-#if 0
-#ifndef lint
-static const char sccsid[] = "@(#)utilities.c	8.6 (Berkeley) 5/19/95";
-#endif /* not lint */
-#endif
-#include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -1023,7 +1017,6 @@ check_cgmagic(int cg, struct bufarea *cgbp)
 	CHK(cgp->cg_ndblk, >, sblock.fs_fpg, "%jd");
 	if (sblock.fs_magic == FS_UFS1_MAGIC) {
 		CHK(cgp->cg_old_niblk, !=, sblock.fs_ipg, "%jd");
-		CHK(cgp->cg_old_ncyl, >, sblock.fs_old_cpg, "%jd");
 	} else if (sblock.fs_magic == FS_UFS2_MAGIC) {
 		CHK(cgp->cg_niblk, !=, sblock.fs_ipg, "%jd");
 		CHK(cgp->cg_initediblk, >, sblock.fs_ipg, "%jd");
@@ -1040,7 +1033,6 @@ check_cgmagic(int cg, struct bufarea *cgbp)
 	} else if (sblock.fs_magic == FS_UFS1_MAGIC) {
 		CHK(cgp->cg_niblk, !=, 0, "%jd");
 		CHK(cgp->cg_initediblk, !=, 0, "%jd");
-		CHK(cgp->cg_old_ncyl, !=, sblock.fs_old_cpg, "%jd");
 		CHK(cgp->cg_old_niblk, !=, sblock.fs_ipg, "%jd");
 		CHK(cgp->cg_old_btotoff, !=, start, "%jd");
 		CHK(cgp->cg_old_boff, !=, cgp->cg_old_btotoff +

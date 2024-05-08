@@ -26,7 +26,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/bus.h>
@@ -310,6 +309,7 @@ struct uart_class uart_z8530_class = {
 	.uc_rclk = DEFAULT_RCLK,
 	.uc_rshift = 0
 };
+UART_CLASS(uart_z8530_class);
 
 #define	SIGCHG(c, i, s, d)				\
 	if (c) {					\

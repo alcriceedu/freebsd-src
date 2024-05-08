@@ -26,7 +26,6 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/cpuset.h>
@@ -287,6 +286,13 @@ kthread_add1(void (*func)(void *), void *arg, struct proc *p,
 	}
 	oldtd = FIRST_THREAD_IN_PROC(p);
 
+	/*
+	 * Set the new thread pointer before the thread starts running: *newtdp
+	 * could be a pointer that is referenced by "func".
+	 */
+	if (newtdp != NULL)
+		*newtdp = newtd;
+
 	bzero(&newtd->td_startzero,
 	    __rangeof(struct thread, td_startzero, td_endzero));
 	bcopy(&oldtd->td_startcopy, &newtd->td_startcopy,
@@ -331,8 +337,6 @@ kthread_add1(void (*func)(void *), void *arg, struct proc *p,
 		thread_lock(newtd);
 		sched_add(newtd, SRQ_BORING); 
 	}
-	if (newtdp)
-		*newtdp = newtd;
 	return (0);
 }
 
@@ -491,13 +495,21 @@ kproc_kthread_add(void (*func)(void *), void *arg,
 	struct thread *td;
 
 	if (*procptr == NULL) {
+		/*
+		 * Use RFSTOPPED to ensure that *tdptr is initialized before the
+		 * thread starts running.
+		 */
 		error = kproc_create(func, arg,
-		    procptr, flags, pages, "%s", procname);
+		    procptr, flags | RFSTOPPED, pages, "%s", procname);
 		if (error)
 			return (error);
 		td = FIRST_THREAD_IN_PROC(*procptr);
 		if (tdptr)
 			*tdptr = td;
+		if ((flags & RFSTOPPED) == 0) {
+			thread_lock(td);
+			sched_add(td, SRQ_BORING);
+		}
 		va_start(ap, fmt);
 		vsnprintf(td->td_name, sizeof(td->td_name), fmt, ap);
 		va_end(ap);

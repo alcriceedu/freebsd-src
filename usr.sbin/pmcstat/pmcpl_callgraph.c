@@ -35,7 +35,6 @@
  * gprof(1) compatible profiles.
  */
 
-#include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/endian.h>
 #include <sys/gmon.h>
@@ -359,7 +358,7 @@ pmcpl_cg_process(struct pmcstat_process *pp, struct pmcstat_pmcrecord *pmcr,
 	 * For each return address in the call chain record, subject
 	 * to the maximum depth desired.
 	 * - Find the image associated with the sample.  Stop if there
-	 *   there is no valid image at that address.
+	 *   is no valid image at that address.
 	 * - Find the function that overlaps the return address.
 	 * - If found: use the start address of the function.
 	 *   If not found (say an object's symbol table is not present or

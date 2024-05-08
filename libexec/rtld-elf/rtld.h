@@ -240,6 +240,7 @@ typedef struct Struct_Obj_Entry {
     bool ver_checked : 1;	/* True if processed by rtld_verify_object_versions */
     bool textrel : 1;		/* True if there are relocations to text seg */
     bool symbolic : 1;		/* True if generated with "-Bsymbolic" */
+    bool deepbind : 1;		/* True if loaded with RTLD_DEEPBIND" */
     bool bind_now : 1;		/* True if all relocations should be made first */
     bool traced : 1;		/* Already printed in ldd trace output */
     bool jmpslots_done : 1;	/* Already have relocated the jump slots */
@@ -262,6 +263,7 @@ typedef struct Struct_Obj_Entry {
     bool on_fini_list: 1;	/* Object is already on fini list. */
     bool dag_inited : 1;	/* Object has its DAG initialized. */
     bool filtees_loaded : 1;	/* Filtees loaded */
+    bool filtees_loading : 1;	/* In process of filtees loading */
     bool irelative : 1;		/* Object has R_MACHDEP_IRELATIVE relocs */
     bool irelative_nonplt : 1;	/* Object has R_MACHDEP_IRELATIVE non-plt relocs */
     bool gnu_ifunc : 1;		/* Object has references to STT_GNU_IFUNC */

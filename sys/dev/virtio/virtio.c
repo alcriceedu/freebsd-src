@@ -26,7 +26,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -67,6 +66,13 @@ static struct virtio_ident {
 	{ VIRTIO_ID_INPUT,		"Input"				},
 	{ VIRTIO_ID_VSOCK,		"VSOCK Transport"		},
 	{ VIRTIO_ID_CRYPTO,		"Crypto"			},
+	{ VIRTIO_ID_IOMMU,		"IOMMU"				},
+	{ VIRTIO_ID_SOUND,		"Sound"				},
+	{ VIRTIO_ID_FS,			"Filesystem"			},
+	{ VIRTIO_ID_PMEM,		"Persistent Memory"		},
+	{ VIRTIO_ID_RPMB,		"RPMB"				},
+	{ VIRTIO_ID_SCMI,		"SCMI"				},
+	{ VIRTIO_ID_GPIO,		"GPIO"				},
 
 	{ 0, NULL }
 };

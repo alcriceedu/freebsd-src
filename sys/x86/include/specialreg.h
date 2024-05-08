@@ -27,8 +27,6 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- *	from: @(#)specialreg.h	7.1 (Berkeley) 5/9/91
  */
 
 #ifndef _MACHINE_SPECIALREG_H_
@@ -920,7 +918,7 @@
 
 #define	CCR4			0xe8
 #define	CCR4_IOMASK		0x07
-#define	CCR4_MEM		0x08	/* Enables momory bypassing */
+#define	CCR4_MEM		0x08	/* Enables memory bypassing */
 #define	CCR4_DTE		0x10	/* Enables directory table entry cache */
 #define	CCR4_FASTFPE	0x20	/* Fast FPU exception */
 #define	CCR4_CPUID		0x80	/* Enables CPUID instruction */
@@ -940,7 +938,7 @@
 #define	PCR0_RSTK		0x01	/* Enables return stack */
 #define	PCR0_BTB		0x02	/* Enables branch target buffer */
 #define	PCR0_LOOP		0x04	/* Enables loop */
-#define	PCR0_AIS		0x08	/* Enables all instrcutions stalled to
+#define	PCR0_AIS		0x08	/* Enables all instructions stalled to
 								   serialize pipe. */
 #define	PCR0_MLR		0x10	/* Enables reordering of misaligned loads */
 #define	PCR0_BTBRT		0x40	/* Enables BTB test register. */
@@ -1094,7 +1092,7 @@
 
 /*
  * The region control registers specify the attributes associated with
- * the ARRx addres regions.
+ * the ARRx address regions.
  */
 #define	RCR0	0xdc
 #define	RCR1	0xdd

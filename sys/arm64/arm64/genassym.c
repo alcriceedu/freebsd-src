@@ -26,7 +26,6 @@
  *
  */
 
-#include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/assym.h>
 #include <sys/pcpu.h>
@@ -72,6 +71,7 @@ ASSYM(TD_MD_CANARY, offsetof(struct thread, td_md.md_canary));
 
 ASSYM(TF_SIZE, sizeof(struct trapframe));
 ASSYM(TF_SP, offsetof(struct trapframe, tf_sp));
+ASSYM(TF_LR, offsetof(struct trapframe, tf_lr));
 ASSYM(TF_ELR, offsetof(struct trapframe, tf_elr));
 ASSYM(TF_SPSR, offsetof(struct trapframe, tf_spsr));
 ASSYM(TF_ESR, offsetof(struct trapframe, tf_esr));
