@@ -27,7 +27,6 @@
  *
  */
 
-#include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/bus.h>
@@ -47,7 +46,7 @@
 #include <dev/gpio/gpiobusvar.h>
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
-#include <dev/extres/clk/clk.h>
+#include <dev/clk/clk.h>
 
 #include "gpio_if.h"
 #include "pic_if.h"
@@ -205,7 +204,7 @@ rk_gpio_write_4(struct rk_gpio_softc *sc, int reg, uint32_t value)
 static int
 rk_gpio_intr(void *arg)
 {
-	struct rk_gpio_softc *sc = (struct rk_gpio_softc *)arg;;
+	struct rk_gpio_softc *sc = (struct rk_gpio_softc *)arg;
 	struct trapframe *tf = curthread->td_intr_frame;
 	uint32_t status;
 

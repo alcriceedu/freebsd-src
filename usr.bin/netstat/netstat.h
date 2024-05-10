@@ -27,8 +27,6 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- *	@(#)netstat.h	8.2 (Berkeley) 1/4/94
  */
 
 #include <sys/cdefs.h>
@@ -98,6 +96,7 @@ void	igmp_stats(u_long, const char *, int, int);
 void	pim_stats(u_long, const char *, int, int);
 void	carp_stats(u_long, const char *, int, int);
 void	pfsync_stats(u_long, const char *, int, int);
+void	pflow_stats(u_long, const char *, int, int);
 #ifdef IPSEC
 void	ipsec_stats(u_long, const char *, int, int);
 void	esp_stats(u_long, const char *, int, int);

@@ -203,7 +203,7 @@ static uint_t zfs_scan_checkpoint_intval = 7200; /* in seconds */
 int zfs_scan_suspend_progress = 0; /* set to prevent scans from progressing */
 static int zfs_no_scrub_io = B_FALSE; /* set to disable scrub i/o */
 static int zfs_no_scrub_prefetch = B_FALSE; /* set to disable scrub prefetch */
-static const enum ddt_class zfs_scrub_ddt_class_max = DDT_CLASS_DUPLICATE;
+static const ddt_class_t zfs_scrub_ddt_class_max = DDT_CLASS_DUPLICATE;
 /* max number of blocks to free in a single TXG */
 static uint64_t zfs_async_block_max_blocks = UINT64_MAX;
 /* max number of dedup blocks to free in a single TXG */
@@ -429,8 +429,8 @@ sio2bp(const scan_io_t *sio, blkptr_t *bp)
 {
 	memset(bp, 0, sizeof (*bp));
 	bp->blk_prop = sio->sio_blk_prop;
-	bp->blk_phys_birth = sio->sio_phys_birth;
-	bp->blk_birth = sio->sio_birth;
+	BP_SET_PHYSICAL_BIRTH(bp, sio->sio_phys_birth);
+	BP_SET_LOGICAL_BIRTH(bp, sio->sio_birth);
 	bp->blk_fill = 1;	/* we always only work with data pointers */
 	bp->blk_cksum = sio->sio_cksum;
 
@@ -444,8 +444,8 @@ static inline void
 bp2sio(const blkptr_t *bp, scan_io_t *sio, int dva_i)
 {
 	sio->sio_blk_prop = bp->blk_prop;
-	sio->sio_phys_birth = bp->blk_phys_birth;
-	sio->sio_birth = bp->blk_birth;
+	sio->sio_phys_birth = BP_GET_PHYSICAL_BIRTH(bp);
+	sio->sio_birth = BP_GET_LOGICAL_BIRTH(bp);
 	sio->sio_cksum = bp->blk_cksum;
 	sio->sio_nr_dvas = BP_GET_NDVAS(bp);
 
@@ -1721,7 +1721,8 @@ dsl_scan_zil_block(zilog_t *zilog, const blkptr_t *bp, void *arg,
 	zbookmark_phys_t zb;
 
 	ASSERT(!BP_IS_REDACTED(bp));
-	if (BP_IS_HOLE(bp) || bp->blk_birth <= scn->scn_phys.scn_cur_min_txg)
+	if (BP_IS_HOLE(bp) ||
+	    BP_GET_LOGICAL_BIRTH(bp) <= scn->scn_phys.scn_cur_min_txg)
 		return (0);
 
 	/*
@@ -1730,7 +1731,8 @@ dsl_scan_zil_block(zilog_t *zilog, const blkptr_t *bp, void *arg,
 	 * (on-disk) even if it hasn't been claimed (even though for
 	 * scrub there's nothing to do to it).
 	 */
-	if (claim_txg == 0 && bp->blk_birth >= spa_min_claim_txg(dp->dp_spa))
+	if (claim_txg == 0 &&
+	    BP_GET_LOGICAL_BIRTH(bp) >= spa_min_claim_txg(dp->dp_spa))
 		return (0);
 
 	SET_BOOKMARK(&zb, zh->zh_log.blk_cksum.zc_word[ZIL_ZC_OBJSET],
@@ -1756,7 +1758,7 @@ dsl_scan_zil_record(zilog_t *zilog, const lr_t *lrc, void *arg,
 
 		ASSERT(!BP_IS_REDACTED(bp));
 		if (BP_IS_HOLE(bp) ||
-		    bp->blk_birth <= scn->scn_phys.scn_cur_min_txg)
+		    BP_GET_LOGICAL_BIRTH(bp) <= scn->scn_phys.scn_cur_min_txg)
 			return (0);
 
 		/*
@@ -1764,7 +1766,7 @@ dsl_scan_zil_record(zilog_t *zilog, const lr_t *lrc, void *arg,
 		 * already txg sync'ed (but this log block contains
 		 * other records that are not synced)
 		 */
-		if (claim_txg == 0 || bp->blk_birth < claim_txg)
+		if (claim_txg == 0 || BP_GET_LOGICAL_BIRTH(bp) < claim_txg)
 			return (0);
 
 		ASSERT3U(BP_GET_LSIZE(bp), !=, 0);
@@ -1903,7 +1905,8 @@ dsl_scan_prefetch(scan_prefetch_ctx_t *spc, blkptr_t *bp, zbookmark_phys_t *zb)
 	if (zfs_no_scrub_prefetch || BP_IS_REDACTED(bp))
 		return;
 
-	if (BP_IS_HOLE(bp) || bp->blk_birth <= scn->scn_phys.scn_cur_min_txg ||
+	if (BP_IS_HOLE(bp) ||
+	    BP_GET_LOGICAL_BIRTH(bp) <= scn->scn_phys.scn_cur_min_txg ||
 	    (BP_GET_LEVEL(bp) == 0 && BP_GET_TYPE(bp) != DMU_OT_DNODE &&
 	    BP_GET_TYPE(bp) != DMU_OT_OBJSET))
 		return;
@@ -2142,7 +2145,7 @@ dsl_scan_check_resume(dsl_scan_t *scn, const dnode_phys_t *dnp,
 	return (B_FALSE);
 }
 
-static void dsl_scan_visitbp(blkptr_t *bp, const zbookmark_phys_t *zb,
+static void dsl_scan_visitbp(const blkptr_t *bp, const zbookmark_phys_t *zb,
     dnode_phys_t *dnp, dsl_dataset_t *ds, dsl_scan_t *scn,
     dmu_objset_type_t ostype, dmu_tx_t *tx);
 inline __attribute__((always_inline)) static void dsl_scan_visitdnode(
@@ -2174,7 +2177,7 @@ dsl_scan_recurse(dsl_scan_t *scn, dsl_dataset_t *ds, dmu_objset_type_t ostype,
 	if (dnp != NULL &&
 	    dnp->dn_bonuslen > DN_MAX_BONUS_LEN(dnp)) {
 		scn->scn_phys.scn_errors++;
-		spa_log_error(spa, zb, &bp->blk_birth);
+		spa_log_error(spa, zb, BP_GET_LOGICAL_BIRTH(bp));
 		return (SET_ERROR(EINVAL));
 	}
 
@@ -2270,7 +2273,7 @@ dsl_scan_recurse(dsl_scan_t *scn, dsl_dataset_t *ds, dmu_objset_type_t ostype,
 		 * by arc_read() for the cases above.
 		 */
 		scn->scn_phys.scn_errors++;
-		spa_log_error(spa, zb, &bp->blk_birth);
+		spa_log_error(spa, zb, BP_GET_LOGICAL_BIRTH(bp));
 		return (SET_ERROR(EINVAL));
 	}
 
@@ -2307,12 +2310,11 @@ dsl_scan_visitdnode(dsl_scan_t *scn, dsl_dataset_t *ds,
  * first 5; we want them to be useful.
  */
 static void
-dsl_scan_visitbp(blkptr_t *bp, const zbookmark_phys_t *zb,
+dsl_scan_visitbp(const blkptr_t *bp, const zbookmark_phys_t *zb,
     dnode_phys_t *dnp, dsl_dataset_t *ds, dsl_scan_t *scn,
     dmu_objset_type_t ostype, dmu_tx_t *tx)
 {
 	dsl_pool_t *dp = scn->scn_dp;
-	blkptr_t *bp_toread = NULL;
 
 	if (dsl_scan_check_suspend(scn, zb))
 		return;
@@ -2348,16 +2350,13 @@ dsl_scan_visitbp(blkptr_t *bp, const zbookmark_phys_t *zb,
 	if (f != SPA_FEATURE_NONE)
 		ASSERT(dsl_dataset_feature_is_active(ds, f));
 
-	if (bp->blk_birth <= scn->scn_phys.scn_cur_min_txg) {
+	if (BP_GET_LOGICAL_BIRTH(bp) <= scn->scn_phys.scn_cur_min_txg) {
 		scn->scn_lt_min_this_txg++;
 		return;
 	}
 
-	bp_toread = kmem_alloc(sizeof (blkptr_t), KM_SLEEP);
-	*bp_toread = *bp;
-
-	if (dsl_scan_recurse(scn, ds, ostype, dnp, bp_toread, zb, tx) != 0)
-		goto out;
+	if (dsl_scan_recurse(scn, ds, ostype, dnp, bp, zb, tx) != 0)
+		return;
 
 	/*
 	 * If dsl_scan_ddt() has already visited this block, it will have
@@ -2367,7 +2366,7 @@ dsl_scan_visitbp(blkptr_t *bp, const zbookmark_phys_t *zb,
 	if (ddt_class_contains(dp->dp_spa,
 	    scn->scn_phys.scn_ddt_class_max, bp)) {
 		scn->scn_ddt_contained_this_txg++;
-		goto out;
+		return;
 	}
 
 	/*
@@ -2377,15 +2376,12 @@ dsl_scan_visitbp(blkptr_t *bp, const zbookmark_phys_t *zb,
 	 * Don't scan it now unless we need to because something
 	 * under it was modified.
 	 */
-	if (BP_PHYSICAL_BIRTH(bp) > scn->scn_phys.scn_cur_max_txg) {
+	if (BP_GET_BIRTH(bp) > scn->scn_phys.scn_cur_max_txg) {
 		scn->scn_gt_max_this_txg++;
-		goto out;
+		return;
 	}
 
 	scan_funcs[scn->scn_phys.scn_func](dp, bp, zb);
-
-out:
-	kmem_free(bp_toread, sizeof (blkptr_t));
 }
 
 static void
@@ -2969,7 +2965,7 @@ dsl_scan_ddt_entry(dsl_scan_t *scn, enum zio_checksum checksum,
  * If there are N references to a deduped block, we don't want to scrub it
  * N times -- ideally, we should scrub it exactly once.
  *
- * We leverage the fact that the dde's replication class (enum ddt_class)
+ * We leverage the fact that the dde's replication class (ddt_class_t)
  * is ordered from highest replication class (DDT_CLASS_DITTO) to lowest
  * (DDT_CLASS_UNIQUE) so that we may walk the DDT in that order.
  *
@@ -4721,7 +4717,7 @@ dsl_scan_scrub_cb(dsl_pool_t *dp,
 {
 	dsl_scan_t *scn = dp->dp_scan;
 	spa_t *spa = dp->dp_spa;
-	uint64_t phys_birth = BP_PHYSICAL_BIRTH(bp);
+	uint64_t phys_birth = BP_GET_BIRTH(bp);
 	size_t psize = BP_GET_PSIZE(bp);
 	boolean_t needs_io = B_FALSE;
 	int zio_flags = ZIO_FLAG_SCAN_THREAD | ZIO_FLAG_RAW | ZIO_FLAG_CANFAIL;

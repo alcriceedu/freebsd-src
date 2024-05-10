@@ -35,7 +35,6 @@
  * Universal 10/100/1000 Ethernet MAC (DWC_gmac).
  */
 
-#include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/bus.h>
@@ -60,8 +59,8 @@
 
 #include <machine/bus.h>
 
-#include <dev/extres/clk/clk.h>
-#include <dev/extres/hwreset/hwreset.h>
+#include <dev/clk/clk.h>
+#include <dev/hwreset/hwreset.h>
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>

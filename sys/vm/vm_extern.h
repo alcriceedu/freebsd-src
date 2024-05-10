@@ -27,8 +27,6 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- *	@(#)vm_extern.h	8.2 (Berkeley) 1/12/94
  */
 
 #ifndef _VM_EXTERN_H_
@@ -49,6 +47,7 @@ struct domainset;
 
 /* These operate on kernel virtual addresses only. */
 vm_offset_t kva_alloc(vm_size_t);
+vm_offset_t kva_alloc_aligned(vm_size_t, vm_size_t);
 void kva_free(vm_offset_t, vm_size_t);
 
 /* These operate on pageable virtual addresses. */
@@ -128,8 +127,10 @@ struct sf_buf *vm_imgact_map_page(vm_object_t object, vm_ooffset_t offset);
 void vm_imgact_unmap_page(struct sf_buf *sf);
 void vm_thread_dispose(struct thread *td);
 int vm_thread_new(struct thread *td, int pages);
-void vm_thread_stack_back(struct domainset *ds, vm_offset_t kaddr,
-    vm_page_t ma[], int npages, int req_class);
+vm_pindex_t vm_kstack_pindex(vm_offset_t ks, int npages);
+vm_object_t vm_thread_kstack_size_to_obj(int npages);
+int vm_thread_stack_back(vm_offset_t kaddr, vm_page_t ma[], int npages,
+    int req_class, int domain);
 u_int vm_active_count(void);
 u_int vm_inactive_count(void);
 u_int vm_laundry_count(void);

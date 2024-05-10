@@ -27,7 +27,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include <sys/cdefs.h>
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/bus.h>
@@ -1562,7 +1562,7 @@ alloc_bar_out:
 static void
 mana_gd_free_pci_res(struct gdma_context *gc)
 {
-	if (!gc || gc->dev)
+	if (!gc || !gc->dev)
 		return;
 
 	if (gc->bar0 != NULL) {

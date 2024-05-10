@@ -35,8 +35,6 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- *	from: @(#)cons.c	7.2 (Berkeley) 5/9/91
  */
 
 #include <sys/cdefs.h>
@@ -74,6 +72,18 @@
 #include <machine/cpu.h>
 #include <machine/clock.h>
 
+/*
+ * Check for 'options EARLY_PRINTF' that may have been used in old kernel
+ * config files. If you are hitting this error you should update your
+ * config to use 'options EARLY_PRINTF=<device name>', e.g. with the
+ * Arm pl011 use:
+ *
+ * options EARLY_PRINTF=pl011
+ */
+#if CHECK_EARLY_PRINTF(1)
+#error Update your config to use 'options EARLY_PRINTF=<device name>'
+#endif
+
 static MALLOC_DEFINE(M_TTYCONS, "tty console", "tty console handling");
 
 struct cn_device {
@@ -93,7 +103,7 @@ int	cons_avail_mask = 0;	/* Bit mask. Each registered low level console
 				 * this bit cleared.
 				 */
 
-static int cn_mute;
+int cn_mute;
 SYSCTL_INT(_kern, OID_AUTO, consmute, CTLFLAG_RW, &cn_mute, 0,
     "State of the console muting");
 
@@ -127,6 +137,18 @@ kbdinit(void)
 {
 
 }
+
+static void
+mute_console(void *data __unused)
+{
+
+	if ((boothowto & (RB_MUTEMSGS | RB_VERBOSE)) == RB_MUTEMSGS) {
+		printf("-- Muting boot messages --\n");
+		cn_mute = 1;
+	}
+}
+
+SYSINIT(mute_console, SI_SUB_COPYRIGHT, SI_ORDER_ANY, mute_console, NULL);
 
 void
 cninit(void)

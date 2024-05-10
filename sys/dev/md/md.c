@@ -53,8 +53,6 @@
  * SUCH DAMAGE.
  *
  * from: Utah Hdr: vn.c 1.13 94/04/02
- *
- *	from: @(#)vn.c	8.6 (Berkeley) 4/1/94
  * From: src/sys/dev/vn/vn.c,v 1.122 2000/12/16 16:06:03
  */
 
@@ -967,7 +965,7 @@ unmapped_step:
 		    PAGE_MASK))));
 		iolen = min(ptoa(npages) - (ma_offs & PAGE_MASK), len);
 		KASSERT(iolen > 0, ("zero iolen"));
-		KASSERT(npages <= atop(MAXPHYS + PAGE_SIZE),
+		KASSERT(npages <= atop(maxphys + PAGE_SIZE),
 		    ("npages %d too large", npages));
 		pmap_qenter(sc->kva, &bp->bio_ma[atop(ma_offs)], npages);
 		aiov.iov_base = (void *)(sc->kva + (ma_offs & PAGE_MASK));
@@ -1489,7 +1487,7 @@ mdcreate_vnode(struct md_s *sc, struct md_req *mdr, struct thread *td)
 		goto bad;
 	}
 
-	sc->kva = kva_alloc(MAXPHYS + PAGE_SIZE);
+	sc->kva = kva_alloc(maxphys + PAGE_SIZE);
 	return (0);
 bad:
 	VOP_UNLOCK(nd.ni_vp);
@@ -1549,7 +1547,7 @@ mddestroy(struct md_s *sc, struct thread *td)
 	if (sc->uma)
 		uma_zdestroy(sc->uma);
 	if (sc->kva)
-		kva_free(sc->kva, MAXPHYS + PAGE_SIZE);
+		kva_free(sc->kva, maxphys + PAGE_SIZE);
 
 	LIST_REMOVE(sc, list);
 	free_unr(md_uh, sc->unit);

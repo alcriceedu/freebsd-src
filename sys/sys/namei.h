@@ -27,8 +27,6 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- *	@(#)namei.h	8.5 (Berkeley) 1/9/95
  */
 
 #ifndef _SYS_NAMEI_H_
@@ -39,6 +37,8 @@
 #include <sys/queue.h>
 #include <sys/_seqc.h>
 #include <sys/_uio.h>
+
+#include <vm/uma.h>
 
 enum nameiop { LOOKUP, CREATE, DELETE, RENAME };
 
@@ -198,8 +198,12 @@ int	cache_fplookup(struct nameidata *ndp, enum cache_fpl_status *status,
 /*
  * Flags in ni_lcf, valid for the duration of the namei call.
  */
-#define	NI_LCF_STRICTRELATIVE	0x0001	/* relative lookup only */
+#define	NI_LCF_STRICTREL	0x0001	/* relative lookup only */
 #define	NI_LCF_CAP_DOTDOT	0x0002	/* ".." in strictrelative case */
+/* Track capability restrictions seperately for violation ktracing. */
+#define	NI_LCF_STRICTREL_KTR	0x0004	/* trace relative lookups */
+#define	NI_LCF_CAP_DOTDOT_KTR	0x0008	/* ".." in strictrelative case */
+#define	NI_LCF_KTR_FLAGS	(NI_LCF_STRICTREL_KTR | NI_LCF_CAP_DOTDOT_KTR)
 
 /*
  * Initialization of a nameidata structure.

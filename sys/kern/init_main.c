@@ -39,11 +39,8 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- *	@(#)init_main.c	8.9 (Berkeley) 1/21/94
  */
 
-#include <sys/cdefs.h>
 #include "opt_ddb.h"
 #include "opt_kdb.h"
 #include "opt_init_path.h"
@@ -787,6 +784,7 @@ start_init(void *dummy)
 		 */
 		KASSERT((td->td_pflags & TDP_EXECVMSPC) == 0,
 		    ("nested execve"));
+		memset(td->td_frame, 0, sizeof(*td->td_frame));
 		oldvmspace = p->p_vmspace;
 		error = kern_execve(td, &args, NULL, oldvmspace);
 		KASSERT(error != 0,

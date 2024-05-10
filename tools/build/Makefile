@@ -216,6 +216,10 @@ SRCS+=	progname.c
 # Stub implementations of fflagstostr/strtofflags
 SRCS+=	fflags.c
 
+# macOS has a standalone cross-build implementation, but Linux can use the same
+# ELF one as FreeBSD
+SYSINCS+=	${SRCTOP}/sys/sys/linker_set.h
+
 .endif # ${MAKE.OS} == "Linux"
 
 .if ${.MAKE.OS} == "Darwin"
@@ -299,6 +303,8 @@ SYSINCS+=	${SRCTOP}/sys/sys/elf.h
 SYSINCS+=	${SRCTOP}/sys/sys/ctf.h
 # for kbdcontrol:
 SYSINCS+=	${SRCTOP}/sys/sys/kbio.h
+# for kldxref:
+SYSINCS+=	${SRCTOP}/sys/sys/module.h
 
 # We want to run the build with only ${WORLDTMP} in $PATH to ensure we don't
 # accidentally run tools that are incompatible but happen to be in $PATH.
@@ -364,9 +370,9 @@ _WRAP_HOST_TOOL=	${_LINK_HOST_TOOL}
 .endif
 .for var in CC CXX CPP LD
 .for X in $${_empty_var_} X
-.if !empty(${X}${var}) && !${${X}${var}:M/*} && \
-	!${_toolchain_tools_to_symlink:U:M${${X}${var}}}
-_toolchain_tools_to_symlink+=	${${X}${var}}
+.if !empty(${X}${var}) && !${${X}${var}:[1]:M/*} && \
+	!${_toolchain_tools_to_symlink:U:M${${X}${var}:[1]}}
+_toolchain_tools_to_symlink+=	${${X}${var}:[1]}
 .endif
 .endfor
 .endfor

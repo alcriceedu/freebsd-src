@@ -26,7 +26,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/module.h>
 #include <sys/systm.h>
@@ -367,11 +366,10 @@ mvs_alloc_resource(device_t dev, device_t child, int type, int *rid,
 }
 
 static int
-mvs_release_resource(device_t dev, device_t child, int type, int rid,
-			 struct resource *r)
+mvs_release_resource(device_t dev, device_t child, struct resource *r)
 {
 
-	switch (type) {
+	switch (rman_get_type(r)) {
 	case SYS_RES_MEMORY:
 		rman_release_resource(r);
 		return (0);

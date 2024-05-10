@@ -37,7 +37,6 @@
  *
  */
 
-#include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/capsicum.h>
 #include <sys/callout.h>
@@ -169,7 +168,7 @@ cctl_start_element(void *user_data, const char *name, const char **attr)
 	if ((u_int)devlist->level >= (sizeof(devlist->cur_sb) /
 	    sizeof(devlist->cur_sb[0])))
 		log_errx(1, "%s: too many nesting levels, %zd max", __func__,
-		     sizeof(devlist->cur_sb) / sizeof(devlist->cur_sb[0]));
+		     nitems(devlist->cur_sb));
 
 	devlist->cur_sb[devlist->level] = sbuf_new_auto();
 	if (devlist->cur_sb[devlist->level] == NULL)
@@ -291,7 +290,7 @@ cctl_start_pelement(void *user_data, const char *name, const char **attr)
 	if ((u_int)devlist->level >= (sizeof(devlist->cur_sb) /
 	    sizeof(devlist->cur_sb[0])))
 		log_errx(1, "%s: too many nesting levels, %zd max", __func__,
-		     sizeof(devlist->cur_sb) / sizeof(devlist->cur_sb[0]));
+		     nitems(devlist->cur_sb));
 
 	devlist->cur_sb[devlist->level] = sbuf_new_auto();
 	if (devlist->cur_sb[devlist->level] == NULL)

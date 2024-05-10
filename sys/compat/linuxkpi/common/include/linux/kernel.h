@@ -30,7 +30,6 @@
 #ifndef	_LINUXKPI_LINUX_KERNEL_H_
 #define	_LINUXKPI_LINUX_KERNEL_H_
 
-#include <sys/cdefs.h>
 #include <sys/types.h>
 #include <sys/systm.h>
 #include <sys/param.h>
@@ -42,7 +41,10 @@
 #include <sys/time.h>
 
 #include <linux/bitops.h>
+#include <linux/build_bug.h>
 #include <linux/compiler.h>
+#include <linux/container_of.h>
+#include <linux/limits.h>
 #include <linux/stringify.h>
 #include <linux/errno.h>
 #include <linux/sched.h>
@@ -69,19 +71,6 @@
 #define	KERN_INFO	"<6>"
 #define	KERN_DEBUG	"<7>"
 
-#define	U8_MAX		((u8)~0U)
-#define	S8_MAX		((s8)(U8_MAX >> 1))
-#define	S8_MIN		((s8)(-S8_MAX - 1))
-#define	U16_MAX		((u16)~0U)
-#define	S16_MAX		((s16)(U16_MAX >> 1))
-#define	S16_MIN		((s16)(-S16_MAX - 1))
-#define	U32_MAX		((u32)~0U)
-#define	S32_MAX		((s32)(U32_MAX >> 1))
-#define	S32_MIN		((s32)(-S32_MAX - 1))
-#define	U64_MAX		((u64)~0ULL)
-#define	S64_MAX		((s64)(U64_MAX >> 1))
-#define	S64_MIN		((s64)(-S64_MAX - 1))
-
 #define	S8_C(x)  x
 #define	U8_C(x)  x ## U
 #define	S16_C(x) x
@@ -90,28 +79,6 @@
 #define	U32_C(x) x ## U
 #define	S64_C(x) x ## LL
 #define	U64_C(x) x ## ULL
-
-/*
- * BUILD_BUG_ON() can happen inside functions where _Static_assert() does not
- * seem to work.  Use old-schoold-ish CTASSERT from before commit
- * a3085588a88fa58eb5b1eaae471999e1995a29cf but also make sure we do not
- * end up with an unused typedef or variable. The compiler should optimise
- * it away entirely.
- */
-#define	_O_CTASSERT(x)		_O__CTASSERT(x, __LINE__)
-#define	_O__CTASSERT(x, y)	_O___CTASSERT(x, y)
-#define	_O___CTASSERT(x, y)	while (0) { \
-    typedef char __unused __assert_line_ ## y[(x) ? 1 : -1]; \
-    __assert_line_ ## y _x; \
-    _x[0] = '\0'; \
-}
-
-#define	BUILD_BUG()			do { CTASSERT(0); } while (0)
-#define	BUILD_BUG_ON(x)			do { _O_CTASSERT(!(x)) } while (0)
-#define	BUILD_BUG_ON_MSG(x, msg)	BUILD_BUG_ON(x)
-#define	BUILD_BUG_ON_NOT_POWER_OF_2(x)	BUILD_BUG_ON(!powerof2(x))
-#define	BUILD_BUG_ON_INVALID(expr)	while (0) { (void)(expr); }
-#define	BUILD_BUG_ON_ZERO(x)	((int)sizeof(struct { int:-((x) != 0); }))
 
 #define	BUG()			panic("BUG at %s:%d", __FILE__, __LINE__)
 #define	BUG_ON(cond)		do {				\
@@ -164,6 +131,8 @@ extern int linuxkpi_warn_dump_stack;
 
 #define	printk(...)		printf(__VA_ARGS__)
 #define	vprintk(f, a)		vprintf(f, a)
+
+#define PTR_IF(x, p)		((x) ? (p) : NULL)
 
 #define	asm			__asm
 
@@ -294,12 +263,6 @@ extern int linuxkpi_debug;
 	unlikely(__ret_warn_on);		\
 })
 #endif
-
-#define container_of(ptr, type, member)				\
-({								\
-	const __typeof(((type *)0)->member) *__p = (ptr);	\
-	(type *)((uintptr_t)__p - offsetof(type, member));	\
-})
 
 #define	ARRAY_SIZE(x)	(sizeof(x) / sizeof((x)[0]))
 
@@ -573,8 +536,6 @@ kstrtou8_from_user(const char __user *s, size_t count, unsigned int base,
 #define offsetofend(t, m)	\
         (offsetof(t, m) + sizeof((((t *)0)->m)))
 
-#define	typeof_member(s, e)	typeof(((s *)0)->e)
-
 #define clamp_t(type, _x, min, max)	min_t(type, max_t(type, _x, min), max)
 #define clamp(x, lo, hi)		min( max(x,lo), hi)
 #define	clamp_val(val, lo, hi) clamp_t(typeof(val), val, lo, hi)
@@ -634,12 +595,6 @@ linux_ratelimited(linux_ratelimit_t *rl)
 	return (ppsratecheck(&rl->lasttime, &rl->counter, 1));
 }
 
-#define	struct_size(ptr, field, num) ({ \
-	const size_t __size = offsetof(__typeof(*(ptr)), field); \
-	const size_t __max = (SIZE_MAX - __size) / sizeof((ptr)->field[0]); \
-	((num) > __max) ? SIZE_MAX : (__size + sizeof((ptr)->field[0]) * (num)); \
-})
-
 #define	__is_constexpr(x) \
 	__builtin_constant_p(x)
 
@@ -648,29 +603,6 @@ linux_ratelimited(linux_ratelimit_t *rl)
  * signed. Else false is returned.
  */
 #define	is_signed(datatype) (((datatype)-1 / (datatype)2) == (datatype)0)
-
-/*
- * The type_max() macro below returns the maxium positive value the
- * passed data type can hold.
- */
-#define	type_max(datatype) ( \
-  (sizeof(datatype) >= 8) ? (is_signed(datatype) ? INT64_MAX : UINT64_MAX) : \
-  (sizeof(datatype) >= 4) ? (is_signed(datatype) ? INT32_MAX : UINT32_MAX) : \
-  (sizeof(datatype) >= 2) ? (is_signed(datatype) ? INT16_MAX : UINT16_MAX) : \
-			    (is_signed(datatype) ? INT8_MAX : UINT8_MAX) \
-)
-
-/*
- * The type_min() macro below returns the minimum value the passed
- * data type can hold. For unsigned types the minimum value is always
- * zero. For signed types it may vary.
- */
-#define	type_min(datatype) ( \
-  (sizeof(datatype) >= 8) ? (is_signed(datatype) ? INT64_MIN : 0) : \
-  (sizeof(datatype) >= 4) ? (is_signed(datatype) ? INT32_MIN : 0) : \
-  (sizeof(datatype) >= 2) ? (is_signed(datatype) ? INT16_MIN : 0) : \
-			    (is_signed(datatype) ? INT8_MIN : 0) \
-)
 
 #define	TAINT_WARN	0
 #define	test_taint(x)	(0)

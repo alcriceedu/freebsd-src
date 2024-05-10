@@ -4042,6 +4042,7 @@ product RALINK RT3573		0x3573	RT3573
 product RALINK RT5370		0x5370	RT5370
 product RALINK RT5372		0x5372	RT5372
 product RALINK RT5572		0x5572	RT5572
+product RALINK RT7601		0x7601	RT7601
 product RALINK RT8070		0x8070	RT8070
 product RALINK RT2570_3		0x9020	RT2500USB Wireless Adapter
 product RALINK RT2573_2		0x9021	RT2501USB Wireless Adapter
@@ -4944,6 +4945,7 @@ product WESTERN MYPASSPORTES_06	0x0750	MyPassport Essential External HDD
 product WESTERN MYPASSPORTES_07	0x0752	MyPassport Essential External HDD
 product WESTERN MYPASSPORTES_08	0x07A0	MyPassport Essential External HDD
 product WESTERN MYPASSPORTES_09	0x07A2	MyPassport Essential External HDD
+product WESTERN MYPASSPORTUL_00	0x0743	MyPassport Ultra External HDD
 
 /* WeTelecom products */
 product WETELECOM WM_D200	0x6801	WM-D200

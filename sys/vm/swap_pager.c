@@ -63,9 +63,6 @@
  *	  or renamed.
  *
  * from: Utah $Hdr: swap_pager.c 1.4 91/04/30$
- *
- *	@(#)swap_pager.c	8.9 (Berkeley) 3/21/94
- *	@(#)vm_swap.c	8.5 (Berkeley) 2/17/94
  */
 
 #include <sys/cdefs.h>
@@ -1686,6 +1683,9 @@ swp_pager_async_iodone(struct buf *bp)
 				 * getpages so don't play cute tricks here.
 				 */
 				vm_page_invalid(m);
+				if (i < bp->b_pgbefore ||
+				    i >= bp->b_npages - bp->b_pgafter)
+					vm_page_free_invalid(m);
 			} else {
 				/*
 				 * If a write error occurs, reactivate page

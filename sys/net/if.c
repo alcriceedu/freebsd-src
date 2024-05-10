@@ -28,8 +28,6 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- *	@(#)if.c	8.5 (Berkeley) 1/9/95
  */
 
 #include "opt_bpf.h"
@@ -4873,6 +4871,9 @@ if_resolvemulti(if_t ifp, struct sockaddr **srcs, struct sockaddr *dst)
 int
 if_ioctl(if_t ifp, u_long cmd, void *data)
 {
+	if (ifp->if_ioctl == NULL)
+		return (EOPNOTSUPP);
+
 	return (ifp->if_ioctl(ifp, cmd, data));
 }
 

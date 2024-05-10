@@ -30,8 +30,6 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- *	@(#)cdefs.h	8.8 (Berkeley) 1/9/95
  */
 
 #ifndef	_SYS_CDEFS_H_
@@ -74,46 +72,6 @@
  * having a compiler-agnostic source tree.
  */
 
-#if defined(__GNUC__)
-
-#define	__GNUCLIKE___SECTION 1
-
-#define	__GNUCLIKE_CTOR_SECTION_HANDLING 1
-
-#define	__GNUCLIKE_BUILTIN_CONSTANT_P 1
-
-#if (__GNUC_MINOR__ > 95 || __GNUC__ >= 3)
-#define	__GNUCLIKE_BUILTIN_VARARGS 1
-#define	__GNUCLIKE_BUILTIN_STDARG 1
-#define	__GNUCLIKE_BUILTIN_VAALIST 1
-#endif
-
-#define	__GNUC_VA_LIST_COMPATIBILITY 1
-
-/*
- * Compiler memory barriers, specific to gcc and clang.
- */
-#define	__compiler_membar()	__asm __volatile(" " : : : "memory")
-
-#define	__GNUCLIKE_BUILTIN_NEXT_ARG 1
-#define	__GNUCLIKE_MATH_BUILTIN_RELOPS
-
-#define	__GNUCLIKE_BUILTIN_MEMCPY 1
-
-/* XXX: if __GNUC__ >= 2: not tested everywhere originally, where replaced */
-#define	__CC_SUPPORTS_INLINE 1
-#define	__CC_SUPPORTS___INLINE 1
-#define	__CC_SUPPORTS___INLINE__ 1
-
-#define	__CC_SUPPORTS___FUNC__ 1
-#define	__CC_SUPPORTS_WARNING 1
-
-#define	__CC_SUPPORTS_VARADIC_XXX 1 /* see varargs.h */
-
-#define	__CC_SUPPORTS_DYNAMIC_ARRAY_INIT 1
-
-#endif /* __GNUC__ */
-
 /*
  * Macro to test if we're using a specific version of gcc or later.
  */
@@ -123,6 +81,17 @@
 #else
 #define	__GNUC_PREREQ__(ma, mi)	0
 #endif
+
+#if defined(__GNUC__)
+
+/*
+ * Compiler memory barriers, specific to gcc and clang.
+ */
+#define	__compiler_membar()	__asm __volatile(" " : : : "memory")
+
+#define	__CC_SUPPORTS___INLINE 1
+
+#endif /* __GNUC__ */
 
 /*
  * The __CONCAT macro is used to concatenate parts of symbol names, e.g.
@@ -357,6 +326,17 @@
 #if __GNUC_PREREQ__(3, 4)
 #define	__fastcall	__attribute__((__fastcall__))
 #define	__result_use_check	__attribute__((__warn_unused_result__))
+#ifdef __clang__
+/*
+ * clang and gcc have different semantics for __warn_unused_result__: the latter
+ * does not permit the use of a void cast to suppress the warning.  Use
+ * __result_use_or_ignore_check in places where a void cast is acceptable.
+ * This can be implemented by [[nodiscard]] from C23.
+ */
+#define	__result_use_or_ignore_check	__result_use_check
+#else
+#define	__result_use_or_ignore_check
+#endif /* !__clang__ */
 #else
 #define	__fastcall
 #define	__result_use_check
@@ -374,11 +354,6 @@
 #define	__unreachable()	((void)0)
 #endif
 
-/* XXX: should use `#if __STDC_VERSION__ < 199901'. */
-#if !__GNUC_PREREQ__(2, 7)
-#define	__func__	NULL
-#endif
-
 #if (defined(__GNUC__) && __GNUC__ >= 2) && !defined(__STRICT_ANSI__) || __STDC_VERSION__ >= 199901
 #define	__LONG_LONG_SUPPORTED
 #endif
@@ -392,6 +367,17 @@
 #ifndef	__STDC_CONSTANT_MACROS
 #define	__STDC_CONSTANT_MACROS
 #endif
+#endif
+
+/*
+ * noexcept keyword added in C++11.
+ */
+#if defined(__cplusplus) && __cplusplus >= 201103L
+#define __noexcept noexcept
+#define __noexcept_if(__c) noexcept(__c)
+#else
+#define __noexcept
+#define __noexcept_if(__c)
 #endif
 
 /*
