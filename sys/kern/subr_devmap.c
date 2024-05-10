@@ -277,8 +277,6 @@ pmap_mapdev(vm_paddr_t pa, vm_size_t size)
 #ifdef __aarch64__
 	if (size >= L2_SIZE && (pa & L2_OFFSET) == 0)
 		va = kva_alloc_aligned(size, L2_SIZE);
-	else if (size >= L3C_SIZE && (pa & L3C_OFFSET) == 0)
-		va = kva_alloc_aligned(size, L3C_SIZE);
 	else
 #endif
 		va = kva_alloc(size);
@@ -314,8 +312,6 @@ pmap_mapdev_attr(vm_paddr_t pa, vm_size_t size, vm_memattr_t ma)
 #ifdef __aarch64__
 	if (size >= L2_SIZE && (pa & L2_OFFSET) == 0)
 		va = kva_alloc_aligned(size, L2_SIZE);
-	else if (size >= L3C_SIZE && (pa & L3C_OFFSET) == 0)
-		va = kva_alloc_aligned(size, L3C_SIZE);
 	else
 #endif
 		va = kva_alloc(size);
