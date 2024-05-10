@@ -120,6 +120,12 @@ typedef	uint64_t	pt_entry_t;		/* page table entry */
 #define	ATTR_DESCR_TYPE_PAGE	2
 #define	ATTR_DESCR_TYPE_BLOCK	0
 
+/*
+ * Superpage promotion requires that the bits specified by the following
+ * mask all be identical in the constituent PTEs.
+ */
+#define	ATTR_PROMOTE	(ATTR_MASK & ~(ATTR_CONTIGUOUS | ATTR_AF))
+
 #if PAGE_SIZE == PAGE_SIZE_4K
 #define	L0_SHIFT	39
 #define	L1_SHIFT	30

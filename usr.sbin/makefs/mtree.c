@@ -29,7 +29,6 @@
 #include "nbtool_config.h"
 #endif
 
-#include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/queue.h>
 #include <sys/sbuf.h>
@@ -895,11 +894,11 @@ read_mtree_spec1(FILE *fp, bool def, const char *name)
 
 		if (strcmp(name, node->name) == 0) {
 			if (def == true) {
-				if (!dupsok)
+				if (dupsok == 0)
 					mtree_error(
 					    "duplicate definition of %s",
 					    name);
-				else
+				else if (dupsok == 1)
 					mtree_warning(
 					    "duplicate definition of %s",
 					    name);

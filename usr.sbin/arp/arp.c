@@ -32,18 +32,6 @@
  * SUCH DAMAGE.
  */
 
-#if 0
-#ifndef lint
-static char const copyright[] =
-"@(#) Copyright (c) 1984, 1993\n\
-	The Regents of the University of California.  All rights reserved.\n";
-#endif /* not lint */
-
-#ifndef lint
-static char const sccsid[] = "@(#)from: arp.c	8.2 (Berkeley) 1/2/94";
-#endif /* not lint */
-#endif
-#include <sys/cdefs.h>
 /*
  * arp - display, set, and delete arp table entries
  */
@@ -831,7 +819,7 @@ doit:
 
 /*
  * get_ether_addr - get the hardware address of an interface on the
- * the same subnet as ipaddr.
+ * same subnet as ipaddr.
  */
 static int
 get_ether_addr(in_addr_t ipaddr, struct ether_addr *hwaddr)

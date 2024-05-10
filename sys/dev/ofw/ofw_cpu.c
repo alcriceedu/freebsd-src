@@ -28,7 +28,6 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -44,7 +43,7 @@
 #include <dev/ofw/ofw_cpu.h>
 
 #if defined(__arm__) || defined(__arm64__) || defined(__riscv__)
-#include <dev/extres/clk/clk.h>
+#include <dev/clk/clk.h>
 #endif
 
 static int	ofw_cpulist_probe(device_t);

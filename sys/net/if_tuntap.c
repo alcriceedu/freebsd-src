@@ -328,16 +328,9 @@ static struct tuntap_driver {
 		.clone_destroy_fn =	tun_clone_destroy,
 	},
 };
+#define	NDRV	nitems(tuntap_drivers)
 
-struct tuntap_driver_cloner {
-	SLIST_ENTRY(tuntap_driver_cloner)	 link;
-	struct tuntap_driver			*drv;
-	struct if_clone				*cloner;
-};
-
-VNET_DEFINE_STATIC(SLIST_HEAD(, tuntap_driver_cloner), tuntap_driver_cloners) =
-    SLIST_HEAD_INITIALIZER(tuntap_driver_cloners);
-
+VNET_DEFINE_STATIC(struct if_clone *, tuntap_driver_cloners[NDRV]);
 #define	V_tuntap_driver_cloners	VNET(tuntap_driver_cloners)
 
 /*
@@ -406,7 +399,6 @@ static int
 tuntap_name2info(const char *name, int *outunit, int *outflags)
 {
 	struct tuntap_driver *drv;
-	struct tuntap_driver_cloner *drvc;
 	char *dname;
 	int flags, unit;
 	bool found;
@@ -422,12 +414,8 @@ tuntap_name2info(const char *name, int *outunit, int *outflags)
 	dname = __DECONST(char *, name);
 	found = false;
 
-	KASSERT(!SLIST_EMPTY(&V_tuntap_driver_cloners),
-	    ("tuntap_driver_cloners failed to initialize"));
-	SLIST_FOREACH(drvc, &V_tuntap_driver_cloners, link) {
-		KASSERT(drvc->drv != NULL,
-		    ("tuntap_driver_cloners entry not properly initialized"));
-		drv = drvc->drv;
+	for (u_int i = 0; i < NDRV; i++) {
+		drv = &tuntap_drivers[i];
 
 		if (strcmp(name, drv->cdevsw.d_name) == 0) {
 			found = true;
@@ -456,23 +444,16 @@ tuntap_name2info(const char *name, int *outunit, int *outflags)
 /*
  * Get driver information from a set of flags specified.  Masks the identifying
  * part of the flags and compares it against all of the available
- * tuntap_drivers. Must be called with correct vnet context.
+ * tuntap_drivers.
  */
 static struct tuntap_driver *
 tuntap_driver_from_flags(int tun_flags)
 {
-	struct tuntap_driver *drv;
-	struct tuntap_driver_cloner *drvc;
 
-	KASSERT(!SLIST_EMPTY(&V_tuntap_driver_cloners),
-	    ("tuntap_driver_cloners failed to initialize"));
-	SLIST_FOREACH(drvc, &V_tuntap_driver_cloners, link) {
-		KASSERT(drvc->drv != NULL,
-		    ("tuntap_driver_cloners entry not properly initialized"));
-		drv = drvc->drv;
-		if ((tun_flags & TUN_DRIVER_IDENT_MASK) == drv->ident_flags)
-			return (drv);
-	}
+	for (u_int i = 0; i < NDRV; i++)
+		if ((tun_flags & TUN_DRIVER_IDENT_MASK) ==
+		    tuntap_drivers[i].ident_flags)
+			return (&tuntap_drivers[i]);
 
 	return (NULL);
 }
@@ -674,22 +655,15 @@ tun_clone_destroy(struct if_clone *ifc __unused, struct ifnet *ifp, uint32_t fla
 static void
 vnet_tun_init(const void *unused __unused)
 {
-	struct tuntap_driver *drv;
-	struct tuntap_driver_cloner *drvc;
-	int i;
 
-	for (i = 0; i < nitems(tuntap_drivers); ++i) {
-		drv = &tuntap_drivers[i];
-		drvc = malloc(sizeof(*drvc), M_TUN, M_WAITOK | M_ZERO);
-
-		drvc->drv = drv;
+	for (u_int i = 0; i < NDRV; ++i) {
 		struct if_clone_addreq req = {
-			.match_f = drv->clone_match_fn,
-			.create_f = drv->clone_create_fn,
-			.destroy_f = drv->clone_destroy_fn,
+			.match_f = tuntap_drivers[i].clone_match_fn,
+			.create_f = tuntap_drivers[i].clone_create_fn,
+			.destroy_f = tuntap_drivers[i].clone_destroy_fn,
 		};
-		drvc->cloner = ifc_attach_cloner(drv->cdevsw.d_name, &req);
-		SLIST_INSERT_HEAD(&V_tuntap_driver_cloners, drvc, link);
+		V_tuntap_driver_cloners[i] =
+		    ifc_attach_cloner(tuntap_drivers[i].cdevsw.d_name, &req);
 	};
 }
 VNET_SYSINIT(vnet_tun_init, SI_SUB_PROTO_IF, SI_ORDER_ANY,
@@ -698,15 +672,9 @@ VNET_SYSINIT(vnet_tun_init, SI_SUB_PROTO_IF, SI_ORDER_ANY,
 static void
 vnet_tun_uninit(const void *unused __unused)
 {
-	struct tuntap_driver_cloner *drvc;
 
-	while (!SLIST_EMPTY(&V_tuntap_driver_cloners)) {
-		drvc = SLIST_FIRST(&V_tuntap_driver_cloners);
-		SLIST_REMOVE_HEAD(&V_tuntap_driver_cloners, link);
-
-		if_clone_detach(drvc->cloner);
-		free(drvc, M_TUN);
-	}
+	for (u_int i = 0; i < NDRV; ++i)
+		if_clone_detach(V_tuntap_driver_cloners[i]);
 }
 VNET_SYSUNINIT(vnet_tun_uninit, SI_SUB_PROTO_IF, SI_ORDER_ANY,
     vnet_tun_uninit, NULL);
@@ -820,7 +788,7 @@ tun_create_device(struct tuntap_driver *drv, int unit, struct ucred *cr,
 
 	make_dev_args_init(&args);
 	if (cr != NULL)
-		args.mda_flags = MAKEDEV_REF;
+		args.mda_flags = MAKEDEV_REF | MAKEDEV_CHECKNAME;
 	args.mda_devsw = &drv->cdevsw;
 	args.mda_cr = cr;
 	args.mda_uid = UID_UUCP;
@@ -1178,13 +1146,13 @@ tundtor(void *data)
 	if ((tp->tun_flags & TUN_VMNET) != 0 ||
 	    (l2tun && (ifp->if_flags & IFF_LINK0) != 0))
 		goto out;
-
+#if defined(INET) || defined(INET6)
 	if (l2tun && tp->tun_lro_ready) {
 		TUNDEBUG (ifp, "LRO disabled\n");
 		tcp_lro_free(&tp->tun_lro);
 		tp->tun_lro_ready = false;
 	}
-
+#endif
 	if (ifp->if_flags & IFF_UP) {
 		TUN_UNLOCK(tp);
 		if_down(ifp);
@@ -1229,6 +1197,7 @@ tuninit(struct ifnet *ifp)
 		getmicrotime(&ifp->if_lastchange);
 		TUN_UNLOCK(tp);
 	} else {
+#if defined(INET) || defined(INET6)
 		if (tcp_lro_init(&tp->tun_lro) == 0) {
 			TUNDEBUG(ifp, "LRO enabled\n");
 			tp->tun_lro.ifp = ifp;
@@ -1237,6 +1206,7 @@ tuninit(struct ifnet *ifp)
 			TUNDEBUG(ifp, "Could not enable LRO\n");
 			tp->tun_lro_ready = false;
 		}
+#endif
 		ifp->if_drv_flags &= ~IFF_DRV_OACTIVE;
 		TUN_UNLOCK(tp);
 		/* attempt to start output */
@@ -1440,7 +1410,7 @@ tunoutput(struct ifnet *ifp, struct mbuf *m0, const struct sockaddr *dst,
 	}
 
 	/* BPF writes need to be handled specially. */
-	if (dst->sa_family == AF_UNSPEC)
+	if (dst->sa_family == AF_UNSPEC || dst->sa_family == pseudo_AF_HDRCMPLT)
 		bcopy(dst->sa_data, &af, sizeof(af));
 	else
 		af = RO_GET_FAMILY(ro, dst);
@@ -1783,7 +1753,6 @@ tunwrite_l2(struct tuntap_softc *tp, struct mbuf *m,
 	struct epoch_tracker et;
 	struct ether_header *eh;
 	struct ifnet *ifp;
-	int result;
 
 	ifp = TUN2IFP(tp);
 
@@ -1839,14 +1808,12 @@ tunwrite_l2(struct tuntap_softc *tp, struct mbuf *m,
 	/* Pass packet up to parent. */
 	CURVNET_SET(ifp->if_vnet);
 	NET_EPOCH_ENTER(et);
-	if (tp->tun_lro_ready && ifp->if_capenable & IFCAP_LRO) {
-		result = tcp_lro_rx(&tp->tun_lro, m, 0);
-		TUNDEBUG(ifp, "tcp_lro_rx() returned %d\n", result);
-	} else
-		result = TCP_LRO_CANNOT;
-	if (result == 0)
+#if defined(INET) || defined(INET6)
+	if (tp->tun_lro_ready && ifp->if_capenable & IFCAP_LRO &&
+	    tcp_lro_rx(&tp->tun_lro, m, 0) == 0)
 		tcp_lro_flush_all(&tp->tun_lro);
 	else
+#endif
 		(*ifp->if_input)(ifp, m);
 	NET_EPOCH_EXIT(et);
 	CURVNET_RESTORE();

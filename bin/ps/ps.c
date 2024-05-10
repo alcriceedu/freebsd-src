@@ -36,19 +36,6 @@
  * ------+---------+---------+-------- + --------+---------+---------+---------*
  */
 
-#ifndef lint
-static const char copyright[] =
-"@(#) Copyright (c) 1990, 1993, 1994\n\
-	The Regents of the University of California.  All rights reserved.\n";
-#endif /* not lint */
-
-#if 0
-#ifndef lint
-static char sccsid[] = "@(#)ps.c	8.4 (Berkeley) 4/2/94";
-#endif /* not lint */
-#endif
-
-#include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/jail.h>
 #include <sys/proc.h>
@@ -276,6 +263,8 @@ main(int argc, char *argv[])
 				else if (len <= 4 &&
 					strncasecmp(optarg, "both", len) == 0)
 					directions |= BOTH;
+				else
+					usage();
 				break;
 			}
 		case 'd':

@@ -29,19 +29,6 @@
  * SUCH DAMAGE.
  */
 
-#ifndef lint
-static char const copyright[] =
-"@(#) Copyright (c) 1983, 1988, 1993\n\
-	Regents of the University of California.  All rights reserved.\n";
-#endif /* not lint */
-
-#if 0
-#ifndef lint
-static char sccsid[] = "@(#)main.c	8.4 (Berkeley) 3/1/94";
-#endif /* not lint */
-#endif
-
-#include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/file.h>
 #ifdef JAIL
@@ -129,6 +116,8 @@ static struct protox {
 #ifdef PF
 	{ -1,		N_PFSYNCSTATS,	1,	NULL,
 	  pfsync_stats,	NULL,		"pfsync", 1,	0 },
+	{ -1,		N_PFLOWSTATS,	1,	NULL,
+	  pflow_stats,	NULL,		"pflow", 1,	0 },
 #endif
 	{ -1,		N_ARPSTAT,	1,	NULL,
 	  arp_stats,	NULL,		"arp", 1,	0 },

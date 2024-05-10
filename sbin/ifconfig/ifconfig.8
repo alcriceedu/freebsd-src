@@ -25,9 +25,7 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.\"     From: @(#)ifconfig.8	8.3 (Berkeley) 1/5/94
-.\"
-.Dd November 08, 2023
+.Dd May 1, 2024
 .Dt IFCONFIG 8
 .Os
 .Sh NAME
@@ -36,7 +34,7 @@
 .Sh SYNOPSIS
 .Nm
 .Op Fl j Ar jail
-.Op Fl kLmn
+.Op Fl DkLmn
 .Op Fl f Ar type Ns Cm \&: Ns Ar format
 .Ar interface
 .Op Cm create
@@ -55,7 +53,7 @@
 .Nm
 .Op Fl j Ar jail
 .Fl a
-.Op Fl dkLmuv
+.Op Fl dDkLmuv
 .Op Fl f Ar type Ns Cm \&: Ns Ar format
 .Op Fl G Ar groupname
 .Op Fl g Ar groupname
@@ -104,6 +102,12 @@ with no additional information.
 Use of this flag is mutually exclusive with all other flags and commands.
 .It Fl d
 Display only the interfaces that are down.
+.It Fl D
+Include the driver name and unit number of the interface in the output.
+This is normally the original name of the interface,
+even if it has been renamed; it may differ from the original name
+in some cases, such as
+.Xr epair 4 .
 .It Fl f Xo
 .Ar type Ns Cm \&: Ns Ar format Ns
 .Op Cm \&, Ns Ar type Ns Cm \&: Ns Ar format Ar ...
@@ -545,9 +549,10 @@ A FIB
 .Ar fib_number
 is assigned to all packets encapsulated by tunnel interface, e.g.,
 .Xr gif 4 ,
-.Xr gre 4
+.Xr gre 4 ,
+.Xr vxlan 4 ,
 and
-.Xr vxlan 4 .
+.Xr wg 4 .
 .It Cm maclabel Ar label
 If Mandatory Access Control support is enabled in the kernel,
 set the MAC label to
@@ -707,7 +712,7 @@ buffers, enable them on the interface.
 .It Fl mextpg
 If the driver supports extended multi-page
 .Xr mbuf 9
-biffers, disable them on the interface.
+buffers, disable them on the interface.
 .It Cm wol , wol_ucast , wol_mcast , wol_magic
 Enable Wake On Lan (WOL) support, if available.
 WOL is a facility whereby a machine in a low power state may be woken
@@ -1064,7 +1069,7 @@ Legacy
 .Cm wds
 devices have a fixed peer relationship and do not, for example, roam
 if their peer stops communicating.
-For completeness a Dynamic WDS (DWDS) interface may marked as
+For completeness a Dynamic WDS (DWDS) interface may be marked as
 .Fl wdslegacy .
 .It Cm bssid
 Request a unique local mac address for the cloned device.
@@ -3146,6 +3151,20 @@ announcements to.
 Restore the default destination address for (IPv4)
 .Xr carp 4
 announcements, which is ff02::12.
+.It Cm carpver
+Set the protocol version.
+Valid choices are 2 (for
+.Xr carp 4)
+and 3 (for VRRPv3).
+This can only be set when
+.Xr carp 4
+is initiated.
+.It Cm vrrpprio
+Set the VRRPv3 priority.
+Valid values are 1-255.
+.It Cm vrrpinterval
+Set the VRRPv3 Master Advertisement Interval.
+Values are in centiseconds.
 .El
 .Sh ENVIRONMENT
 The following environment variables affect the execution of

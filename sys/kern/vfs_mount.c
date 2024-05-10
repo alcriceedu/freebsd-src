@@ -36,7 +36,6 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/conf.h>
 #include <sys/smp.h>
@@ -474,7 +473,7 @@ sys_nmount(struct thread *td, struct nmount_args *uap)
 	}
 	error = vfs_donmount(td, flags, auio);
 
-	free(auio, M_IOV);
+	freeuio(auio);
 	return (error);
 }
 
@@ -1025,7 +1024,7 @@ bail:
 			    fsoptions->uio_iov[2 * errmsg_pos + 1].iov_base,
 			    fsoptions->uio_iov[2 * errmsg_pos + 1].iov_len);
 		} else {
-			copyout(errmsg,
+			(void)copyout(errmsg,
 			    fsoptions->uio_iov[2 * errmsg_pos + 1].iov_base,
 			    fsoptions->uio_iov[2 * errmsg_pos + 1].iov_len);
 		}
@@ -1389,7 +1388,7 @@ vfs_domount_update(
 			error = EINVAL;
 			goto end;
 		}
-		if (fsidcmp(&fsid_up, &mp->mnt_stat.f_fsid) != 0) {
+		if (fsidcmp(fsid_up, &mp->mnt_stat.f_fsid) != 0) {
 			error = ENOENT;
 			goto end;
 		}

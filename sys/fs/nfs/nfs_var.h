@@ -370,7 +370,7 @@ int nfsrpc_destroysession(struct nfsmount *, struct nfsclsession *,
     struct ucred *, NFSPROC_T *);
 
 /* nfs_clcomsubs.c */
-void nfsm_uiombuf(struct nfsrv_descript *, struct uio *, int);
+int nfsm_uiombuf(struct nfsrv_descript *, struct uio *, int);
 struct mbuf *nfsm_uiombuflist(struct uio *, int, u_int);
 u_int8_t *nfscl_getmyip(struct nfsmount *, struct in6_addr *, int *);
 int nfsm_getfh(struct nfsrv_descript *, struct nfsfh **);
@@ -713,7 +713,7 @@ int nfsvno_rmdirsub(struct nameidata *, int, struct ucred *, NFSPROC_T *,
     struct nfsexstuff *);
 int nfsvno_rename(struct nameidata *, struct nameidata *, u_int32_t,
     u_int32_t, struct ucred *, NFSPROC_T *);
-int nfsvno_link(struct nameidata *, vnode_t, struct ucred *,
+int nfsvno_link(struct nameidata *, vnode_t, nfsquad_t, struct ucred *,
     NFSPROC_T *, struct nfsexstuff *);
 int nfsvno_fsync(vnode_t, u_int64_t, int, struct ucred *, NFSPROC_T *);
 int nfsvno_statfs(vnode_t, struct statfs *);

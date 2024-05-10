@@ -73,8 +73,8 @@
 #define	FREEBSD32_SYS_vfork	66
 				/* 67 is obsolete vread */
 				/* 68 is obsolete vwrite */
-#define	FREEBSD32_SYS_sbrk	69
-#define	FREEBSD32_SYS_sstk	70
+				/* 69 is obsolete sbrk */
+				/* 70 is obsolete sstk */
 				/* 71 is old freebsd32_mmap */
 #define	FREEBSD32_SYS_freebsd11_vadvise	72
 #define	FREEBSD32_SYS_munmap	73
@@ -506,4 +506,5 @@
 #define	FREEBSD32_SYS_timerfd_create	585
 #define	FREEBSD32_SYS_freebsd32_timerfd_gettime	586
 #define	FREEBSD32_SYS_freebsd32_timerfd_settime	587
-#define	FREEBSD32_SYS_MAXSYSCALL	588
+#define	FREEBSD32_SYS_kcmp	588
+#define	FREEBSD32_SYS_MAXSYSCALL	589
