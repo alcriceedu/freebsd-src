@@ -20,6 +20,7 @@ SUBDIR=	\
 	accf_data \
 	accf_dns \
 	accf_http \
+	accf_tls \
 	acl_nfs4 \
 	acl_posix1e \
 	${_acpi} \
@@ -154,6 +155,7 @@ SUBDIR=	\
 	if_edsc \
 	${_if_enc} \
 	if_epair \
+	${_genet} \
 	${_if_gif} \
 	${_if_gre} \
 	${_if_me} \
@@ -217,6 +219,7 @@ SUBDIR=	\
 	lindebugfs \
 	linuxkpi \
 	linuxkpi_hdmi \
+	linuxkpi_video \
 	linuxkpi_wlan \
 	${_lio} \
 	lpt \
@@ -290,9 +293,10 @@ SUBDIR=	\
 	nmdm \
 	nullfs \
 	${_ntb} \
-	${_nvd} \
+	nvd \
 	${_nvdimm} \
-	${_nvme} \
+	nvme \
+	nvmf \
 	${_nvram} \
 	oce \
 	${_ocs_fc} \
@@ -306,6 +310,7 @@ SUBDIR=	\
 	${_pcfclock} \
 	${_pf} \
 	${_pflog} \
+	${_pflow} \
 	${_pfsync} \
 	plip \
 	${_pms} \
@@ -386,7 +391,7 @@ SUBDIR=	\
 	${_ti} \
 	tmpfs \
 	${_toecore} \
-	${_tpm} \
+	tpm \
 	tws \
 	uart \
 	udf \
@@ -396,6 +401,7 @@ SUBDIR=	\
 	unionfs \
 	usb \
 	${_vesa} \
+	${_vf_i2c} \
 	virtio \
 	vge \
 	${_viawd} \
@@ -565,9 +571,13 @@ _iwlwifi=	iwlwifi
 .if ${MK_SOURCELESS_UCODE} != "no"
 _iwlwififw=	iwlwififw
 .endif
-_ossl=		ossl
 _rtw88=		rtw88
 _vmware=	vmware
+.endif
+
+.if ${MACHINE_CPUARCH} == "aarch64" || ${MACHINE_CPUARCH} == "amd64" || \
+    ${MACHINE_CPUARCH} == "i386" || ${MACHINE_ARCH} == "armv7"
+_ossl=		ossl
 .endif
 
 # MAC framework
@@ -607,6 +617,7 @@ _netgraph=	netgraph
 	${MK_INET6_SUPPORT} != "no")) || defined(ALL_MODULES)
 _pf=		pf
 _pflog=		pflog
+_pflow=		pflow
 .if ${MK_INET_SUPPORT} != "no"
 _pfsync=	pfsync
 .endif
@@ -632,6 +643,11 @@ _cxgbe=		cxgbe
 # This has only been tested on amd64 and arm64
 .if ${MACHINE_CPUARCH} == "amd64" || ${MACHINE_CPUARCH} == "aarch64"
 _mpi3mr=mpi3mr
+.endif
+
+# Specific to the Raspberry Pi.
+.if ${MACHINE_CPUARCH} == "aarch64"
+_genet=		genet
 .endif
 
 .if ${MACHINE_CPUARCH} == "amd64" || ${MACHINE_CPUARCH} == "aarch64" || \
@@ -680,6 +696,7 @@ _dpaa2=		dpaa2
 _sff=		sff
 _em=		em
 _hyperv=  hyperv
+_vf_i2c=	vf_i2c
 
 .if !empty(OPT_FDT)
 _allwinner=	allwinner
@@ -787,8 +804,6 @@ _iwmfw=		iwmfw
 _iwnfw=		iwnfw
 .endif
 _nfe=		nfe
-_nvd=		nvd
-_nvme=		nvme
 _nvram=		nvram
 .if ${MK_CRYPT} != "no" || defined(ALL_MODULES)
 _padlock=	padlock
@@ -799,7 +814,6 @@ _pchtherm = pchtherm
 _s3=		s3
 _sdhci_acpi=	sdhci_acpi
 _superio=	superio
-_tpm=		tpm
 _vesa=		vesa
 _viawd=		viawd
 _vmd=		vmd
@@ -835,7 +849,9 @@ _sgx=		sgx
 _sgx_linux=	sgx_linux
 _smartpqi=	smartpqi
 _p2sb=		p2sb
+.endif
 
+.if ${MACHINE_CPUARCH} == "aarch64" || ${MACHINE_CPUARCH} == "amd64"
 .if ${MK_BHYVE} != "no" || defined(ALL_MODULES)
 .if ${KERN_OPTS:MSMP}
 _vmm=		vmm
@@ -870,8 +886,6 @@ _cfi=		cfi
 _cpufreq=	cpufreq
 _exca=		exca
 _ffec=		ffec
-_nvd=		nvd
-_nvme=		nvme
 .endif
 
 .if ${MACHINE_ARCH:Mpowerpc64*} != ""
@@ -907,10 +921,11 @@ SUBDIR:= ${SUBDIR:N${reject}}
 .if !defined(NO_XREF)
 .MAKEFLAGS+=	-DNO_XREF
 afterinstall: .PHONY
-	@if type kldxref >/dev/null 2>&1; then \
-		${ECHO} ${KLDXREF_CMD} ${DESTDIR}${KMODDIR}; \
-		${KLDXREF_CMD} ${DESTDIR}${KMODDIR}; \
-	fi
+	${KLDXREF_CMD} ${DESTDIR}${KMODDIR}
+.if defined(NO_ROOT) && defined(METALOG)
+	echo ".${DISTBASE}${KMODDIR}/linker.hints type=file mode=0644 uname=root gname=wheel" | \
+	    cat -l >> ${METALOG}
+.endif
 .endif
 
 SUBDIR:= ${SUBDIR:u:O}

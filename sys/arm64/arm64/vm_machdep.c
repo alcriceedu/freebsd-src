@@ -27,7 +27,6 @@
 
 #include "opt_platform.h"
 
-#include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/limits.h>
@@ -54,6 +53,13 @@
 #endif
 
 #include <dev/psci/psci.h>
+
+/*
+ * psci.c is "default" in ARM64 kernel config files
+ * psci_reset will do nothing until/unless the psci device probes/attaches.
+ * Therefore, it is safe to default the cpu_reset_hook to psci_reset.
+ */
+cpu_reset_hook_t cpu_reset_hook = psci_reset;
 
 /*
  * Finish a fork operation, with process p2 nearly set up.
@@ -124,7 +130,7 @@ void
 cpu_reset(void)
 {
 
-	psci_reset();
+	cpu_reset_hook();
 
 	printf("cpu_reset failed");
 	while(1)
@@ -206,7 +212,7 @@ cpu_copy_thread(struct thread *td, struct thread *td0)
  * Set that machine state for performing an upcall that starts
  * the entry function with the given argument.
  */
-void
+int
 cpu_set_upcall(struct thread *td, void (*entry)(void *), void *arg,
 	stack_t *stack)
 {
@@ -225,6 +231,7 @@ cpu_set_upcall(struct thread *td, void (*entry)(void *), void *arg,
 	tf->tf_x[0] = (register_t)arg;
 	tf->tf_x[29] = 0;
 	tf->tf_lr = 0;
+	return (0);
 }
 
 int

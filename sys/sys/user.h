@@ -29,8 +29,6 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- *	@(#)user.h	8.2 (Berkeley) 9/23/93
  */
 
 #ifndef _SYS_USER_H_
@@ -373,7 +371,7 @@ struct kinfo_file {
 				struct sockaddr_storage	kf_sa_peer;
 				/* Address of so_pcb. */
 				uint64_t	kf_sock_pcb;
-				/* Address of inp_ppcb. */
+				/* Obsolete! May be reused as a spare. */
 				uint64_t	kf_sock_inpcb;
 				/* Address of unp_conn. */
 				uint64_t	kf_sock_unpconn;

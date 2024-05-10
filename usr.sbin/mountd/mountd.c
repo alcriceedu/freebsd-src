@@ -32,19 +32,6 @@
  * SUCH DAMAGE.
  */
 
-#ifndef lint
-static const char copyright[] =
-"@(#) Copyright (c) 1989, 1993\n\
-	The Regents of the University of California.  All rights reserved.\n";
-#endif /*not lint*/
-
-#if 0
-#ifndef lint
-static char sccsid[] = "@(#)mountd.c	8.15 (Berkeley) 5/1/95";
-#endif /*not lint*/
-#endif
-
-#include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/conf.h>
 #include <sys/fcntl.h>
@@ -143,10 +130,11 @@ struct exportlist {
 	SLIST_ENTRY(exportlist) entries;
 };
 /* ex_flag bits */
-#define	EX_LINKED	0x1
-#define	EX_DONE		0x2
-#define	EX_DEFSET	0x4
-#define	EX_PUBLICFH	0x8
+#define	EX_LINKED	0x01
+#define	EX_DONE		0x02
+#define	EX_DEFSET	0x04
+#define	EX_PUBLICFH	0x08
+#define	EX_ADMINWARN	0x10
 
 SLIST_HEAD(exportlisthead, exportlist);
 
@@ -285,6 +273,7 @@ static char *exnames_default[2] = { _PATH_EXPORTS, NULL };
 static char **exnames;
 static char **hosts = NULL;
 static int force_v2 = 0;
+static int warn_admin = 1;
 static int resvport_only = 1;
 static int nhosts = 0;
 static int dir_only = 1;
@@ -447,10 +436,13 @@ main(int argc, char **argv)
 	else
 		close(s);
 
-	while ((c = getopt(argc, argv, "2deh:lnp:RrS")) != -1)
+	while ((c = getopt(argc, argv, "2Adeh:lnp:RrS")) != -1)
 		switch (c) {
 		case '2':
 			force_v2 = 1;
+			break;
+		case 'A':
+			warn_admin = 0;
 			break;
 		case 'e':
 			/* now a no-op, since this is the default */
@@ -1707,6 +1699,20 @@ get_exportlist_one(int passno)
 					    warnx("found ep fs=0x%x,0x%x",
 						fsb.f_fsid.val[0],
 						fsb.f_fsid.val[1]);
+				    }
+
+				    if (warn_admin != 0 &&
+					(ep->ex_flag & EX_ADMINWARN) == 0 &&
+					strcmp(unvis_dir, fsb.f_mntonname) !=
+					0) {
+					if (debug)
+					    warnx("exporting %s exports entire "
+						"%s file system", unvis_dir,
+						    fsb.f_mntonname);
+					syslog(LOG_ERR, "Warning: exporting %s "
+					    "exports entire %s file system",
+					    unvis_dir, fsb.f_mntonname);
+					ep->ex_flag |= EX_ADMINWARN;
 				    }
 
 				    /*

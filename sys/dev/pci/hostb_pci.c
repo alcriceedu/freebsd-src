@@ -25,7 +25,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/bus.h>
 #include <sys/kernel.h>
@@ -107,11 +106,10 @@ pci_hostb_alloc_resource(device_t dev, device_t child, int type, int *rid,
 }
 
 static int
-pci_hostb_release_resource(device_t dev, device_t child, int type, int rid,
-    struct resource *r)
+pci_hostb_release_resource(device_t dev, device_t child, struct resource *r)
 {
 
-	return (bus_release_resource(dev, type, rid, r));
+	return (bus_release_resource(dev, r));
 }
 
 /* PCI interface. */

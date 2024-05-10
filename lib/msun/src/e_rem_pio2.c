@@ -1,5 +1,4 @@
 
-/* @(#)e_rem_pio2.c 1.4 95/01/18 */
 /*
  * ====================================================
  * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
@@ -13,7 +12,6 @@
  * Optimized by Bruce D. Evans.
  */
 
-#include <sys/cdefs.h>
 /* __ieee754_rem_pio2(x,y)
  * 
  * return the remainder of x rem pi/2 in y[0]+y[1] 
@@ -164,7 +162,7 @@ medium:
     /* set z = scalbn(|x|,ilogb(x)-23) */
 	GET_LOW_WORD(low,x);
 	e0 	= (ix>>20)-1046;	/* e0 = ilogb(z)-23; */
-	INSERT_WORDS(z, ix - ((int32_t)(e0<<20)), low);
+	INSERT_WORDS(z, ix - ((int32_t)((u_int32_t)e0<<20)), low);
 	for(i=0;i<2;i++) {
 		tx[i] = (double)((int32_t)(z));
 		z     = (z-tx[i])*two24;

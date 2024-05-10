@@ -32,8 +32,6 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- *	@(#)kern_fork.c	8.6 (Berkeley) 4/8/94
  */
 
 #include <sys/cdefs.h>
@@ -624,7 +622,6 @@ do_fork(struct thread *td, struct fork_req *fr, struct proc *p2, struct thread *
 	LIST_INIT(&p2->p_orphans);
 
 	callout_init_mtx(&p2->p_itcallout, &p2->p_mtx, 0);
-	TAILQ_INIT(&p2->p_kqtim_stop);
 
 	/*
 	 * This begins the section where we must prevent the parent
@@ -1021,15 +1018,9 @@ fork1(struct thread *td, struct fork_req *fr)
 		}
 		proc_linkup(newproc, td2);
 	} else {
-		kmsan_thread_alloc(td2);
-		if (td2->td_kstack == 0 || td2->td_kstack_pages != pages) {
-			if (td2->td_kstack != 0)
-				vm_thread_dispose(td2);
-			if (!thread_alloc_stack(td2, pages)) {
-				error = ENOMEM;
-				goto fail2;
-			}
-		}
+		error = thread_recycle(td2, pages);
+		if (error != 0)
+			goto fail2;
 	}
 
 	if ((flags & RFMEM) == 0) {

@@ -25,7 +25,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/systm.h>
@@ -166,8 +165,8 @@ amd64_lower_shared_page(struct sysentvec *sv)
 }
 
 static bool
-freebsd_brand_info_la57_img_compat(struct image_params *imgp,
-    int32_t *osrel __unused, uint32_t *fctl0)
+freebsd_brand_info_la57_img_compat(const struct image_params *imgp,
+    const int32_t *osrel __unused, const uint32_t *fctl0)
 {
 	if ((imgp->proc->p_md.md_flags & P_MD_LA57) != 0)
 		return (true);

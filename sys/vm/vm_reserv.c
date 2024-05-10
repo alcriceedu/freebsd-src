@@ -1283,6 +1283,27 @@ vm_reserv_is_page_free(vm_page_t m)
 }
 
 /*
+ * Returns true if the given page is part of a block of npages, starting at a
+ * multiple of npages, that are all allocated.  Otherwise, returns false.
+ */
+/*bool
+vm_reserv_is_populated(vm_page_t m, int npages)
+{
+	vm_reserv_t rv;
+	int index;
+
+	KASSERT(npages <= VM_LEVEL_0_NPAGES,
+	    ("%s: npages %d exceeds VM_LEVEL_0_NPAGES", __func__, npages));
+	KASSERT(powerof2(npages),
+	    ("%s: npages %d is not a power of 2", __func__, npages));
+	rv = vm_reserv_from_page(m);
+	if (rv->object == NULL)
+		return (false);
+	index = rounddown2(m - rv->pages, npages);
+	return (bit_ntest(rv->popmap, index, index + npages - 1, 1));
+}*/
+
+/*
  * If the given page belongs to a reservation, returns the level of that
  * reservation.  Otherwise, returns -1.
  */
@@ -1467,7 +1488,7 @@ vm_reserv_find_contig(vm_reserv_t rv, int npages, int lo,
  * Searches the partially populated reservation queue for the least recently
  * changed reservation with free pages that satisfy the given request for
  * contiguous physical memory.  If a satisfactory reservation is found, it is
- * broken.  Returns true if a reservation is broken and false otherwise.
+ * broken.  Returns a page if a reservation is broken and NULL otherwise.
  */
 vm_page_t
 vm_reserv_reclaim_contig(int domain, u_long npages, vm_paddr_t low,

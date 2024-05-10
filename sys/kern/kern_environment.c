@@ -36,7 +36,6 @@
  * the kernel.
  */
 
-#include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/eventhandler.h>
 #include <sys/systm.h>
@@ -54,6 +53,8 @@
 #include <sys/sysproto.h>
 
 #include <security/mac/mac_framework.h>
+
+#include <vm/uma.h>
 
 static char *_getenv_dynamic_locked(const char *name, int *idx);
 static char *_getenv_dynamic(const char *name, int *idx);
