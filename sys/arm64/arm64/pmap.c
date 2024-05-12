@@ -4909,7 +4909,7 @@ static int
 pmap_enter_largepage(pmap_t pmap, vm_offset_t va, pt_entry_t newpte, int flags,
     int psind)
 {
-	pd_entry_t *l0p, *l1p, *l2p, origpte;
+	pd_entry_t *l0p, *l1p, *l2p, *l3p, origpte, *tl3p;
 	vm_page_t mp;
 
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
@@ -4986,7 +4986,63 @@ restart:
 		    va, origpte, newpte));
 		pmap_store(l2p, newpte);
 	} else /* (psind == 1) */ {
-		return (KERN_FAILURE); // XXX
+		l1p = pmap_l1(pmap, va);
+		if (l1p != NULL && pmap_load(l1p) != 0) {
+			KASSERT((pmap_load(l1p) & ATTR_DESCR_MASK) != L1_BLOCK,
+			    ("va %#lx unexpected 1G phys page l1 %#lx",
+			    va, pmap_load(l1p)));
+			l2p = pmap_l1_to_l2(l1p, va);
+			if (pmap_load(l2p) != 0) {
+				KASSERT((pmap_load(l2p) & ATTR_DESCR_MASK) !=
+				    L2_BLOCK,
+				    ("va %#lx unexpected 2M phys page l2 %#lx",
+				    va, pmap_load(l2p)));
+				l3p = pmap_l2_to_l3(l2p, va);
+				if (pmap_load(l3p) == 0) {
+					mp = PHYS_TO_VM_PAGE(
+					    PTE_TO_PHYS(pmap_load(l2p)));
+					mp->ref_count += L3C_ENTRIES;
+				}
+			} else {
+				mp = _pmap_alloc_l3(pmap, pmap_l2_pindex(va),
+				    NULL);
+				if (mp == NULL) {
+					if ((flags & PMAP_ENTER_NOSLEEP) != 0)
+						return (KERN_RESOURCE_SHORTAGE);
+					PMAP_UNLOCK(pmap);
+					vm_wait(NULL);
+					PMAP_LOCK(pmap);
+					goto restart;
+				}
+				mp->ref_count += L3C_ENTRIES - 1;
+				l3p = (pd_entry_t *)PHYS_TO_DMAP(
+				    VM_PAGE_TO_PHYS(mp));
+				l3p = &l3p[pmap_l3_index(va)];
+			}
+		} else {
+			mp = _pmap_alloc_l3(pmap, pmap_l2_pindex(va), NULL);
+			if (mp == NULL) {
+				if ((flags & PMAP_ENTER_NOSLEEP) != 0)
+					return (KERN_RESOURCE_SHORTAGE);
+				PMAP_UNLOCK(pmap);
+				vm_wait(NULL);
+				PMAP_LOCK(pmap);
+				goto restart;
+			}
+			mp->ref_count += L3C_ENTRIES - 1;
+			l3p = (pd_entry_t *)PHYS_TO_DMAP(VM_PAGE_TO_PHYS(mp));
+			l3p = &l3p[pmap_l3_index(va)];
+		}
+		for (tl3p = l3p; tl3p < &l3p[L3C_ENTRIES]; tl3p++) {
+			origpte = pmap_load(tl3p);
+			KASSERT((origpte & ATTR_DESCR_VALID) == 0 ||
+			    ((origpte & ATTR_CONTIGUOUS) != 0 &&
+			    PTE_TO_PHYS(origpte) == PTE_TO_PHYS(newpte)),
+			    ("va %#lx changing 64K phys page l3 %#lx newpte %#lx",
+			    va, origpte, newpte));
+			pmap_store(tl3p, newpte);
+			newpte += L3_SIZE;
+		}
 	}
 	dsb(ishst);
 
@@ -5090,9 +5146,8 @@ pmap_enter(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 			new_l3 |= L1_BLOCK;
 		} else if (psind == 2)
 			new_l3 |= L2_BLOCK;
-		else /* (psind == 1) */ {
-			// XXX
-		}
+		else /* (psind == 1) */
+			new_l3 |= ATTR_CONTIGUOUS;
 		rv = pmap_enter_largepage(pmap, va, new_l3, flags, psind);
 		goto out;
 	}
