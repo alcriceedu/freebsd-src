@@ -1626,8 +1626,8 @@ pmap_init(void)
 	TUNABLE_INT_FETCH("vm.pmap.superpages_enabled", &superpages_enabled);
 	if (superpages_enabled) {
 		KASSERT(MAXPAGESIZES > 1 && pagesizes[1] == 0,
-                    ("pmap_init: can't assign to pagesizes[1]"));
-                pagesizes[1] = L3C_SIZE;
+		    ("pmap_init: can't assign to pagesizes[1]"));
+		pagesizes[1] = L3C_SIZE;
 		KASSERT(MAXPAGESIZES > 2 && pagesizes[2] == 0,
 		    ("pmap_init: can't assign to pagesizes[2]"));
 		pagesizes[2] = L2_SIZE;
