@@ -470,7 +470,7 @@ sysctl_vm_page_scan(SYSCTL_HANDLER_ARGS)
 	error = sysctl_wire_old_buffer(req, 0);
 	if (error != 0)
 		return (error);
-	sbuf_new_for_sysctl(&sbuf, NULL, 128, req);
+	sbuf_new_for_sysctl(&sbuf, NULL, 4096 * 256, req);
 
 	sbuf_printf(&sbuf, "\n[");
 	first_seg = true;
@@ -483,8 +483,23 @@ sysctl_vm_page_scan(SYSCTL_HANDLER_ARGS)
 			sbuf_printf(&sbuf, ",\n    [");
 		}
 		first_page = true;
+		vm_domain_free_lock(VM_DOMAIN(seg->domain));
 		while (paddr + PAGE_SIZE > paddr && paddr +
 		    PAGE_SIZE <= seg->end) {
+			if (paddr % (PAGE_SIZE << VM_NFREEORDER) == 0) {
+				/*
+				 * Buddy allocator coalescing doesn't happen
+				 * across higher order blocks.  So that's the
+				 * granularity at which we lock.  Now unlock
+				 * and flush the output and give other people a
+				 * chance to allocate memory.
+				 */
+				vm_domain_free_unlock(VM_DOMAIN(seg->domain));
+				if (sbuf_drain(&sbuf) != 0) {
+					printf("sbuf_drain() != 0\n");
+				}
+				vm_domain_free_lock(VM_DOMAIN(seg->domain));
+			}
 			m = PHYS_TO_VM_PAGE(paddr);
 			if (m->object) {
 				VM_OBJECT_RLOCK(m->object);
@@ -517,6 +532,7 @@ sysctl_vm_page_scan(SYSCTL_HANDLER_ARGS)
 			paddr += PAGE_SIZE;
 			first_page = false;
 		}
+		vm_domain_free_unlock(VM_DOMAIN(seg->domain));
 		sbuf_printf(&sbuf, "\n    ]");
 		first_seg = false;
 	}
