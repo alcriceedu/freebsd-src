@@ -5077,7 +5077,7 @@ pmap_enter(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 	vm_paddr_t opa, pa;
 	vm_page_t mpte, om;
 	bool nosleep;
-	int lvl, rv;
+	int full_lvl, lvl, rv;
 
 	KASSERT(ADDR_IS_CANONICAL(va),
 	    ("%s: Address not in canonical form: %lx", __func__, va));
@@ -5385,10 +5385,10 @@ validate:
 	 */
 	if ((va & L3C_OFFSET) == (pa & L3C_OFFSET) &&
 	    (m->flags & PG_FICTITIOUS) == 0 &&
-	    vm_reserv_is_populated(m, L3C_ENTRIES) &&
+	    (full_lvl = vm_reserv_level_iffullpop(m)) >= 0 &&
 	    pmap_promote_l3c(pmap, l3, va) &&
 	    (mpte == NULL || mpte->ref_count == NL3PG) &&
-	    vm_reserv_level_iffullpop(m) == 0)
+	    full_lvl == 1)
 		(void)pmap_promote_l2(pmap, pde, va, mpte, &lock);
 #endif
 
@@ -5932,11 +5932,10 @@ static vm_page_t
 pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va, vm_page_t m,
     vm_prot_t prot, vm_page_t mpte, struct rwlock **lockp)
 {
-	struct vm_phys_seg *seg;
 	pd_entry_t *pde;
 	pt_entry_t *l1, *l2, *l3, l3_val;
 	vm_paddr_t pa;
-	int l3c_rv, lvl;
+	int full_lvl, lvl;
 
 	KASSERT(!VA_IS_CLEANMAP(va) ||
 	    (m->oflags & VPO_UNMANAGED) != 0,
@@ -6063,36 +6062,29 @@ pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va, vm_page_t m,
 
 #if VM_NRESERVLEVEL > 0
 	/*
-	 * Try to promote from level 3 pages to a level 3 contiguous superpage,
-	 * and then to a level 2 superpage. This currently only works on
-	 * stage 1 pmaps as pmap_promote_l2 looks at stage 1 specific fields
-	 * and performs a break-before-make sequence that is incorrect for a
-	 * stage 2 pmap.
+	 * First, attempt L3C promotion, if the virtual and physical addresses
+	 * are aligned with each other and an underlying reservation has the
+	 * neighboring L3 pages allocated.  The first condition is simply an
+	 * optimization that recognizes some eventual promotion failures early
+	 * at a lower run-time cost.  Then, if both the page table page and
+	 * the reservation are fully populated, attempt L2 promotion.
 	 */
-	if (pmap_ps_enabled(pmap) && pmap->pm_stage == PM_STAGE1 &&
-	    (m->flags & PG_FICTITIOUS) == 0) {
-		seg = &vm_phys_segs[m->segind];
-		l3c_rv = false;
-		if ((mpte == NULL || mpte->ref_count >= L3C_ENTRIES) &&
-		    (m->phys_addr & ~L3C_OFFSET) >= seg->start &&
-		    seg->first_page[atop((m->phys_addr & ~L3C_OFFSET) -
-		    seg->start)].psind >= 1)
-			l3c_rv = pmap_promote_l3c(pmap, l3, va);
-		if ((mpte == NULL || mpte->ref_count == NL3PG) &&
-		    (m->phys_addr & ~L2_OFFSET) >= seg->start &&
-		    seg->first_page[atop((m->phys_addr & ~L2_OFFSET) -
-		    seg->start)].psind >= 2 && l3c_rv) {
-			if (l2 == NULL)
-				l2 = pmap_pde(pmap, va, &lvl);
+	if ((va & L3C_OFFSET) == (pa & L3C_OFFSET) &&
+	    (m->flags & PG_FICTITIOUS) == 0 &&
+	    (full_lvl = vm_reserv_level_iffullpop(m)) >= 0 &&
+	    pmap_promote_l3c(pmap, l3, va) &&
+	    (mpte == NULL || mpte->ref_count == NL3PG) &&
+	    full_lvl == 1) {
+		if (l2 == NULL)
+			l2 = pmap_pde(pmap, va, &lvl);
 
-			/*
-			 * If promotion succeeds, then the next call to this
-			 * function should not be given the unmapped PTP as
-			 * a hint.
-			 */
-			if (pmap_promote_l2(pmap, l2, va, mpte, lockp))
-				mpte = NULL;
-		}
+		/*
+		 * If promotion succeeds, then the next call to this
+		 * function should not be given the unmapped PTP as
+		 * a hint.
+		 */
+		if (pmap_promote_l2(pmap, l2, va, mpte, lockp))
+			mpte = NULL;
 	}
 #endif
 

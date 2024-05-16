@@ -1099,7 +1099,7 @@ vm_reserv_is_page_free(vm_page_t m)
  * Returns true if the given page is part of a block of npages, starting at a
  * multiple of npages, that are all allocated.  Otherwise, returns false.
  */
-bool
+/*bool
 vm_reserv_is_populated(vm_page_t m, int npages)
 {
 	vm_reserv_t rv;
@@ -1114,7 +1114,7 @@ vm_reserv_is_populated(vm_page_t m, int npages)
 		return (false);
 	index = rounddown2(m - rv->pages, npages);
 	return (bit_ntest(rv->popmap, index, index + npages - 1, 1));
-}
+}*/
 
 /*
  * If the given page belongs to a reservation, returns the level of that
@@ -1126,7 +1126,7 @@ vm_reserv_level(vm_page_t m)
 	vm_reserv_t rv;
 
 	rv = vm_reserv_from_page(m);
-	return (rv->object != NULL ? 0 : -1);
+	return (rv->object != NULL ? 1 : -1);
 }
 
 /*
@@ -1139,7 +1139,16 @@ vm_reserv_level_iffullpop(vm_page_t m)
 	vm_reserv_t rv;
 
 	rv = vm_reserv_from_page(m);
-	return (rv->popcnt == VM_LEVEL_0_NPAGES ? 0 : -1);
+	if (rv->object == NULL)
+		return (-1);
+
+	if (rv->popcnt == VM_LEVEL_0_NPAGES) {
+		return (1);
+	} else if (((uint16_t *)rv->popmap)[(m - rv->pages) / 16] == 65535) {
+		return (0);
+	} else {
+		return (-1);
+	}
 }
 
 /*
@@ -1393,8 +1402,10 @@ vm_reserv_size(int level)
 {
 
 	switch (level) {
-	case 0:
+	case 1:
 		return (VM_LEVEL_0_SIZE);
+	case 0:
+		return (VM_LEVEL_0_PART_COUNT * PAGE_SIZE);
 	case -1:
 		return (PAGE_SIZE);
 	default:
