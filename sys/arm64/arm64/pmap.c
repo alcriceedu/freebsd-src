@@ -4996,8 +4996,7 @@ restart:
 				    va, pmap_load(l2p)));
 				l3p = pmap_l2_to_l3(l2p, va);
 				if (pmap_load(l3p) == 0) {
-					mp = PHYS_TO_VM_PAGE(
-					    PTE_TO_PHYS(pmap_load(l2p)));
+					mp = PTE_TO_VM_PAGE(pmap_load(l2p)));
 					mp->ref_count += L3C_ENTRIES;
 				}
 			} else {
