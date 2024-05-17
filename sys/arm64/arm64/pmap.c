@@ -5077,7 +5077,7 @@ pmap_enter(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 	vm_paddr_t opa, pa;
 	vm_page_t mpte, om;
 	bool nosleep;
-	int full_lvl, l3c_rv, lvl, rv;
+	int full_lvl, lvl, rv;
 
 	KASSERT(ADDR_IS_CANONICAL(va),
 	    ("%s: Address not in canonical form: %lx", __func__, va));
@@ -5383,15 +5383,13 @@ validate:
 	 * at a lower run-time cost.  Then, if both the page table page and
 	 * the reservation are fully populated, attempt L2 promotion.
 	 */
-	if ((m->flags & PG_FICTITIOUS) == 0) {
-		l3c_rv = false;
-		if ((mpte == NULL || mpte->ref_count >= L3C_ENTRIES) &&
-		    (full_lvl = vm_reserv_level_iffullpop(m)) >= 0)
-			l3c_rv = pmap_promote_l3c(pmap, l3, va);
-		if ((mpte == NULL || mpte->ref_count == NL3PG) &&
-		    full_lvl >= 1 && l3c_rv)
-			pmap_promote_l2(pmap, pde, va, mpte, &lock);
-	}
+	if ((va & L3C_OFFSET) == (pa & L3C_OFFSET) &&
+	    (m->flags & PG_FICTITIOUS) == 0 &&
+	    (full_lvl = vm_reserv_level_iffullpop(m)) >= 0 &&
+	    pmap_promote_l3c(pmap, l3, va) &&
+	    (mpte == NULL || mpte->ref_count == NL3PG) &&
+	    full_lvl == 1)
+		(void)pmap_promote_l2(pmap, pde, va, mpte, &lock);
 #endif
 
 	rv = KERN_SUCCESS;
@@ -5937,7 +5935,7 @@ pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va, vm_page_t m,
 	pd_entry_t *pde;
 	pt_entry_t *l1, *l2, *l3, l3_val;
 	vm_paddr_t pa;
-	int full_lvl, l3c_rv, lvl;
+	int full_lvl, lvl;
 
 	KASSERT(!VA_IS_CLEANMAP(va) ||
 	    (m->oflags & VPO_UNMANAGED) != 0,
@@ -6064,27 +6062,29 @@ pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va, vm_page_t m,
 
 #if VM_NRESERVLEVEL > 0
 	/*
-	 * Try to promote from level 3 pages to a level 3 contiguous superpage,
-	 * and then to a level 2 superpage.
+	 * First, attempt L3C promotion, if the virtual and physical addresses
+	 * are aligned with each other and an underlying reservation has the
+	 * neighboring L3 pages allocated.  The first condition is simply an
+	 * optimization that recognizes some eventual promotion failures early
+	 * at a lower run-time cost.  Then, if both the page table page and
+	 * the reservation are fully populated, attempt L2 promotion.
 	 */
-	if ((m->flags & PG_FICTITIOUS) == 0) {
-		l3c_rv = false;
-		if ((mpte == NULL || mpte->ref_count >= L3C_ENTRIES) &&
-		    (full_lvl = vm_reserv_level_iffullpop(m)) >= 0)
-			l3c_rv = pmap_promote_l3c(pmap, l3, va);
-		if ((mpte == NULL || mpte->ref_count == NL3PG) &&
-		    full_lvl >= 1 && l3c_rv) {
-			if (l2 == NULL)
-				l2 = pmap_pde(pmap, va, &lvl);
+	if ((va & L3C_OFFSET) == (pa & L3C_OFFSET) &&
+	    (m->flags & PG_FICTITIOUS) == 0 &&
+	    (full_lvl = vm_reserv_level_iffullpop(m)) >= 0 &&
+	    pmap_promote_l3c(pmap, l3, va) &&
+	    (mpte == NULL || mpte->ref_count == NL3PG) &&
+	    full_lvl == 1) {
+		if (l2 == NULL)
+			l2 = pmap_pde(pmap, va, &lvl);
 
-			/*
-			 * If promotion succeeds, then the next call to this
-			 * function should not be given the unmapped PTP as
-			 * a hint.
-			 */
-			if (pmap_promote_l2(pmap, l2, va, mpte, lockp))
-				mpte = NULL;
-		}
+		/*
+		 * If promotion succeeds, then the next call to this
+		 * function should not be given the unmapped PTP as
+		 * a hint.
+		 */
+		if (pmap_promote_l2(pmap, l2, va, mpte, lockp))
+			mpte = NULL;
 	}
 #endif
 
