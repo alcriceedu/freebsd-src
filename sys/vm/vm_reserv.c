@@ -1480,12 +1480,14 @@ vm_reserv_to_superpage(vm_page_t m)
 
 	VM_OBJECT_ASSERT_LOCKED(m->object);
 	rv = vm_reserv_from_page(m);
-	if (rv->object == m->object && rv->popcnt == VM_LEVEL_0_NPAGES)
-		m = rv->pages;
-	else
-		m = NULL;
+	if (rv->object == m->object) {
+		if (rv->popcnt == VM_LEVEL_0_NPAGES)
+			return (rv->pages);
+		else if (((uint16_t *)rv->popmap)[(m - rv->pages) / 16] == 65535)
+			return (rv->pages + rounddown2(m - rv->pages, 16));
+	}
 
-	return (m);
+	return (NULL);
 }
 
 #endif	/* VM_NRESERVLEVEL > 0 */
