@@ -926,13 +926,16 @@ out:
 static void
 vm_reserv_break(vm_reserv_t rv)
 {
+	vm_page_t m;
 	int hi, lo, pos;
 
 	vm_reserv_assert_locked(rv);
 	CTR5(KTR_VM, "%s: rv %p object %p popcnt %d inpartpop %d",
 	    __FUNCTION__, rv, rv->object, rv->popcnt, rv->inpartpopq);
 	vm_reserv_remove(rv);
-	rv->pages->psind = 0;
+	for (m = rv->pages; m < rv->pages + VM_LEVEL_0_NPAGES; m +=
+	    VM_LEVEL_0_PART_COUNT)
+		m->psind = 0;
 	hi = lo = -1;
 	pos = 0;
 	for (;;) {
