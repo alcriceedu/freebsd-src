@@ -1080,6 +1080,11 @@ vm_reserv_migrate_prep(vm_reserv_t rv)
 	CTR5(KTR_VM, "%s: rv %p object %p popcnt %d inpartpop %d",
 	    __FUNCTION__, rv, rv->object, rv->popcnt, rv->inpartpopq);
 	vm_reserv_remove(rv);
+	/*
+	 * Set to non-NULL so that reclaim_run can call
+	 * vm_reserv_is_page_free() to determine the free status from popmap.
+	 */
+	rv->object = (vm_object_t)1;
 	rv->pages->psind = 0;
 }
 
@@ -1456,7 +1461,7 @@ vm_reserv_migrate_locked(int domain, vm_reserv_t rv)
 		//vm_reserv_reclaim(rv);
 		vm_reserv_migrate_prep(rv);
 		vm_reserv_unlock(rv);
-		error = vm_page_reclaim_run_batch_free(VM_ALLOC_NORMAL, domain, VM_LEVEL_0_ORDER, rv->pages, 0, rv->popcnt);
+		error = vm_page_reclaim_run_batch_free(VM_ALLOC_NORMAL, domain, VM_LEVEL_0_ORDER, rv->pages, 0);
 		//vm_reserv_lock(rv);
 		//if (rv->object == NULL) {
 			//counter_u64_add(vm_reserv_migrate_object_turned_null, 1);

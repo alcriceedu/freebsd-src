@@ -3150,7 +3150,7 @@ unlock:
  */
 int
 vm_page_reclaim_run_batch_free(int req_class, int domain, int blk_order,
-    vm_page_t m_run, vm_paddr_t high, int reloc_cnt)
+    vm_page_t m_run, vm_paddr_t high)
 {
 	struct vm_domain *vmd;
 	struct spglist free;
@@ -3162,7 +3162,6 @@ vm_page_reclaim_run_batch_free(int req_class, int domain, int blk_order,
 
 	KASSERT((req_class & VM_ALLOC_CLASS_MASK) == req_class,
 	    ("req_class is not an allocation class"));
-	KASSERT(reloc_cnt > 0, ("reloc_cnt should be > 0"));
 	SLIST_INIT(&free);
 	error = 0;
 	npages = 1 << blk_order;
@@ -3289,7 +3288,6 @@ vm_page_reclaim_run_batch_free(int req_class, int domain, int blk_order,
 					    vm_page_free_prep(m)) {
 						SLIST_INSERT_HEAD(&free, m,
 						    plinks.s.ss);
-						reloc_cnt--;
 					}
 
 					/*
@@ -3303,7 +3301,6 @@ vm_page_reclaim_run_batch_free(int req_class, int domain, int blk_order,
 					if (vm_page_free_prep(m)) {
 						SLIST_INSERT_HEAD(&free, m,
 						    plinks.s.ss);
-						reloc_cnt--;
 					}
 					KASSERT(m->dirty == 0,
 					    ("page %p is dirty", m));
@@ -3346,7 +3343,7 @@ unlock:
 
 		vmd = VM_DOMAIN(domain);
 		vm_domain_free_lock(vmd);
-		if (reloc_cnt) {
+		if (error) {
 			cnt = 0;
 			do {
 				MPASS(vm_page_domain(m) == domain);
