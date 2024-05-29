@@ -1073,6 +1073,54 @@ vm_reserv_break(vm_reserv_t rv)
 	counter_u64_add(vm_reserv_broken, 1);
 }
 
+static void
+vm_reserv_migrate_prep(vm_reserv_t rv)
+{
+	vm_reserv_assert_locked(rv);
+	CTR5(KTR_VM, "%s: rv %p object %p popcnt %d inpartpop %d",
+	    __FUNCTION__, rv, rv->object, rv->popcnt, rv->inpartpopq);
+	vm_reserv_remove(rv);
+	rv->pages->psind = 0;
+}
+
+static void
+vm_reserv_migrate_done(vm_reserv_t rv, bool free_popmap)
+{
+	int hi, lo, pos;
+
+	vm_reserv_assert_locked(rv);
+	CTR5(KTR_VM, "%s: rv %p object %p popcnt %d inpartpop %d",
+	    __FUNCTION__, rv, rv->object, rv->popcnt, rv->inpartpopq);
+	if (free_popmap) {
+		hi = lo = -1;
+		pos = 0;
+		for (;;) {
+			bit_ff_at(rv->popmap, pos, VM_LEVEL_0_NPAGES, lo != hi, &pos);
+			if (lo == hi) {
+				if (pos == -1)
+					break;
+				lo = pos;
+				continue;
+			}
+			if (pos == -1)
+				pos = VM_LEVEL_0_NPAGES;
+			hi = pos;
+			vm_domain_free_lock(VM_DOMAIN(rv->domain));
+			/*
+			 * Can we use vm_phys_enqueue_contig here?  What
+			 * happens if some of the pages in popcnt were
+			 * concurrently freed?  Will we be getting coalescing
+			 * if we used enqueue?
+			 */
+			vm_phys_free_contig(&rv->pages[lo], hi - lo);
+			vm_domain_free_unlock(VM_DOMAIN(rv->domain));
+			lo = hi;
+		}
+	}
+	bit_nclear(rv->popmap, 0, VM_LEVEL_0_NPAGES - 1);
+	rv->popcnt = 0;
+}
+
 /*
  * Breaks all reservations belonging to the given object.
  */
@@ -1385,6 +1433,10 @@ vm_reserv_migrate_locked(int domain, vm_reserv_t rv)
 
 	object = rv->object;
 	MPASS(object != NULL);
+	/*
+	 * These flags are "const until freed" so it should be safe to just
+	 * read them.
+	 */
 	if((object->flags & (OBJ_FICTITIOUS | OBJ_UNMANAGED)) == 0)
 	{
 		/*
@@ -1401,13 +1453,17 @@ vm_reserv_migrate_locked(int domain, vm_reserv_t rv)
 		 * reservation.  This also prevents a concurrent allocation
 		 * from putting the reservation back into the partpopq.
 		 */
-		vm_reserv_reclaim(rv);
+		//vm_reserv_reclaim(rv);
+		vm_reserv_migrate_prep(rv);
 		vm_reserv_unlock(rv);
-		error = vm_page_reclaim_run(VM_ALLOC_NORMAL, domain, (1 << VM_LEVEL_0_ORDER), rv->pages, 0);
+		error = vm_page_reclaim_run_batch_free(VM_ALLOC_NORMAL, domain, VM_LEVEL_0_ORDER, rv->pages, 0, rv->popcnt);
 		//vm_reserv_lock(rv);
 		//if (rv->object == NULL) {
 			//counter_u64_add(vm_reserv_migrate_object_turned_null, 1);
 		//}
+		vm_reserv_lock(rv);
+		vm_reserv_migrate_done(rv, error ? true : false);
+		vm_reserv_unlock(rv);
 		if (error) {
 			switch (error) {
 				case EINVAL:
@@ -1425,7 +1481,7 @@ vm_reserv_migrate_locked(int domain, vm_reserv_t rv)
 		 * At this point, if we succeeded, then all the memory
 		 * belonging to the reservation has been returned to the buddy
 		 * allocator.  This is because vm_page_reclaim_run() =>
-		 * vm_page_free_prep().
+		 * vm_page_free_prep(), and finally vm_phys_free_pages().
 		 */
 		goto DONE;
 	} else {

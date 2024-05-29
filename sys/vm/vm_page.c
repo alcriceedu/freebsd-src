@@ -187,6 +187,9 @@ SYSCTL_COUNTER_U64(_vm_stats, OID_AUTO, vm_page_reclaim_inval2, CTLFLAG_RD,
 static COUNTER_U64_DEFINE_EARLY(vm_page_reclaim_inval3);
 SYSCTL_COUNTER_U64(_vm_stats, OID_AUTO, vm_page_reclaim_inval3, CTLFLAG_RD,
     &vm_page_reclaim_inval3, "Cumulative number of times the third EINVAL in vm_page_reclaim_run()");
+static COUNTER_U64_DEFINE_EARLY(vm_page_reclaim_batch_free);
+SYSCTL_COUNTER_U64(_vm_stats, OID_AUTO, vm_page_reclaim_batch_free, CTLFLAG_RD,
+    &vm_page_reclaim_batch_free, "Cumulative number of times we succeeded at freeing an entire block as requested in vm_page_reclaim_run_batch_free()");
 
 static uma_zone_t fakepg_zone;
 
@@ -489,7 +492,7 @@ sysctl_vm_page_scan(SYSCTL_HANDLER_ARGS)
 			if (paddr % (PAGE_SIZE << VM_NFREEORDER) == 0) {
 				/*
 				 * Buddy allocator coalescing doesn't happen
-				 * across higher order blocks.  So that's the
+				 * across highest order blocks.  So that's the
 				 * granularity at which we lock.  Now unlock
 				 * and flush the output and give other people a
 				 * chance to allocate memory.
@@ -3133,6 +3136,230 @@ unlock:
 			vm_phys_free_pages(m, 0);
 			cnt++;
 		} while ((m = SLIST_FIRST(&free)) != NULL);
+		vm_domain_free_unlock(vmd);
+		vm_domain_freecnt_inc(vmd, cnt);
+	}
+	return (error);
+}
+
+/*
+ * Similar to vm_page_reclaim_run(), but we are given an entire aligned block
+ * of the given order, and if the number of pages we end up relocating is the
+ * same as the provided cnt, we should try to give the whole block back to the
+ * buddy allocator at once.
+ */
+int
+vm_page_reclaim_run_batch_free(int req_class, int domain, int blk_order,
+    vm_page_t m_run, vm_paddr_t high, int reloc_cnt)
+{
+	struct vm_domain *vmd;
+	struct spglist free;
+	vm_object_t object;
+	vm_paddr_t pa;
+	vm_page_t m, m_end, m_new;
+	u_long npages;
+	int error, order, req;
+
+	KASSERT((req_class & VM_ALLOC_CLASS_MASK) == req_class,
+	    ("req_class is not an allocation class"));
+	SLIST_INIT(&free);
+	error = 0;
+	npages = 1 << blk_order;
+	m = m_run;
+	m_end = m_run + npages;
+	for (; error == 0 && m < m_end; m++) {
+		KASSERT((m->flags & (PG_FICTITIOUS | PG_MARKER)) == 0,
+		    ("page %p is PG_FICTITIOUS or PG_MARKER", m));
+
+		/*
+		 * Racily check for wirings.  Races are handled once the object
+		 * lock is held and the page is unmapped.
+		 */
+		if (vm_page_wired(m)) {
+			counter_u64_add(vm_page_reclaim_busy1, 1);
+			error = EBUSY;
+		}
+		else if ((object = atomic_load_ptr(&m->object)) != NULL) {
+			/*
+			 * The page is relocated if and only if it could be
+			 * laundered or reclaimed by the page daemon.
+			 */
+			VM_OBJECT_WLOCK(object);
+			/* Don't care: PG_NODUMP, PG_ZERO. */
+			if (m->object != object ||
+			    ((object->flags & OBJ_SWAP) == 0 &&
+			    object->type != OBJT_VNODE)) {
+				counter_u64_add(vm_page_reclaim_inval1, 1);
+				error = EINVAL;
+			}
+			else if (object->memattr != VM_MEMATTR_DEFAULT) {
+				counter_u64_add(vm_page_reclaim_inval2, 1);
+				error = EINVAL;
+			}
+			else if (vm_page_queue(m) != PQ_NONE &&
+			    vm_page_tryxbusy(m) != 0) {
+				if (vm_page_wired(m)) {
+					vm_page_xunbusy(m);
+					counter_u64_add(vm_page_reclaim_busy2, 1);
+					error = EBUSY;
+					goto unlock;
+				}
+				KASSERT(pmap_page_get_memattr(m) ==
+				    VM_MEMATTR_DEFAULT,
+				    ("page %p has an unexpected memattr", m));
+				KASSERT(m->oflags == 0,
+				    ("page %p has unexpected oflags", m));
+				/* Don't care: PGA_NOSYNC. */
+				if (!vm_page_none_valid(m)) {
+					/*
+					 * First, try to allocate a new page
+					 * that is above "high".  Failing
+					 * that, try to allocate a new page
+					 * that is below "m_run".  Allocate
+					 * the new page between the end of
+					 * "m_run" and "high" only as a last
+					 * resort.
+					 */
+					req = req_class;
+					if ((m->flags & PG_NODUMP) != 0)
+						req |= VM_ALLOC_NODUMP;
+					if (trunc_page(high) !=
+					    ~(vm_paddr_t)PAGE_MASK) {
+						m_new =
+						    vm_page_alloc_noobj_contig(
+						    req, 1, round_page(high),
+						    ~(vm_paddr_t)0, PAGE_SIZE,
+						    0, VM_MEMATTR_DEFAULT);
+					} else
+						m_new = NULL;
+					if (m_new == NULL) {
+						pa = VM_PAGE_TO_PHYS(m_run);
+						m_new =
+						    vm_page_alloc_noobj_contig(
+						    req, 1, 0, pa - 1,
+						    PAGE_SIZE, 0,
+						    VM_MEMATTR_DEFAULT);
+					}
+					if (m_new == NULL) {
+						pa += ptoa(npages);
+						m_new =
+						    vm_page_alloc_noobj_contig(
+						    req, 1, pa, high, PAGE_SIZE,
+						    0, VM_MEMATTR_DEFAULT);
+					}
+					if (m_new == NULL) {
+						vm_page_xunbusy(m);
+						error = ENOMEM;
+						goto unlock;
+					}
+
+					/*
+					 * Unmap the page and check for new
+					 * wirings that may have been acquired
+					 * through a pmap lookup.
+					 */
+					if (object->ref_count != 0 &&
+					    !vm_page_try_remove_all(m)) {
+						vm_page_xunbusy(m);
+						vm_page_free(m_new);
+						counter_u64_add(vm_page_reclaim_busy3, 1);
+						error = EBUSY;
+						goto unlock;
+					}
+
+					/*
+					 * Replace "m" with the new page.  For
+					 * vm_page_replace(), "m" must be busy
+					 * and dequeued.  Finally, change "m"
+					 * as if vm_page_free() was called.
+					 */
+					m_new->a.flags = m->a.flags &
+					    ~PGA_QUEUE_STATE_MASK;
+					KASSERT(m_new->oflags == VPO_UNMANAGED,
+					    ("page %p is managed", m_new));
+					m_new->oflags = 0;
+					pmap_copy_page(m, m_new);
+					m_new->valid = m->valid;
+					m_new->dirty = m->dirty;
+					m->flags &= ~PG_ZERO;
+					vm_page_dequeue(m);
+					if (vm_page_replace_hold(m_new, object,
+					    m->pindex, m) &&
+					    vm_page_free_prep(m))
+						SLIST_INSERT_HEAD(&free, m,
+						    plinks.s.ss);
+						reloc_cnt--;
+
+					/*
+					 * The new page must be deactivated
+					 * before the object is unlocked.
+					 */
+					vm_page_deactivate(m_new);
+				} else {
+					m->flags &= ~PG_ZERO;
+					vm_page_dequeue(m);
+					if (vm_page_free_prep(m))
+						SLIST_INSERT_HEAD(&free, m,
+						    plinks.s.ss);
+						reloc_cnt--;
+					KASSERT(m->dirty == 0,
+					    ("page %p is dirty", m));
+				}
+			} else {
+				counter_u64_add(vm_page_reclaim_busy4, 1);
+				error = EBUSY;
+			}
+unlock:
+			VM_OBJECT_WUNLOCK(object);
+		} else {
+			MPASS(vm_page_domain(m) == domain);
+			vmd = VM_DOMAIN(domain);
+			vm_domain_free_lock(vmd);
+			order = m->order;
+			if (order < VM_NFREEORDER) {
+				/*
+				 * The page is enqueued in the physical memory
+				 * allocator's free page queues.  Moreover, it
+				 * is the first page in a power-of-two-sized
+				 * run of contiguous free pages.  Jump ahead
+				 * to the last page within that run, and
+				 * continue from there.
+				 */
+				m += (1 << order) - 1;
+			}
+#if VM_NRESERVLEVEL > 0
+			else if (vm_reserv_is_page_free(m))
+				order = 0;
+#endif
+			vm_domain_free_unlock(vmd);
+			if (order == VM_NFREEORDER) {
+				counter_u64_add(vm_page_reclaim_inval3, 1);
+				error = EINVAL;
+			}
+		}
+	}
+	if ((m = SLIST_FIRST(&free)) != NULL) {
+		int cnt;
+
+		vmd = VM_DOMAIN(domain);
+		vm_domain_free_lock(vmd);
+		if (reloc_cnt) {
+			cnt = 0;
+			do {
+				MPASS(vm_page_domain(m) == domain);
+				SLIST_REMOVE_HEAD(&free, plinks.s.ss);
+				vm_phys_free_pages(m, 0);
+				cnt++;
+			} while ((m = SLIST_FIRST(&free)) != NULL);
+		} else {
+			/*
+			 * We freed everything we were asked to, so let's give
+			 * the whole block back to the buddy allocator.
+			 */
+			vm_phys_free_pages(m, blk_order);
+			counter_u64_add(vm_page_reclaim_batch_free, 1);
+			cnt = 1 << blk_order;
+		}
 		vm_domain_free_unlock(vmd);
 		vm_domain_freecnt_inc(vmd, cnt);
 	}
