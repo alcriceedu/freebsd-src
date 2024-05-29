@@ -3162,6 +3162,7 @@ vm_page_reclaim_run_batch_free(int req_class, int domain, int blk_order,
 
 	KASSERT((req_class & VM_ALLOC_CLASS_MASK) == req_class,
 	    ("req_class is not an allocation class"));
+	KASSERT(reloc_cnt > 0, ("reloc_cnt should be > 0"));
 	SLIST_INIT(&free);
 	error = 0;
 	npages = 1 << blk_order;
@@ -3285,10 +3286,11 @@ vm_page_reclaim_run_batch_free(int req_class, int domain, int blk_order,
 					vm_page_dequeue(m);
 					if (vm_page_replace_hold(m_new, object,
 					    m->pindex, m) &&
-					    vm_page_free_prep(m))
+					    vm_page_free_prep(m)) {
 						SLIST_INSERT_HEAD(&free, m,
 						    plinks.s.ss);
 						reloc_cnt--;
+					}
 
 					/*
 					 * The new page must be deactivated
@@ -3298,10 +3300,11 @@ vm_page_reclaim_run_batch_free(int req_class, int domain, int blk_order,
 				} else {
 					m->flags &= ~PG_ZERO;
 					vm_page_dequeue(m);
-					if (vm_page_free_prep(m))
+					if (vm_page_free_prep(m)) {
 						SLIST_INSERT_HEAD(&free, m,
 						    plinks.s.ss);
 						reloc_cnt--;
+					}
 					KASSERT(m->dirty == 0,
 					    ("page %p is dirty", m));
 				}
