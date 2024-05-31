@@ -2972,6 +2972,7 @@ vm_page_reclaim_run_toq(int req_class, int domain, u_long npages,
 	vm_paddr_t pa;
 	vm_page_t m, m_end, m_new;
 	int error, order, req;
+	bool locked;
 
 	KASSERT((req_class & VM_ALLOC_CLASS_MASK) == req_class,
 	    ("req_class is not an allocation class"));
@@ -2995,7 +2996,10 @@ vm_page_reclaim_run_toq(int req_class, int domain, u_long npages,
 			 * The page is relocated if and only if it could be
 			 * laundered or reclaimed by the page daemon.
 			 */
-			if (obj == NULL || object != obj) {
+			(void)obj;
+			//if (obj == NULL || object != obj) {
+			locked = false;
+			if (!VM_OBJECT_WOWNED(object)) {
 				/*
 				 * If we ended up calling reclaim_run because
 				 * we called vm_reserv_break_all further up the
@@ -3026,6 +3030,7 @@ vm_page_reclaim_run_toq(int req_class, int domain, u_long npages,
 				 * deadlock free.
 				 */
 				VM_OBJECT_WLOCK(object);
+				locked = true;
 			}
 			/* Don't care: PG_NODUMP, PG_ZERO. */
 			if (m->object != object ||
@@ -3150,7 +3155,7 @@ vm_page_reclaim_run_toq(int req_class, int domain, u_long npages,
 				error = EBUSY;
 			}
 unlock:
-			if (obj == NULL || object != obj) {
+			if (locked) {
 				VM_OBJECT_WUNLOCK(object);
 			}
 		} else {
