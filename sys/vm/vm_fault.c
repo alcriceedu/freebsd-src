@@ -491,7 +491,7 @@ vm_fault_populate(struct faultstate *fs)
 	vm_offset_t vaddr;
 	vm_page_t m;
 	vm_pindex_t map_first, map_last, pager_first, pager_last, pidx;
-	int bdry_idx, i, npages, psind, rv;
+	int bdry_idx, i, npages, psind, psind_cand, rv;
 	enum fault_status res;
 
 	MPASS(fs->object == fs->first_object);
@@ -619,11 +619,14 @@ vm_fault_populate(struct faultstate *fs)
 	    pidx += npages, m = vm_page_next(&m[npages - 1])) {
 		vaddr = fs->entry->start + IDX_TO_OFF(pidx) - fs->entry->offset;
 
-		psind = m->psind;
-		if (psind > 0 && ((vaddr & (pagesizes[psind] - 1)) != 0 ||
-		    pidx + OFF_TO_IDX(pagesizes[psind]) - 1 > pager_last ||
-		    !pmap_ps_enabled(fs->map->pmap)))
-			psind = 0;
+		psind = 0;
+		for (psind_cand = m->psind; psind_cand > 0; psind_cand--)
+			if (((vaddr & (pagesizes[psind_cand] - 1)) == 0 &&
+			    pidx + OFF_TO_IDX(pagesizes[psind_cand]) - 1 <=
+			    pager_last && pmap_ps_enabled(fs->map->pmap))) {
+				psind = psind_cand;
+				break;
+			}
 
 		npages = atop(pagesizes[psind]);
 		for (i = 0; i < npages; i++) {
