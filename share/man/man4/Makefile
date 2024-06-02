@@ -214,6 +214,7 @@ MAN=	aac.4 \
 	${_hwpstate_intel.4} \
 	i2ctinyusb.4 \
 	iavf.4 \
+	ice.4 \
 	ichsmb.4 \
 	${_ichwd.4} \
 	icmp.4 \
@@ -296,6 +297,7 @@ MAN=	aac.4 \
 	mac_biba.4 \
 	mac_bsdextended.4 \
 	mac_ddb.4 \
+	mac_do.4 \
 	mac_ifoff.4 \
 	mac_ipacl.4 \
 	mac_lomac.4 \
@@ -687,7 +689,7 @@ MLINKS+=em.4 if_em.4 \
 MLINKS+=enc.4 if_enc.4
 MLINKS+=epair.4 if_epair.4
 MLINKS+=et.4 if_et.4
-MLINKS+=ext2fs.4 ext4fs.4 \
+MLINKS+=ext2fs.4 ext4fs.4
 MLINKS+=fd.4 stderr.4 \
 	fd.4 stdin.4 \
 	fd.4 stdout.4
@@ -711,6 +713,7 @@ MLINKS+=ip.4 rawip.4
 MLINKS+=ipfirewall.4 ipaccounting.4 \
 	ipfirewall.4 ipacct.4 \
 	ipfirewall.4 ipfw.4
+MLINKS+=ice.4 if_ice.4
 MLINKS+=ipheth.4 if_ipheth.4
 MLINKS+=ipw.4 if_ipw.4
 MLINKS+=iwi.4 if_iwi.4
