@@ -337,7 +337,7 @@ vm_fault_soft_fast(struct faultstate *fs)
 	vm_page_t m, m_map;
 #if VM_NRESERVLEVEL > 0
 	vm_page_t m_super;
-	int flags;
+	int psind_cand, flags;
 #endif
 	int psind;
 	vm_offset_t vaddr;
@@ -380,31 +380,36 @@ vm_fault_soft_fast(struct faultstate *fs)
 	psind = 0;
 #if VM_NRESERVLEVEL > 0
 	if ((m->flags & PG_FICTITIOUS) == 0 &&
-	    (m_super = vm_reserv_to_superpage(m)) != NULL &&
-	    rounddown2(vaddr, pagesizes[m_super->psind]) >= fs->entry->start &&
-	    roundup2(vaddr + 1, pagesizes[m_super->psind]) <= fs->entry->end &&
-	    (vaddr & (pagesizes[m_super->psind] - 1)) == (VM_PAGE_TO_PHYS(m) &
-	    (pagesizes[m_super->psind] - 1)) &&
-	    pmap_ps_enabled(fs->map->pmap)) {
-		flags = PS_ALL_VALID;
-		if ((fs->prot & VM_PROT_WRITE) != 0) {
-			/*
-			 * Create a superpage mapping allowing write access
-			 * only if none of the constituent pages are busy and
-			 * all of them are already dirty (except possibly for
-			 * the page that was faulted on).
-			 */
-			flags |= PS_NONE_BUSY;
-			if ((fs->first_object->flags & OBJ_UNMANAGED) == 0)
-				flags |= PS_ALL_DIRTY;
-		}
-		if (vm_page_ps_test(m_super, flags, m)) {
-			m_map = m_super;
-			psind = m_super->psind;
-			vaddr = rounddown2(vaddr, pagesizes[psind]);
-			/* Preset the modified bit for dirty superpages. */
-			if ((flags & PS_ALL_DIRTY) != 0)
-				fs->fault_type |= VM_PROT_WRITE;
+	    (m_super = vm_reserv_to_superpage(m)) != NULL) {
+		for (psind_cand = m_super->psind; psind_cand > 0; psind_cand--) {
+			m_super += rounddown2(m - m_super, pagesizes[psind_cand] / PAGE_SIZE);
+			if (rounddown2(vaddr, pagesizes[psind_cand]) >= fs->entry->start &&
+			    roundup2(vaddr + 1, pagesizes[psind_cand]) <= fs->entry->end &&
+			    (vaddr & (pagesizes[psind_cand] - 1)) ==
+			    (VM_PAGE_TO_PHYS(m) & (pagesizes[psind_cand] - 1)) &&
+			    pmap_ps_enabled(fs->map->pmap)) {
+				flags = PS_ALL_VALID;
+				if ((fs->prot & VM_PROT_WRITE) != 0) {
+					/*
+					 * Create a superpage mapping allowing write access
+					 * only if none of the constituent pages are busy and
+					 * all of them are already dirty (except possibly for
+					 * the page that was faulted on).
+					 */
+					flags |= PS_NONE_BUSY;
+					if ((fs->first_object->flags & OBJ_UNMANAGED) == 0)
+						flags |= PS_ALL_DIRTY;
+				}
+				if (vm_page_ps_test(m_super, flags, m)) {
+					m_map = m_super;
+					psind = psind_cand;
+					vaddr = rounddown2(vaddr, pagesizes[psind]);
+					/* Preset the modified bit for dirty superpages. */
+					if ((flags & PS_ALL_DIRTY) != 0)
+						fs->fault_type |= VM_PROT_WRITE;
+				}
+				break;
+			}
 		}
 	}
 #endif
@@ -486,7 +491,7 @@ vm_fault_populate(struct faultstate *fs)
 	vm_offset_t vaddr;
 	vm_page_t m;
 	vm_pindex_t map_first, map_last, pager_first, pager_last, pidx;
-	int bdry_idx, i, npages, psind, rv;
+	int bdry_idx, i, npages, psind, psind_cand, rv;
 	enum fault_status res;
 
 	MPASS(fs->object == fs->first_object);
@@ -614,11 +619,14 @@ vm_fault_populate(struct faultstate *fs)
 	    pidx += npages, m = vm_page_next(&m[npages - 1])) {
 		vaddr = fs->entry->start + IDX_TO_OFF(pidx) - fs->entry->offset;
 
-		psind = m->psind;
-		if (psind > 0 && ((vaddr & (pagesizes[psind] - 1)) != 0 ||
-		    pidx + OFF_TO_IDX(pagesizes[psind]) - 1 > pager_last ||
-		    !pmap_ps_enabled(fs->map->pmap)))
-			psind = 0;
+		psind = 0;
+		for (psind_cand = m->psind; psind_cand > 0; psind_cand--)
+			if (((vaddr & (pagesizes[psind_cand] - 1)) == 0 &&
+			    pidx + OFF_TO_IDX(pagesizes[psind_cand]) - 1 <=
+			    pager_last && pmap_ps_enabled(fs->map->pmap))) {
+				psind = psind_cand;
+				break;
+			}
 
 		npages = atop(pagesizes[psind]);
 		for (i = 0; i < npages; i++) {
