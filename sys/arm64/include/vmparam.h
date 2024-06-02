@@ -299,7 +299,7 @@
 #endif
 
 #if !defined(KASAN) && !defined(KMSAN)
-#define	UMA_MD_SMALL_ALLOC
+#define UMA_USE_DMAP
 #endif
 
 #ifndef LOCORE
@@ -307,7 +307,6 @@
 extern vm_paddr_t dmap_phys_base;
 extern vm_paddr_t dmap_phys_max;
 extern vm_offset_t dmap_max_addr;
-extern vm_offset_t vm_max_kernel_address;
 
 #endif
 
@@ -326,6 +325,7 @@ extern vm_offset_t vm_max_kernel_address;
  * Need a page dump array for minidump.
  */
 #define MINIDUMP_PAGE_TRACKING	1
+#define MINIDUMP_STARTUP_PAGE_TRACKING 1
 
 #endif /* !_MACHINE_VMPARAM_H_ */
 
