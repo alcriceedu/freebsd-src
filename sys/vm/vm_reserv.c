@@ -1261,7 +1261,8 @@ vm_reserv_break_all(vm_object_t object)
 			rv->inpartpopq = FALSE;
 		}
 		vm_reserv_domain_unlock(rv->domain);
-		vm_reserv_break(rv, object, vm_reserv_break_style);
+		//vm_reserv_break(rv, object, vm_reserv_break_style);
+		vm_reserv_break(rv, object, 0);
 		vm_reserv_unlock(rv);
 	}
 }
@@ -1432,7 +1433,8 @@ vm_reserv_reclaim(vm_reserv_t rv)
 		vm_reserv_dequeue(rv);
 		vm_reserv_domain_unlock(rv->domain);
 	}
-	vm_reserv_break(rv, NULL, vm_reserv_break_style);
+	//vm_reserv_break(rv, NULL, vm_reserv_break_style);
+	vm_reserv_break(rv, NULL, 0);
 	counter_u64_add(vm_reserv_reclaimed, 1);
 }
 

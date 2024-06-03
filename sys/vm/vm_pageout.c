@@ -2305,12 +2305,16 @@ vm_pageout_worker(void *arg)
 
 #if VM_NRESERVLEVEL > 0
 		if (vm_daemon_reserv_reclaim_enabled &&
-		    vmd->vmd_free_count >=
-		    vm_daemon_reserv_reclaim_disable_low_count) {
+		    vmd->vmd_free_count <=
+		    vmd->vmd_free_target) {
+			/*
+			 * Relocate when below 2% of total memory plus change.
+			 */
 			//if (vmd->vmd_free_count < npages_to_reclaim + vmd->vmd_free_reserved)
 				//goto done;
 
-			reserv_shortage = (((int)vmd->vmd_free_count) - vm_phys_high_order_free_count(domain) * vm_daemon_reserv_reclaim_ratio) / (1 << VM_LEVEL_0_ORDER);
+			//reserv_shortage = (((int)vmd->vmd_free_count) - vm_phys_high_order_free_count(domain) * vm_daemon_reserv_reclaim_ratio) / (1 << VM_LEVEL_0_ORDER);
+			reserv_shortage = (((int)vmd->vmd_free_target) - ((int)vmd->vmd_free_count)) / (1 << VM_LEVEL_0_ORDER);
 			if (reserv_shortage > 0) {
 				counter_u64_add(vm_daemon_reserv_reclaim, 1);
 				reclaimed = vm_reserv_partpop_reclaim(domain, reserv_shortage, vm_daemon_reserv_early_break_popcnt_thld);
