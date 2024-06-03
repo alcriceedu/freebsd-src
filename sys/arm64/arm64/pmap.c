@@ -472,9 +472,6 @@ static vm_page_t pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va,
     vm_page_t m, vm_prot_t prot, vm_page_t mpte, struct rwlock **lockp);
 static int pmap_enter_l2(pmap_t pmap, vm_offset_t va, pd_entry_t new_l2,
     u_int flags, vm_page_t m, struct rwlock **lockp);
-static bool pmap_every_pte_zero(vm_paddr_t pa);
-static int pmap_insert_pt_page(pmap_t pmap, vm_page_t mpte, bool promoted,
-    bool all_l3e_AF_set);
 static int pmap_remove_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t sva,
     pd_entry_t l1e, struct spglist *free, struct rwlock **lockp);
 static int pmap_remove_l3(pmap_t pmap, pt_entry_t *l3, vm_offset_t sva,
@@ -489,8 +486,6 @@ static vm_page_t _pmap_alloc_l3(pmap_t pmap, vm_pindex_t ptepindex,
 static void _pmap_unwire_l3(pmap_t pmap, vm_offset_t va, vm_page_t m,
     struct spglist *free);
 static int pmap_unuse_pt(pmap_t, vm_offset_t, pd_entry_t, struct spglist *);
-static void pmap_update_entry(pmap_t pmap, pd_entry_t *pte, pd_entry_t newpte,
-    vm_offset_t va, vm_size_t size);
 static __inline vm_page_t pmap_remove_pt_page(pmap_t pmap, vm_offset_t va);
 
 static uma_zone_t pmap_bti_ranges_zone;
@@ -2024,9 +2019,8 @@ pmap_kenter(vm_offset_t sva, vm_size_t size, vm_paddr_t pa, int mode)
 {
 	pd_entry_t *pde;
 	pt_entry_t attr, old_l3e, *pte;
-	vm_page_t mpte;
 	vm_offset_t va;
-	int error, lvl;
+	int lvl;
 
 	KASSERT((pa & L3_OFFSET) == 0,
 	    ("pmap_kenter: Invalid physical address"));
@@ -2044,40 +2038,6 @@ pmap_kenter(vm_offset_t sva, vm_size_t size, vm_paddr_t pa, int mode)
 		KASSERT(pde != NULL,
 		    ("pmap_kenter: Invalid page entry, va: 0x%lx", va));
 		KASSERT(lvl == 2, ("pmap_kenter: Invalid level %d", lvl));
-
-		/*
-		 * If we have an aligned, contiguous chunk of L2_SIZE, try
-		 * to create an L2_BLOCK mapping.
-		 */
-		if ((va & L2_OFFSET) == 0 && size >= L2_SIZE &&
-		    (pa & L2_OFFSET) == 0 && vm_initialized) {
-			mpte = PTE_TO_VM_PAGE(pmap_load(pde));
-			KASSERT(pmap_every_pte_zero(VM_PAGE_TO_PHYS(mpte)),
-			    ("pmap_kenter: Unexpected mapping"));
-			PMAP_LOCK(kernel_pmap);
-			error = pmap_insert_pt_page(kernel_pmap, mpte, false,
-			    false);
-			if (error == 0) {
-				attr &= ~ATTR_CONTIGUOUS;
-
-				/*
-				 * Although the page table page "mpte" should
-				 * be devoid of mappings, the TLB might hold
-				 * intermediate entries that reference it, so
-				 * we perform a single-page invalidation.
-				 */
-				pmap_update_entry(kernel_pmap, pde,
-				    PHYS_TO_PTE(pa) | attr | L2_BLOCK, va,
-				    PAGE_SIZE);
-			}
-			PMAP_UNLOCK(kernel_pmap);
-			if (error == 0) {
-				va += L2_SIZE;
-				pa += L2_SIZE;
-				size -= L2_SIZE;
-				continue;
-			}
-		}
 
 		pte = pmap_l2_to_l3(pde, va);
 		old_l3e |= pmap_load_store(pte, PHYS_TO_PTE(pa) | attr);
