@@ -2945,7 +2945,7 @@ vm_page_reclaim_run(int req_class, int domain, u_long npages, vm_page_t m_run,
 	int error, cnt;
 
 	SLIST_INIT(&free);
-	error = vm_page_reclaim_run_toq(req_class, domain, npages, m_run, high,
+	error = vm_page_reclaim_run_toq(req_class, 0, domain, npages, m_run, high,
 	    NULL, &free);
 	if ((m = SLIST_FIRST(&free)) != NULL) {
 		vmd = VM_DOMAIN(domain);
@@ -2964,7 +2964,7 @@ vm_page_reclaim_run(int req_class, int domain, u_long npages, vm_page_t m_run,
 }
 
 int
-vm_page_reclaim_run_toq(int req_class, int domain, u_long npages,
+vm_page_reclaim_run_toq(int req_class, int req_flags, int domain, u_long npages,
     vm_page_t m_run, vm_paddr_t high, vm_object_t obj, struct spglist *free)
 {
 	struct vm_domain *vmd;
@@ -2976,6 +2976,8 @@ vm_page_reclaim_run_toq(int req_class, int domain, u_long npages,
 
 	KASSERT((req_class & VM_ALLOC_CLASS_MASK) == req_class,
 	    ("req_class is not an allocation class"));
+	KASSERT((req_flags & VM_ALLOC_CLASS_MASK) == 0,
+	    ("req_flags contains allocation class"));
 	error = 0;
 	m = m_run;
 	m_end = m_run + npages;
@@ -3067,7 +3069,7 @@ vm_page_reclaim_run_toq(int req_class, int domain, u_long npages,
 					 * "m_run" and "high" only as a last
 					 * resort.
 					 */
-					req = req_class;
+					req = req_class | req_flags;
 					if ((m->flags & PG_NODUMP) != 0)
 						req |= VM_ALLOC_NODUMP;
 					if (trunc_page(high) !=

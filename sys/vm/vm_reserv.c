@@ -1130,8 +1130,10 @@ vm_reserv_break(vm_reserv_t rv, vm_object_t obj, int opt)
 			if (pos == -1)
 				pos = VM_LEVEL_0_NPAGES;
 			hi = pos;
-			error = vm_page_reclaim_run_toq(VM_ALLOC_NORMAL,
-			    rv->domain, hi - lo, &rv->pages[lo], 0, obj, &free);
+			error = vm_page_reclaim_run_toq(
+			    VM_ALLOC_NORMAL, VM_ALLOC_NORECLAIM,
+			    rv->domain, hi - lo, &rv->pages[lo], 0, obj, &free
+			);
 			if (error) {
 				switch (error) {
 					case EINVAL:

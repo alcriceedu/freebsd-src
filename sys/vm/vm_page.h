@@ -707,8 +707,9 @@ void vm_page_zero_invalid(vm_page_t m, boolean_t setvalid);
 void vm_page_free_pages_toq(struct spglist *free, bool update_wire_count);
 int vm_page_reclaim_run(int req_class, int domain, u_long npages,
     vm_page_t m_run, vm_paddr_t high);
-int vm_page_reclaim_run_toq(int req_class, int domain, u_long npages,
-    vm_page_t m_run, vm_paddr_t high, vm_object_t obj, struct spglist *free);
+int vm_page_reclaim_run_toq(int req_class, int req_flags, int domain,
+    u_long npages, vm_page_t m_run, vm_paddr_t high, vm_object_t obj,
+    struct spglist *free);
 
 void vm_page_dirty_KBI(vm_page_t m);
 void vm_page_lock_KBI(vm_page_t m, const char *file, int line);
