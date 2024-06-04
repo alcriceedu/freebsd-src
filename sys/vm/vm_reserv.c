@@ -1662,6 +1662,7 @@ vm_reserv_partpop_reclaim(int domain, int shortage, int popcnt_thld)
 				 * Bound the number of attempts.
 				 */
 				attempts++;
+				(void)attempts;
 				/* Evacuate the victim. */
 				MPASS(rv->domain == dom);
 				//status = vm_reserv_migrate_locked(rv);
@@ -1671,13 +1672,13 @@ vm_reserv_partpop_reclaim(int domain, int shortage, int popcnt_thld)
 					reclaimed++;
 				}
 				//vm_reserv_unlock(rv);
-				if (!(reclaimed < shortage && attempts < shortage)) {
-					goto OUT;
-				}
+				//if (!(reclaimed < shortage && attempts < shortage)) {
+					//goto OUT;
+				//}
 			}
 		}
 	}
-OUT:
+//OUT:
 	return (reclaimed);
 }
 
