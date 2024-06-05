@@ -1619,15 +1619,23 @@ int
 vm_reserv_partpop_reclaim(int domain, int shortage, int popcnt_thld)
 {
 	vm_reserv_t rv;
-	int dom, level, reclaimed, attempts, status;
+	int dom, level, reclaimed, attempts, status, t_min, t_max;
 
 	reclaimed = 0;
 	attempts = 0;
+	t_min = INT_MAX;
+	t_max = 0;
 	for (dom = 0; dom < vm_ndomains && (dom == domain || domain < 0); dom++) {
 		for (level = 0; level < VM_NRESERVLEVEL; level++) {
+			int len = 0;
 			while (true) {
 				/* Find a victim. */
 				vm_reserv_domain_lock(dom);
+				if (len == 0) {
+					TAILQ_FOREACH(rv, &vm_rvd[dom].partpop, partpopq) {
+						len++;
+					}
+				}
 				TAILQ_FOREACH(rv, &vm_rvd[dom].partpop, partpopq) {
 					/*
 					 * Skip the marker node.
@@ -1656,6 +1664,12 @@ vm_reserv_partpop_reclaim(int domain, int shortage, int popcnt_thld)
 					 */
 					break;
 				}
+				if (rv->lasttick > t_max) {
+					t_max = rv->lasttick;
+				}
+				if (rv->lasttick < t_min) {
+					t_min = rv->lasttick;
+				}
 
 				/*
 				 * Don't try too many times.
@@ -1672,13 +1686,17 @@ vm_reserv_partpop_reclaim(int domain, int shortage, int popcnt_thld)
 					reclaimed++;
 				}
 				//vm_reserv_unlock(rv);
+				if (attempts >= len / 2) {
+					goto OUT;
+				}
 				//if (!(reclaimed < shortage && attempts < shortage)) {
 					//goto OUT;
 				//}
 			}
 		}
 	}
-//OUT:
+OUT:
+	printf("%s: t_max %d t_min %d tick %d\n", __func__, t_max, t_min, tick);
 	return (reclaimed);
 }
 
