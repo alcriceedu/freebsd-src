@@ -1103,6 +1103,7 @@ vm_reserv_break(vm_reserv_t rv, vm_object_t obj, int opt)
 				goto RELOC_DONE;
 			}
 		}
+		ret = 0;
 
 
 		SLIST_INIT(&free);
@@ -1153,6 +1154,7 @@ vm_reserv_break(vm_reserv_t rv, vm_object_t obj, int opt)
 				 * contiguity so there's no point in trying to
 				 * relocate more pages in this reservation.
 				 */
+				ret = 1;
 				break;
 			}
 			lo = hi;
@@ -1174,7 +1176,6 @@ vm_reserv_break(vm_reserv_t rv, vm_object_t obj, int opt)
 			vm_domain_free_unlock(vmd);
 			vm_domain_freecnt_inc(vmd, cnt);
 			counter_u64_add(vm_reserv_migrate_npages_ok, cnt);
-			ret = 0;
 		}
 	}
 
@@ -1620,12 +1621,12 @@ int
 vm_reserv_partpop_reclaim(int domain, int shortage, int popcnt_thld)
 {
 	vm_reserv_t rv;
-	int dom, level, reclaimed, attempts, status, t_min, t_max, pop_min, pop_max;
+	int dom, level, reclaimed, attempts, status, t_min, t_max, pop_min, pop_max, pop_tmp;
 
 	reclaimed = 0;
 	attempts = 0;
 	t_min = pop_min = INT_MAX;
-	t_max = pop_max = 0;
+	t_max = pop_max = INT_MIN;
 	for (dom = 0; dom < vm_ndomains && (dom == domain || domain < 0); dom++) {
 		for (level = 0; level < VM_NRESERVLEVEL; level++) {
 			int len = 0;
@@ -1671,12 +1672,7 @@ vm_reserv_partpop_reclaim(int domain, int shortage, int popcnt_thld)
 				if (rv->lasttick < t_min) {
 					t_min = rv->lasttick;
 				}
-				if (rv->popcnt > pop_max) {
-					pop_max = rv->popcnt;
-				}
-				if (rv->popcnt < pop_min) {
-					pop_min = rv->popcnt;
-				}
+				pop_tmp = rv->popcnt;
 
 				/*
 				 * Don't try too many times.
@@ -1691,6 +1687,12 @@ vm_reserv_partpop_reclaim(int domain, int shortage, int popcnt_thld)
 				vm_reserv_unlock(rv);
 				if (!status) {
 					reclaimed++;
+					if (pop_tmp > pop_max) {
+						pop_max = pop_tmp;
+					}
+					if (pop_tmp < pop_min) {
+						pop_min = pop_tmp;
+					}
 				}
 				//vm_reserv_unlock(rv);
 				if (attempts >= len / 2) {
@@ -1703,7 +1705,7 @@ vm_reserv_partpop_reclaim(int domain, int shortage, int popcnt_thld)
 		}
 	}
 OUT:
-	printf("%s: t_max %d t_min %d tick %d pop_min %d pop_max %d\n", __func__, t_max, t_min, tick, pop_min, pop_max);
+	printf("%s: t_max %d t_min %d ticks %d pop_min %d pop_max %d\n", __func__, t_max, t_min, ticks, pop_min, pop_max);
 	return (reclaimed);
 }
 
