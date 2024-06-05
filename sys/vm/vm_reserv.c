@@ -286,6 +286,9 @@ SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, migrate_npages_ok, CTLFLAG_RD,
 static int __read_frequently vm_reserv_break_style = 0;
 SYSCTL_INT(_vm_reserv, OID_AUTO, break_style, CTLFLAG_RWTUN | CTLFLAG_NOFETCH,
     &vm_reserv_break_style, 0, "0 for in-place reservation breaking and 1 for relocation-based reservation breaking");
+static int __read_frequently vm_reserv_reclaim_damp_factor = 2;
+SYSCTL_INT(_vm_reserv, OID_AUTO, reclaim_damp_factor, CTLFLAG_RWTUN | CTLFLAG_NOFETCH,
+    &vm_reserv_reclaim_damp_factor, 0, "Length of partpopq / damp_factor is the amount we will dig into for aggressive breaking");
 
 /*
  * The object lock pool is used to synchronize the rvq.  We can not use a
@@ -1695,7 +1698,7 @@ vm_reserv_partpop_reclaim(int domain, int shortage, int popcnt_thld)
 					}
 				}
 				//vm_reserv_unlock(rv);
-				if (attempts >= len / 2) {
+				if (attempts >= len / vm_reserv_reclaim_damp_factor) {
 					goto OUT;
 				}
 				//if (!(reclaimed < shortage && attempts < shortage)) {
