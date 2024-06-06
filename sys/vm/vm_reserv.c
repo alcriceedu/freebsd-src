@@ -1621,7 +1621,7 @@ DONE:
  * Returns the number of reservations reclaimed.
  */
 int
-vm_reserv_partpop_reclaim(int domain, int shortage, int popcnt_thld)
+vm_reserv_partpop_reclaim(int domain, int shortage, int popcnt_thld, int opt)
 {
 	vm_reserv_t rv;
 	int dom, level, reclaimed, attempts, status, t_min, t_max, pop_min, pop_max, pop_tmp;
@@ -1653,7 +1653,10 @@ vm_reserv_partpop_reclaim(int domain, int shortage, int popcnt_thld)
 					 */
 					if (rv != &vm_rvd[dom].marker &&
 					    vm_reserv_trylock(rv)) {
-						if (rv->popcnt <= popcnt_thld) {
+						if (opt == 1 && rv->popcnt <= popcnt_thld) {
+							vm_reserv_dequeue(rv);
+							break;
+						} else if (opt == 2 && ticks - rv->lasttick > 5 * hz) {
 							vm_reserv_dequeue(rv);
 							break;
 						} else {
@@ -1698,7 +1701,7 @@ vm_reserv_partpop_reclaim(int domain, int shortage, int popcnt_thld)
 					}
 				}
 				//vm_reserv_unlock(rv);
-				if (attempts >= len / vm_reserv_reclaim_damp_factor) {
+				if (opt == 1 && attempts >= len / vm_reserv_reclaim_damp_factor) {
 					goto OUT;
 				}
 				//if (!(reclaimed < shortage && attempts < shortage)) {
@@ -1708,7 +1711,9 @@ vm_reserv_partpop_reclaim(int domain, int shortage, int popcnt_thld)
 		}
 	}
 OUT:
-	printf("%s: t_max %d t_min %d ticks %d pop_min %d pop_max %d\n", __func__, t_max, t_min, ticks, pop_min, pop_max);
+	if (opt == 1) {
+		printf("%s: t_max %d t_min %d ticks %d pop_min %d pop_max %d\n", __func__, t_max, t_min, ticks, pop_min, pop_max);
+	}
 	return (reclaimed);
 }
 

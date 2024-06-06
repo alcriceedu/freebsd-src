@@ -100,6 +100,7 @@
 #include <sys/rwlock.h>
 #include <sys/sx.h>
 #include <sys/sysctl.h>
+#include <sys/limits.h>
 
 #include <vm/vm.h>
 #include <vm/vm_param.h>
@@ -2194,7 +2195,7 @@ SYSCTL_INT(_vm_daemon, OID_AUTO, reserv_reclaim_disable_low_count, CTLFLAG_RWTUN
     &vm_daemon_reserv_reclaim_disable_low_count, 0, "When total free memory is less than this many base pages, don't bother trying to proactively reclaim reservations");
 static int __read_frequently vm_daemon_reserv_reclaim_enabled = 0;
 SYSCTL_INT(_vm_daemon, OID_AUTO, reserv_reclaim_enabled, CTLFLAG_RWTUN | CTLFLAG_NOFETCH,
-    &vm_daemon_reserv_reclaim_enabled, 0, "Proactive reservation reclamation enabled?");
+    &vm_daemon_reserv_reclaim_enabled, 0, "Proactive reservation reclamation enabled? 0 for disabled, 1 for relocation style, 2 for quicksilver time-based style");
 static int __read_frequently vm_daemon_reserv_early_break_enabled = 0;
 SYSCTL_INT(_vm_daemon, OID_AUTO, reserv_early_break_enabled, CTLFLAG_RWTUN | CTLFLAG_NOFETCH,
     &vm_daemon_reserv_early_break_enabled, 0, "Early reservation breaking enabled?");
@@ -2304,7 +2305,7 @@ vm_pageout_worker(void *arg)
 		vm_pageout_scan_active(vmd, shortage);
 
 #if VM_NRESERVLEVEL > 0
-		if (vm_daemon_reserv_reclaim_enabled &&
+		if (vm_daemon_reserv_reclaim_enabled == 1 &&
 		    vmd->vmd_free_count <=
 		    vmd->vmd_free_target) {
 			/*
@@ -2317,9 +2318,17 @@ vm_pageout_worker(void *arg)
 			reserv_shortage = (((int)vmd->vmd_free_target) - ((int)vmd->vmd_free_count)) / (1 << VM_LEVEL_0_ORDER);
 			if (reserv_shortage > 0) {
 				counter_u64_add(vm_daemon_reserv_reclaim, 1);
-				reclaimed = vm_reserv_partpop_reclaim(domain, reserv_shortage, vm_daemon_reserv_early_break_popcnt_thld);
+				reclaimed = vm_reserv_partpop_reclaim(domain, reserv_shortage, vm_daemon_reserv_early_break_popcnt_thld, vm_daemon_reserv_reclaim_enabled);
 				counter_u64_add(vm_daemon_reserv_reclaim_count, reclaimed);
 			}
+		}
+		if (vm_daemon_reserv_reclaim_enabled == 2) {
+			/*
+			 * Relocate all partpop reservations that are older than 5 seconds.
+			 */
+			counter_u64_add(vm_daemon_reserv_reclaim, 1);
+			reclaimed = vm_reserv_partpop_reclaim(domain, INT_MAX, vm_daemon_reserv_early_break_popcnt_thld, vm_daemon_reserv_reclaim_enabled);
+			counter_u64_add(vm_daemon_reserv_reclaim_count, reclaimed);
 		}
 		break_count = vm_reserv_partpop_free_count(domain) * vm_daemon_reserv_early_break_ratio - vmd->vmd_free_count;
 		if (vm_daemon_reserv_early_break_enabled &&

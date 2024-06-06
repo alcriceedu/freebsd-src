@@ -71,7 +71,7 @@ vm_page_t	vm_reserv_to_superpage(vm_page_t m);
 int		vm_reserv_partpop_free_count(int domain);
 int		vm_reserv_partpop_num(int domain);
 int		vm_reserv_partpop_reclaim(int domain, int shortage,
-		    int popcnt_thld);
+		    int popcnt_thld, int opt);
 
 
 #endif	/* VM_NRESERVLEVEL > 0 */
