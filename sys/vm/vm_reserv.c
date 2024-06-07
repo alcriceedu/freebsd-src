@@ -1656,7 +1656,7 @@ vm_reserv_partpop_reclaim(int domain, int shortage, int popcnt_thld, int opt)
 						if (opt == 1 && rv->popcnt <= popcnt_thld) {
 							vm_reserv_dequeue(rv);
 							break;
-						} else if (opt == 2 && ticks - rv->lasttick > 5 * hz) {
+						} else if (opt == 2 && rv->popcnt < 64 && ticks - rv->lasttick > 5 * hz) {
 							vm_reserv_dequeue(rv);
 							break;
 						} else {
