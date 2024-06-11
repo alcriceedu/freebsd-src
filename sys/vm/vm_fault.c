@@ -1794,6 +1794,7 @@ found:
 	    (fault_flags & VM_FAULT_WIRE) == 0 && fs.object != NULL &&
 	    fs.object->type == OBJT_DEFAULT &&
 	    fs.object->backing_object == NULL &&
+	    fs.object == fs.first_object &&
 	    (fs.m->flags & PG_FICTITIOUS) == 0 &&
 	    rounddown2(vaddr, pagesizes[psind]) >= fs.entry->start &&
 	    roundup2(vaddr + 1, pagesizes[psind]) <= fs.entry->end &&
