@@ -727,7 +727,7 @@ vm_reserv_satisfy_sync_promotion(vm_page_t m, vm_offset_t va, vm_offset_t start,
 			if (count >= sync_popthreshold_0) {
 				*psind = 1;
 				*rv_pindex += *offset;
-				carry = sync_popthreshold_0 - count;
+				carry = reserv_pages[0] - count;
 			}
 		}
 	}
