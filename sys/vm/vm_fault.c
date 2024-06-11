@@ -1800,6 +1800,7 @@ found:
 	    (fault_flags & VM_FAULT_WIRE) == 0 && fs.object != NULL &&
 	    fs.object->type == OBJT_DEFAULT &&
 	    fs.object->backing_object == NULL &&
+	    fs.object == fs.first_object &&
 	    (fs.m->flags & PG_FICTITIOUS) == 0 &&
 	    pmap_ps_enabled(fs.map->pmap) &&
 	    vm_reserv_satisfy_sync_promotion(fs.m, vaddr, fs.entry->start, fs.entry->end, &psind, &rv_pindex, &popmap, &offset)) {
