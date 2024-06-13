@@ -9219,8 +9219,9 @@ pmap_align_superpage(vm_object_t object, vm_ooffset_t offset,
 		if ((*addr & L2_OFFSET) < superpage_offset)
 			*addr = (*addr & ~L2_OFFSET) + superpage_offset;
 		else if ((*addr & L2_OFFSET) > superpage_offset)
-			*addr = ((*addr + L2_OFFSET) & ~L2_OFFSET) + superpage_offset;
-                return;
+			*addr = ((*addr + L2_OFFSET) & ~L2_OFFSET) +
+			    superpage_offset;
+		return;
 	}
 
 	superpage_offset = offset & L3C_OFFSET;
@@ -9228,7 +9229,8 @@ pmap_align_superpage(vm_object_t object, vm_ooffset_t offset,
 		if ((*addr & L3C_OFFSET) < superpage_offset)
 			*addr = (*addr & ~L3C_OFFSET) + superpage_offset;
 		else if ((*addr & L3C_OFFSET) > superpage_offset)
-			*addr = ((*addr + L3C_OFFSET) & ~L3C_OFFSET) + superpage_offset;
+			*addr = ((*addr + L3C_OFFSET) & ~L3C_OFFSET) +
+			    superpage_offset;
 	}
 }
 
