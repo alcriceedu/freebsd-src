@@ -2214,6 +2214,9 @@ SYSCTL_INT(_vm_daemon, OID_AUTO, reserv_early_break_popcnt_thld, CTLFLAG_RWTUN |
 static int __read_frequently vm_daemon_early_4k_reclaim_enabled = 0;
 SYSCTL_INT(_vm_daemon, OID_AUTO, early_4k_reclaim_enabled, CTLFLAG_RWTUN | CTLFLAG_NOFETCH,
     &vm_daemon_early_4k_reclaim_enabled, 0, "Early page daemon reclamation enabled?");
+static int __read_frequently vm_daemon_early_4k_reclaim_active_thld = 50;
+SYSCTL_INT(_vm_daemon, OID_AUTO, early_4k_reclaim_active_thld, CTLFLAG_RWTUN | CTLFLAG_NOFETCH,
+    &vm_daemon_early_4k_reclaim_active_thld, 0, "Early page daemon reclamation by discounting partpop free pages belonging to partpop reservations that have been recently active in this many seconds");
 #endif
 
 
@@ -2289,7 +2292,7 @@ vm_pageout_worker(void *arg)
 		 * difference from the inactive queue scan target.
 		 */
 		if (vm_daemon_early_4k_reclaim_enabled) {
-			shortage = pidctrl_daemon(&vmd->vmd_pid, vmd->vmd_free_count - vm_reserv_active_partpop_free_count(domain, 50));
+			shortage = pidctrl_daemon(&vmd->vmd_pid, vmd->vmd_free_count - vm_reserv_active_partpop_free_count(domain, vm_daemon_early_4k_reclaim_active_thld));
 		} else {
 			shortage = pidctrl_daemon(&vmd->vmd_pid, vmd->vmd_free_count);
 		}

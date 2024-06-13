@@ -289,6 +289,9 @@ SYSCTL_INT(_vm_reserv, OID_AUTO, break_style, CTLFLAG_RWTUN | CTLFLAG_NOFETCH,
 static int __read_frequently vm_reserv_reclaim_damp_factor = 2;
 SYSCTL_INT(_vm_reserv, OID_AUTO, reclaim_damp_factor, CTLFLAG_RWTUN | CTLFLAG_NOFETCH,
     &vm_reserv_reclaim_damp_factor, 0, "Length of partpopq / damp_factor is the amount we will dig into for aggressive breaking");
+static int __read_frequently vm_reserv_reclaim_active_thld = 60;
+SYSCTL_INT(_vm_reserv, OID_AUTO, reclaim_active_thld, CTLFLAG_RWTUN | CTLFLAG_NOFETCH,
+    &vm_reserv_reclaim_active_thld, 0, "Break partpop reservations that have been inactive for this many seconds; this is only relevant when Quicksilver behavior is requested");
 
 /*
  * The object lock pool is used to synchronize the rvq.  We can not use a
@@ -1679,7 +1682,7 @@ vm_reserv_partpop_reclaim(int domain, int shortage, int popcnt_thld, int opt)
 						if (opt == 1 && rv->popcnt <= popcnt_thld) {
 							vm_reserv_dequeue(rv);
 							break;
-						} else if (opt == 2 && rv->popcnt < 64 && ticks - rv->lasttick > 5 * hz) {
+						} else if (opt == 2 && rv->popcnt < 64 && ticks - rv->lasttick > vm_reserv_reclaim_active_thld * hz) {
 							vm_reserv_dequeue(rv);
 							break;
 						} else {
