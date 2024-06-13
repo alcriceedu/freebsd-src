@@ -2211,6 +2211,9 @@ SYSCTL_INT(_vm_daemon, OID_AUTO, reserv_early_break_damp_factor, CTLFLAG_RWTUN |
 static int __read_frequently vm_daemon_reserv_early_break_popcnt_thld = 64;
 SYSCTL_INT(_vm_daemon, OID_AUTO, reserv_early_break_popcnt_thld, CTLFLAG_RWTUN | CTLFLAG_NOFETCH,
     &vm_daemon_reserv_early_break_popcnt_thld, 0, "popcnt needs to be no greater than this for the reservation to be selected for early breaking");
+static int __read_frequently vm_daemon_early_4k_reclaim_enabled = 0;
+SYSCTL_INT(_vm_daemon, OID_AUTO, early_4k_reclaim_enabled, CTLFLAG_RWTUN | CTLFLAG_NOFETCH,
+    &vm_daemon_early_4k_reclaim_enabled, 0, "Early page daemon reclamation enabled?");
 #endif
 
 
@@ -2285,7 +2288,11 @@ vm_pageout_worker(void *arg)
 		 * handlers appear to have freed up some pages, subtract the
 		 * difference from the inactive queue scan target.
 		 */
-		shortage = pidctrl_daemon(&vmd->vmd_pid, vmd->vmd_free_count);
+		if (vm_daemon_early_4k_reclaim_enabled) {
+			shortage = pidctrl_daemon(&vmd->vmd_pid, vmd->vmd_free_count - vm_reserv_active_partpop_free_count(domain, 50));
+		} else {
+			shortage = pidctrl_daemon(&vmd->vmd_pid, vmd->vmd_free_count);
+		}
 		if (shortage > 0) {
 			ofree = vmd->vmd_free_count;
 			if (vm_pageout_lowmem() && vmd->vmd_free_count > ofree)
