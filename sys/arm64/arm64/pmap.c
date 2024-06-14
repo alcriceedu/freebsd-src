@@ -5231,7 +5231,8 @@ pmap_enter(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 	if (psind == 1) {
 		KASSERT((va & L3C_OFFSET) == 0, ("pmap_enter: va unaligned"));
 		KASSERT(m->psind > 0, ("pmap_enter: m->psind < psind"));
-		rv = pmap_enter_l3c(pmap, va, new_l3, flags, m, &mpte, &lock);
+		rv = pmap_enter_l3c(pmap, va, new_l3 | ATTR_CONTIGUOUS, flags,
+		    m, &mpte, &lock);
 		goto out;
 	}
 
