@@ -8643,7 +8643,7 @@ pmap_mincore(pmap_t pmap, vm_offset_t addr, vm_paddr_t *pap)
 {
 	pt_entry_t *pte, tpte;
 	vm_paddr_t mask, pa;
-	int lvl, val, psind;
+	int lvl, psind, val;
 	bool managed;
 
 	PMAP_ASSERT_STAGE1(pmap);
