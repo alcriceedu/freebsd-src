@@ -8671,9 +8671,7 @@ pmap_mincore(pmap_t pmap, vm_offset_t addr, vm_paddr_t *pap)
 		}
 
 		managed = (tpte & ATTR_SW_MANAGED) != 0;
-		val = MINCORE_INCORE;
-		if (psind != 0)
-			val |= MINCORE_PSIND(psind);
+		val = MINCORE_INCORE | MINCORE_PSIND(psind);
 		if ((managed && pmap_pte_dirty(pmap, tpte)) || (!managed &&
 		    (tpte & ATTR_S1_AP_RW_BIT) == ATTR_S1_AP(ATTR_S1_AP_RW)))
 			val |= MINCORE_MODIFIED | MINCORE_MODIFIED_OTHER;
