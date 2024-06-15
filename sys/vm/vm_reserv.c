@@ -1286,7 +1286,7 @@ vm_reserv_is_page_free(vm_page_t m)
  * Returns true if the given page is part of a block of npages, starting at a
  * multiple of npages, that are all allocated.  Otherwise, returns false.
  */
-/*bool
+bool
 vm_reserv_is_populated(vm_page_t m, int npages)
 {
 	vm_reserv_t rv;
@@ -1301,7 +1301,7 @@ vm_reserv_is_populated(vm_page_t m, int npages)
 		return (false);
 	index = rounddown2(m - rv->pages, npages);
 	return (bit_ntest(rv->popmap, index, index + npages - 1, 1));
-}*/
+}
 
 /*
  * If the given page belongs to a reservation, returns the level of that

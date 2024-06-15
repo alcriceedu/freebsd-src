@@ -5231,7 +5231,8 @@ pmap_enter(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 	if (psind == 1) {
 		KASSERT((va & L3C_OFFSET) == 0, ("pmap_enter: va unaligned"));
 		KASSERT(m->psind > 0, ("pmap_enter: m->psind < psind"));
-		rv = pmap_enter_l3c(pmap, va, new_l3, flags, m, &mpte, &lock);
+		rv = pmap_enter_l3c(pmap, va, new_l3 | ATTR_CONTIGUOUS, flags,
+		    m, &mpte, &lock);
 		goto out;
 	}
 
@@ -5964,7 +5965,7 @@ pmap_enter_object(pmap_t pmap, vm_offset_t start, vm_offset_t end,
 		    KERN_SUCCESS || rv == KERN_NO_SPACE))
 			m = &m[L2_SIZE / PAGE_SIZE - 1];
 		else if ((va & L3C_OFFSET) == 0 && va + L3C_SIZE <= end &&
-		    m->psind == 1 && pmap_ps_enabled(pmap) &&
+		    m->psind >= 1 && pmap_ps_enabled(pmap) &&
 		    ((rv = pmap_enter_l3c_rx(pmap, va, m, &mpte, prot,
 		    &lock)) == KERN_SUCCESS || rv == KERN_NO_SPACE))
 			m = &m[L3C_ENTRIES - 1];
@@ -8643,7 +8644,7 @@ pmap_mincore(pmap_t pmap, vm_offset_t addr, vm_paddr_t *pap)
 {
 	pt_entry_t *pte, tpte;
 	vm_paddr_t mask, pa;
-	int lvl, val, psind;
+	int lvl, psind, val;
 	bool managed;
 
 	PMAP_ASSERT_STAGE1(pmap);
@@ -8670,9 +8671,7 @@ pmap_mincore(pmap_t pmap, vm_offset_t addr, vm_paddr_t *pap)
 		}
 
 		managed = (tpte & ATTR_SW_MANAGED) != 0;
-		val = MINCORE_INCORE;
-		if (psind != 0)
-			val |= MINCORE_PSIND(psind);
+		val = MINCORE_INCORE | MINCORE_PSIND(psind);
 		if ((managed && pmap_pte_dirty(pmap, tpte)) || (!managed &&
 		    (tpte & ATTR_S1_AP_RW_BIT) == ATTR_S1_AP(ATTR_S1_AP_RW)))
 			val |= MINCORE_MODIFIED | MINCORE_MODIFIED_OTHER;
@@ -9219,8 +9218,9 @@ pmap_align_superpage(vm_object_t object, vm_ooffset_t offset,
 		if ((*addr & L2_OFFSET) < superpage_offset)
 			*addr = (*addr & ~L2_OFFSET) + superpage_offset;
 		else if ((*addr & L2_OFFSET) > superpage_offset)
-			*addr = ((*addr + L2_OFFSET) & ~L2_OFFSET) + superpage_offset;
-                return;
+			*addr = ((*addr + L2_OFFSET) & ~L2_OFFSET) +
+			    superpage_offset;
+		return;
 	}
 
 	superpage_offset = offset & L3C_OFFSET;
@@ -9228,7 +9228,8 @@ pmap_align_superpage(vm_object_t object, vm_ooffset_t offset,
 		if ((*addr & L3C_OFFSET) < superpage_offset)
 			*addr = (*addr & ~L3C_OFFSET) + superpage_offset;
 		else if ((*addr & L3C_OFFSET) > superpage_offset)
-			*addr = ((*addr + L3C_OFFSET) & ~L3C_OFFSET) + superpage_offset;
+			*addr = ((*addr + L3C_OFFSET) & ~L3C_OFFSET) +
+			    superpage_offset;
 	}
 }
 
