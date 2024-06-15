@@ -52,6 +52,7 @@
 #include <sys/sbuf.h>
 #include <sys/sysctl.h>
 #include <sys/systm.h>
+#include <sys/bitstring.h>
 #include <sys/counter.h>
 #include <sys/ktr.h>
 #include <sys/vmmeter.h>
