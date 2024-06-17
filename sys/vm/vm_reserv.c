@@ -435,15 +435,15 @@ vm_reserv_depopulate(vm_reserv_t rv, int index)
 		KASSERT(rv->pages->psind == VM_LEVEL_0_FULL_PSIND,
 		    ("vm_reserv_depopulate: reserv %p is already demoted",
 		    rv));
-		#ifdef VM_LEVEL_0_PART_PSIND
+#ifdef VM_LEVEL_0_PART_PSIND
 		rv->pages->psind = VM_LEVEL_0_PART_PSIND;
-		#else
+#else
 		rv->pages->psind = 0;
-		#endif
+#endif
 	}
-	#ifdef VM_LEVEL_0_PART_PSIND
+#ifdef VM_LEVEL_0_PART_PSIND
 	rv->pages[rounddown2(index, VM_LEVEL_0_PART_COUNT)].psind = 0;
-	#endif
+#endif
 	bit_clear(rv->popmap, index);
 	rv->popcnt--;
 	if ((unsigned)(ticks - rv->lasttick) >= PARTPOPSLOP ||
@@ -561,10 +561,10 @@ vm_reserv_populate(vm_reserv_t rv, int index)
 	    ("vm_reserv_populate: reserv %p's domain is corrupted %d",
 	    rv, rv->domain));
 	bit_set(rv->popmap, index);
-	#ifdef VM_LEVEL_0_PART_PSIND
+#ifdef VM_LEVEL_0_PART_PSIND
 	if (vm_reserv_part_full(rv, index))
 		rv->pages[rounddown2(index, VM_LEVEL_0_PART_COUNT)].psind = 1;
-	#endif
+#endif
 	rv->popcnt++;
 	if ((unsigned)(ticks - rv->lasttick) < PARTPOPSLOP &&
 	    rv->inpartpopq && rv->popcnt != VM_LEVEL_0_NPAGES)
