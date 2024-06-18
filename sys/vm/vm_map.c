@@ -2649,6 +2649,7 @@ vm_map_pmap_enter(vm_map_t map, vm_offset_t addr, vm_prot_t prot,
 	vm_offset_t start;
 	vm_page_t p, p_start;
 	vm_pindex_t mask, psize, threshold, tmpidx;
+	int psind;
 
 	if ((prot & (VM_PROT_READ | VM_PROT_EXECUTE)) == 0 || object == NULL)
 		return;
@@ -2703,14 +2704,20 @@ vm_map_pmap_enter(vm_map_t map, vm_offset_t addr, vm_prot_t prot,
 				p_start = p;
 			}
 			/* Jump ahead if a superpage mapping is possible. */
-			if (p->psind > 0 && ((addr + ptoa(tmpidx)) &
-			    (pagesizes[p->psind] - 1)) == 0) {
-				mask = atop(pagesizes[p->psind]) - 1;
-				if (tmpidx + mask < psize &&
-				    vm_page_ps_test(p, PS_ALL_VALID, NULL)) {
-					p += mask;
-					threshold += mask;
+			psind = p->psind;
+			while (psind > 0) {
+				if (((addr + ptoa(tmpidx)) &
+				    (pagesizes[psind] - 1)) == 0) {
+					mask = atop(pagesizes[psind]) - 1;
+					if (tmpidx + mask < psize &&
+					    vm_page_ps_test(p, psind,
+					    PS_ALL_VALID, NULL)) {
+						p += mask;
+						threshold += mask;
+						break;
+					}
 				}
+				psind--;
 			}
 		} else if (p_start != NULL) {
 			pmap_enter_object(map->pmap, start, addr +
