@@ -2247,8 +2247,15 @@ again:
 		rv = vm_map_insert(map, object, offset, *addr, *addr + length,
 		    prot, max, cow);
 	}
-	if (rv == KERN_SUCCESS && update_anon)
-		map->anon_loc = *addr + length;
+
+	/*
+	 * Update the starting address for clustered anonymous memory mappings
+	 * if a starting address was not previously defined or an ASLR restart
+	 * placed an anonymous memory mapping at a lower address.
+	 */
+	if (update_anon && rv == KERN_SUCCESS && (map->anon_loc == 0 ||
+	    *addr < map->anon_loc))
+		map->anon_loc = *addr;
 done:
 	vm_map_unlock(map);
 	return (rv);
@@ -2649,6 +2656,7 @@ vm_map_pmap_enter(vm_map_t map, vm_offset_t addr, vm_prot_t prot,
 	vm_offset_t start;
 	vm_page_t p, p_start;
 	vm_pindex_t mask, psize, threshold, tmpidx;
+	int psind;
 
 	if ((prot & (VM_PROT_READ | VM_PROT_EXECUTE)) == 0 || object == NULL)
 		return;
@@ -2703,14 +2711,20 @@ vm_map_pmap_enter(vm_map_t map, vm_offset_t addr, vm_prot_t prot,
 				p_start = p;
 			}
 			/* Jump ahead if a superpage mapping is possible. */
-			if (p->psind > 0 && ((addr + ptoa(tmpidx)) &
-			    (pagesizes[p->psind] - 1)) == 0) {
-				mask = atop(pagesizes[p->psind]) - 1;
-				if (tmpidx + mask < psize &&
-				    vm_page_ps_test(p, PS_ALL_VALID, NULL)) {
-					p += mask;
-					threshold += mask;
+			psind = p->psind;
+			while (psind > 0) {
+				if (((addr + ptoa(tmpidx)) &
+				    (pagesizes[psind] - 1)) == 0) {
+					mask = atop(pagesizes[psind]) - 1;
+					if (tmpidx + mask < psize &&
+					    vm_page_ps_test(p, psind,
+					    PS_ALL_VALID, NULL)) {
+						p += mask;
+						threshold += mask;
+						break;
+					}
 				}
+				psind--;
 			}
 		} else if (p_start != NULL) {
 			pmap_enter_object(map->pmap, start, addr +
@@ -4040,9 +4054,6 @@ vm_map_delete(vm_map_t map, vm_offset_t start, vm_offset_t end)
 		if ((entry->eflags & MAP_ENTRY_IS_SUB_MAP) != 0 ||
 		    entry->object.vm_object != NULL)
 			pmap_map_delete(map->pmap, entry->start, entry->end);
-
-		if (entry->end == map->anon_loc)
-			map->anon_loc = entry->start;
 
 		/*
 		 * Delete the entry only after removing all pmap

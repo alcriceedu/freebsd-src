@@ -1589,7 +1589,11 @@ shm_mmap_large(struct shmfd *shmfd, vm_map_t map, vm_offset_t *addr,
 	if (align == 0) {
 		align = pagesizes[shmfd->shm_lp_psind];
 	} else if (align == MAP_ALIGNED_SUPER) {
-		if (shmfd->shm_lp_psind == 0)
+		if (shmfd->shm_lp_psind != 1
+#if defined(VM_LEVEL_0_FULL_PSIND) && VM_LEVEL_0_FULL_PSIND > 1
+		    && shmfd->shm_lp_psind != 2
+#endif
+		    )
 			return (EINVAL);
 		align = pagesizes[shmfd->shm_lp_psind];
 	} else {
