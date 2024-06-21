@@ -489,7 +489,8 @@ static int pmap_unuse_pt(pmap_t, vm_offset_t, pd_entry_t, struct spglist *);
 static __inline vm_page_t pmap_remove_pt_page(pmap_t pmap, vm_offset_t va);
 
 static uma_zone_t pmap_bti_ranges_zone;
-static bool pmap_bti_same(pmap_t pmap, vm_offset_t sva, vm_offset_t eva);
+static bool pmap_bti_same(pmap_t pmap, vm_offset_t sva, vm_offset_t eva,
+    pt_entry_t *pte);
 static pt_entry_t pmap_pte_bti(pmap_t pmap, vm_offset_t va);
 static void pmap_bti_on_remove(pmap_t pmap, vm_offset_t sva, vm_offset_t eva);
 static void *bti_dup_range(void *ctx, void *data);
@@ -1388,7 +1389,6 @@ pmap_bootstrap_san1(vm_offset_t va, int scale)
 	 * Rebuild physmap one more time, we may have excluded more regions from
 	 * allocation since pmap_bootstrap().
 	 */
-	bzero(physmap, sizeof(physmap));
 	physmap_idx = physmem_avail(physmap, nitems(physmap));
 	physmap_idx /= 2;
 
@@ -4376,21 +4376,22 @@ setl3:
 #endif /* VM_NRESERVLEVEL > 0 */
 
 static int
-pmap_enter_largepage(pmap_t pmap, vm_offset_t va, pt_entry_t newpte, int flags,
+pmap_enter_largepage(pmap_t pmap, vm_offset_t va, pt_entry_t pte, int flags,
     int psind)
 {
-	pd_entry_t *l0p, *l1p, *l2p, origpte;
+	pd_entry_t *l0p, *l1p, *l2p, newpte, origpte;
 	vm_page_t mp;
 
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
 	KASSERT(psind > 0 && psind < MAXPAGESIZES,
 	    ("psind %d unexpected", psind));
-	KASSERT((PTE_TO_PHYS(newpte) & (pagesizes[psind] - 1)) == 0,
-	    ("unaligned phys address %#lx newpte %#lx psind %d",
-	    PTE_TO_PHYS(newpte), newpte, psind));
+	KASSERT((PTE_TO_PHYS(pte) & (pagesizes[psind] - 1)) == 0,
+	    ("unaligned phys address %#lx pte %#lx psind %d",
+	    PTE_TO_PHYS(pte), pte, psind));
 
 restart:
-	if (!pmap_bti_same(pmap, va, va + pagesizes[psind]))
+	newpte = pte;
+	if (!pmap_bti_same(pmap, va, va + pagesizes[psind], &newpte))
 		return (KERN_PROTECTION_FAILURE);
 	if (psind == 2) {
 		PMAP_ASSERT_L1_BLOCKS_SUPPORTED;
@@ -4544,9 +4545,6 @@ pmap_enter(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 
 	lock = NULL;
 	PMAP_LOCK(pmap);
-	/* Wait until we lock the pmap to protect the bti rangeset */
-	new_l3 |= pmap_pte_bti(pmap, va);
-
 	if ((flags & PMAP_ENTER_LARGEPAGE) != 0) {
 		KASSERT((m->oflags & VPO_UNMANAGED) != 0,
 		    ("managed largepage va %#lx flags %#x", va, flags));
@@ -4618,6 +4616,7 @@ havel3:
 	orig_l3 = pmap_load(l3);
 	opa = PTE_TO_PHYS(orig_l3);
 	pv = NULL;
+	new_l3 |= pmap_pte_bti(pmap, va);
 
 	/*
 	 * Is the specified virtual address already mapped?
@@ -4815,7 +4814,6 @@ pmap_enter_2mpage(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 	new_l2 = (pd_entry_t)(VM_PAGE_TO_PTE(m) | ATTR_DEFAULT |
 	    ATTR_S1_IDX(m->md.pv_memattr) | ATTR_S1_AP(ATTR_S1_AP_RO) |
 	    L2_BLOCK);
-	new_l2 |= pmap_pte_bti(pmap, va);
 	if ((m->oflags & VPO_UNMANAGED) == 0) {
 		new_l2 |= ATTR_SW_MANAGED;
 		new_l2 &= ~ATTR_AF;
@@ -4888,7 +4886,7 @@ pmap_enter_l2(pmap_t pmap, vm_offset_t va, pd_entry_t new_l2, u_int flags,
 	 * and let vm_fault() cope.  Check after l2 allocation, since
 	 * it could sleep.
 	 */
-	if (!pmap_bti_same(pmap, va, va + L2_SIZE)) {
+	if (!pmap_bti_same(pmap, va, va + L2_SIZE, &new_l2)) {
 		KASSERT(l2pg != NULL, ("pmap_enter_l2: missing L2 PTP"));
 		pmap_abort_ptp(pmap, va, l2pg);
 		return (KERN_PROTECTION_FAILURE);
@@ -5060,9 +5058,19 @@ pmap_enter_object(pmap_t pmap, vm_offset_t start, vm_offset_t end,
 		    ((rv = pmap_enter_2mpage(pmap, va, m, prot, &lock)) ==
 		    KERN_SUCCESS || rv == KERN_NO_SPACE))
 			m = &m[L2_SIZE / PAGE_SIZE - 1];
-		else
-			mpte = pmap_enter_quick_locked(pmap, va, m, prot, mpte,
-			    &lock);
+		else {
+			/*
+			 * In general, if a superpage mapping were possible,
+			 * it would have been created above.  That said, if
+			 * start and end are not superpage aligned, then
+			 * promotion might be possible at the ends of [start,
+			 * end).  However, in practice, those promotion
+			 * attempts are so unlikely to succeed that they are
+			 * not worth trying.
+			 */
+			mpte = pmap_enter_quick_locked(pmap, va, m, prot |
+			    VM_PROT_NO_PROMOTE, mpte, &lock);
+		}
 		m = TAILQ_NEXT(m, listq);
 	}
 	if (lock != NULL)
@@ -5228,8 +5236,10 @@ pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va, vm_page_t m,
 	 * If both the PTP and the reservation are fully populated, then
 	 * attempt promotion.
 	 */
-	if ((mpte == NULL || mpte->ref_count == NL3PG) &&
+	if ((prot & VM_PROT_NO_PROMOTE) == 0 &&
+	    (va & L2_OFFSET) == (pa & L2_OFFSET) &&
 	    (m->flags & PG_FICTITIOUS) == 0 &&
+	    (mpte == NULL || mpte->ref_count == NL3PG) &&
 	    vm_reserv_level_iffullpop(m) == 0) {
 		if (l2 == NULL)
 			l2 = pmap_pde(pmap, va, &lvl);
@@ -8018,10 +8028,18 @@ pmap_bti_deassign_all(pmap_t pmap)
 		rangeset_remove_all(pmap->pm_bti);
 }
 
+/*
+ * Returns true if the BTI setting is the same across the specified address
+ * range, and false otherwise.  When returning true, updates the referenced PTE
+ * to reflect the BTI setting.
+ *
+ * Only stage 1 pmaps support BTI.  The kernel pmap is always a stage 1 pmap
+ * that has the same BTI setting implicitly across its entire address range.
+ */
 static bool
-pmap_bti_same(pmap_t pmap, vm_offset_t sva, vm_offset_t eva)
+pmap_bti_same(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, pt_entry_t *pte)
 {
-	struct rs_el *prev_rs, *rs;
+	struct rs_el *next_rs, *rs;
 	vm_offset_t va;
 
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
@@ -8029,22 +8047,31 @@ pmap_bti_same(pmap_t pmap, vm_offset_t sva, vm_offset_t eva)
 	    ("%s: Start address not in canonical form: %lx", __func__, sva));
 	KASSERT(ADDR_IS_CANONICAL(eva),
 	    ("%s: End address not in canonical form: %lx", __func__, eva));
+	KASSERT((*pte & ATTR_S1_GP) == 0,
+	    ("%s: pte %lx has ATTR_S1_GP preset", __func__, *pte));
 
-	if (pmap->pm_bti == NULL || ADDR_IS_KERNEL(sva))
+	if (pmap == kernel_pmap) {
+		*pte |= ATTR_KERN_GP;
 		return (true);
-	MPASS(!ADDR_IS_KERNEL(eva));
-	for (va = sva; va < eva; prev_rs = rs) {
-		rs = rangeset_lookup(pmap->pm_bti, va);
-		if (va == sva)
-			prev_rs = rs;
-		else if ((rs == NULL) ^ (prev_rs == NULL))
-			return (false);
-		if (rs == NULL) {
-			va += PAGE_SIZE;
-			continue;
-		}
-		va = rs->re_end;
 	}
+	if (pmap->pm_bti == NULL)
+		return (true);
+	PMAP_ASSERT_STAGE1(pmap);
+	rs = rangeset_lookup(pmap->pm_bti, sva);
+	if (rs == NULL) {
+		rs = rangeset_next(pmap->pm_bti, sva);
+		return (rs == NULL ||
+			rs->re_start >= eva);
+	}
+	while ((va = rs->re_end) < eva) {
+		next_rs = rangeset_next(pmap->pm_bti, va);
+		if (next_rs == NULL ||
+		    va != next_rs->re_start)
+			return (false);
+		rs = next_rs;
+	}
+	if (rs != NULL)
+		*pte |= ATTR_S1_GP;
 	return (true);
 }
 
