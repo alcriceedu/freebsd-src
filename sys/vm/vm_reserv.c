@@ -220,6 +220,7 @@ struct vm_reserv {
 	uint8_t		domain;			/* (c) NUMA domain. */
 	char		inpartpopq;		/* (d, r) */
 	uint8_t		rsind;			/* XXX Reservation size index */
+	uint8_t		subcnt;			/* number of populated subreservations */
 	int		lasttick;		/* (r) last pop update tick. */
 	popmap_t	*popmap;		/* (r) bit vector, used pages */
 };
@@ -332,7 +333,7 @@ static int sync_popthreshold_0 = 4;
 SYSCTL_INT(_vm_reserv, OID_AUTO, sync_popthreshold_0, CTLFLAG_RWTUN,
     &sync_popthreshold_0, 0, "64 KB sync promotion pop threshold");
 
-static int sync_popthreshold_1 = 64;
+static int sync_popthreshold_1 = 384;
 SYSCTL_INT(_vm_reserv, OID_AUTO, sync_popthreshold_1, CTLFLAG_RWTUN,
     &sync_popthreshold_1, 0, "2 MB sync promotion pop threshold");
 
@@ -596,6 +597,7 @@ vm_reserv_depopulate(vm_reserv_t rv, int index)
 	// XXX
         if (((uint16_t *)rv->popmap)[index / 16] != 65535) {
 		rv->pages[16 * (index / 16)].psind = 0;
+		rv->subcnt--;
         }
 	rv->popcnt--;
 	if ((unsigned)(ticks - rv->lasttick) >= PARTPOPSLOP ||
@@ -718,14 +720,19 @@ vm_reserv_satisfy_sync_promotion(vm_page_t m, vm_offset_t va, vm_offset_t start,
 	if (rounddown2(va, reserv_sizes[0]) >= start &&
 	    roundup2(va + 1, reserv_sizes[0]) <= end &&
 	    (va & (reserv_sizes[0] - 1)) == (VM_PAGE_TO_PHYS(m) & (reserv_sizes[0] - 1))) {
+		/*
+		 * Aggressively promote 64 KB reservations.
+		 */
 		if (rv->rsind == 0) {
-			if (rv->popcnt >= sync_popthreshold_0) {
-				*psind = 1;
-			}
+			*psind = 1;
 		} else { /* rv->rsind == 1 */
 			*offset = atop(rounddown2(m->phys_addr, reserv_sizes[0]) - rv->pages->phys_addr);
 			count = bitcount16(((uint16_t *)rv->popmap)[*offset / 16]);
-			if (count >= sync_popthreshold_0) {
+			/*
+			 * Conservatively promote 64 KB subreservations until
+			 * sync_popthreshold_0 of them have been promoted.
+			 */
+			if (rv->subcnt >= sync_popthreshold_0) {
 				*psind = 1;
 				*rv_pindex += *offset;
 				carry = reserv_pages[0] - count;
@@ -737,6 +744,10 @@ vm_reserv_satisfy_sync_promotion(vm_page_t m, vm_offset_t va, vm_offset_t start,
 	if (rounddown2(va, reserv_sizes[1]) >= start &&
 	    roundup2(va + 1, reserv_sizes[1]) <= end &&
 	    (va & (reserv_sizes[1] - 1)) == (VM_PAGE_TO_PHYS(m) & (reserv_sizes[1] - 1))) {
+		/*
+		 * Promote 2 MB reservations when sync_popthreshold_1
+		 * base pages have been mapped.
+		 */
 		if (rv->rsind == 1) {
 			if (rv->popcnt + carry >= sync_popthreshold_1) {
 				*offset = 0;
@@ -776,6 +787,7 @@ vm_reserv_populate(vm_reserv_t rv, int index)
 	// XXX
 	if (((uint16_t *)rv->popmap)[index / 16] == 65535) {
 		rv->pages[16 * (index / 16)].psind = 1;
+		rv->subcnt++;
 	}
 	rv->popcnt++;
 	if ((unsigned)(ticks - rv->lasttick) < PARTPOPSLOP &&
@@ -1201,6 +1213,7 @@ vm_reserv_break(vm_reserv_t rv)
 		}
 	}
 	rv->popcnt = 0;
+	rv->subcnt = 0;
 	counter_u64_add(vm_reserv_broken, 1);
 }
 
