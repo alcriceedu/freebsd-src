@@ -220,6 +220,7 @@ struct vm_reserv {
 	uint8_t		domain;			/* (c) NUMA domain. */
 	char		inpartpopq;		/* (d, r) */
 	uint8_t		rsind;			/* XXX Reservation size index */
+	uint16_t	seqcnt;			/* Sequential resident pages from start */
 	int		lasttick;		/* (r) last pop update tick. */
 	popmap_t	*popmap;		/* (r) bit vector, used pages */
 };
@@ -332,9 +333,13 @@ static int sync_popthreshold_0 = 4;
 SYSCTL_INT(_vm_reserv, OID_AUTO, sync_popthreshold_0, CTLFLAG_RWTUN,
     &sync_popthreshold_0, 0, "64 KB sync promotion pop threshold");
 
-static int sync_popthreshold_1 = 64;
+static int sync_popthreshold_1 = 96;
 SYSCTL_INT(_vm_reserv, OID_AUTO, sync_popthreshold_1, CTLFLAG_RWTUN,
     &sync_popthreshold_1, 0, "2 MB sync promotion pop threshold");
+
+static int sync_popthreshold_2 = 32;
+SYSCTL_INT(_vm_reserv, OID_AUTO, sync_popthreshold_2, CTLFLAG_RWTUN,
+    &sync_popthreshold_2, 0, "2 MB sync promotion pop threshold");
 
 /*
  * The object lock pool is used to synchronize the rvq.  We can not use a
@@ -598,6 +603,8 @@ vm_reserv_depopulate(vm_reserv_t rv, int index)
 		rv->pages[16 * (index / 16)].psind = 0;
         }
 	rv->popcnt--;
+	if (index < rv->seqcnt)
+		rv->seqcnt = index;
 	if ((unsigned)(ticks - rv->lasttick) >= PARTPOPSLOP ||
 	    rv->popcnt == 0) {
 		vm_reserv_domain_lock(rv->domain);
@@ -738,7 +745,9 @@ vm_reserv_satisfy_sync_promotion(vm_page_t m, vm_offset_t va, vm_offset_t start,
 	    roundup2(va + 1, reserv_sizes[1]) <= end &&
 	    (va & (reserv_sizes[1] - 1)) == (VM_PAGE_TO_PHYS(m) & (reserv_sizes[1] - 1))) {
 		if (rv->rsind == 1) {
-			if (rv->popcnt + carry >= sync_popthreshold_1) {
+			if (rv->popcnt + carry >= sync_popthreshold_1 ||
+			    (rounddown2(m - rv->pages, 16) == rounddown2(rv->seqcnt, 16) && carry != 0 ?
+			    roundup2(rv->seqcnt, 16) : rv->seqcnt) >= sync_popthreshold_2) {
 				*offset = 0;
                                 *psind = 2;
 				*rv_pindex = rv->pindex;
@@ -778,6 +787,8 @@ vm_reserv_populate(vm_reserv_t rv, int index)
 		rv->pages[16 * (index / 16)].psind = 1;
 	}
 	rv->popcnt++;
+	if (index == rv->seqcnt)
+		rv->seqcnt++;
 	if ((unsigned)(ticks - rv->lasttick) < PARTPOPSLOP &&
 	    rv->inpartpopq && rv->popcnt != reserv_pages[rv->rsind])
 		return;
@@ -1201,6 +1212,7 @@ vm_reserv_break(vm_reserv_t rv)
 		}
 	}
 	rv->popcnt = 0;
+	rv->seqcnt = 0;
 	counter_u64_add(vm_reserv_broken, 1);
 }
 
