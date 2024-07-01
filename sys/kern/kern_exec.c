@@ -1224,7 +1224,7 @@ exec_map_stack(struct image_params *imgp)
 	if ((map->flags & MAP_ASLR_STACK) != 0) {
 		stack_addr = round_page((vm_offset_t)p->p_vmspace->vm_daddr +
 		    lim_max(curthread, RLIMIT_DATA));
-		find_space = VMFS_ANY_SPACE;
+		find_space = VMFS_ALIGNED_SPACE(4 + 12);
 	} else {
 		stack_addr = sv->sv_usrstack - ssiz;
 		find_space = VMFS_NO_SPACE;
