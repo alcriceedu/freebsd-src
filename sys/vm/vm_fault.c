@@ -384,46 +384,39 @@ vm_fault_soft_fast(struct faultstate *fs)
 		psind = m_super->psind;
 		KASSERT(psind > 0,
 		    ("psind %d of m_super %p < 1", psind, m_super));
-		for (;;) {
-			if (rounddown2(vaddr, pagesizes[psind]) >=
-			    fs->entry->start && roundup2(vaddr + 1,
-			    pagesizes[psind]) <= fs->entry->end &&
-			    (vaddr & (pagesizes[psind] - 1)) ==
-			    (VM_PAGE_TO_PHYS(m) & (pagesizes[psind] - 1)) &&
-			    pmap_ps_enabled(fs->map->pmap)) {
-				flags = PS_ALL_VALID;
-				if ((fs->prot & VM_PROT_WRITE) != 0) {
-					/*
-					 * Create a superpage mapping allowing
-					 * write access only if none of the
-					 * constituent pages are busy and all
-					 * of them are already dirty (except
-					 * possibly for the page that was
-					 * faulted on).
-					 */
-					flags |= PS_NONE_BUSY;
-					if ((fs->first_object->flags &
-					    OBJ_UNMANAGED) == 0)
-						flags |= PS_ALL_DIRTY;
-				}
-				if (vm_page_ps_test(m_super, psind, flags, m)) {
-					m_map = m_super;
-					vaddr = rounddown2(vaddr,
-					    pagesizes[psind]);
-					/*
-					 * Preset the modified bit for dirty
-					 * superpages.
-					 */
-					if ((flags & PS_ALL_DIRTY) != 0)
-						fs->fault_type |= VM_PROT_WRITE;
-					break;
-				}
-			}
+		flags = PS_ALL_VALID;
+		if ((fs->prot & VM_PROT_WRITE) != 0) {
+			/*
+			 * Create a superpage mapping allowing write access
+			 * only if none of the constituent pages are busy and
+			 * all of them are already dirty (except possibly for
+			 * the page that was faulted on).
+			 */
+			flags |= PS_NONE_BUSY;
+			if ((fs->first_object->flags & OBJ_UNMANAGED) == 0)
+				flags |= PS_ALL_DIRTY;
+		}
+		while (rounddown2(vaddr, pagesizes[psind]) < fs->entry->start ||
+		    roundup2(vaddr + 1, pagesizes[psind]) > fs->entry->end ||
+		    (vaddr & (pagesizes[psind] - 1)) !=
+		    (VM_PAGE_TO_PHYS(m) & (pagesizes[psind] - 1)) ||
+		    !vm_page_ps_test(m_super, psind, flags, m) ||
+		    !pmap_ps_enabled(fs->map->pmap)) {
 			psind--;
 			if (psind == 0)
 				break;
 			m_super += rounddown2(m - m_super,
 			    atop(pagesizes[psind]));
+			KASSERT(m_super->psind >= psind,
+			    ("psind %d of m_super %p < %d", m_super->psind,
+			    m_super, psind));
+		}
+		if (psind > 0) {
+			m_map = m_super;
+			vaddr = rounddown2(vaddr, pagesizes[psind]);
+			/* Preset the modified bit for dirty superpages. */
+			if ((flags & PS_ALL_DIRTY) != 0)
+				fs->fault_type |= VM_PROT_WRITE;
 		}
 	}
 #endif
@@ -634,13 +627,10 @@ vm_fault_populate(struct faultstate *fs)
 		vaddr = fs->entry->start + IDX_TO_OFF(pidx) - fs->entry->offset;
 
 		psind = m->psind;
-		while (psind > 0) {
-			if ((vaddr & (pagesizes[psind] - 1)) == 0 && pidx +
-			    OFF_TO_IDX(pagesizes[psind]) - 1 <= pager_last &&
-			    pmap_ps_enabled(fs->map->pmap))
-				break;
+		while (psind > 0 && ((vaddr & (pagesizes[psind] - 1)) != 0 ||
+		    pidx + OFF_TO_IDX(pagesizes[psind]) - 1 > pager_last ||
+		    !pmap_ps_enabled(fs->map->pmap)))
 			psind--;
-		}
 
 		npages = atop(pagesizes[psind]);
 		for (i = 0; i < npages; i++) {

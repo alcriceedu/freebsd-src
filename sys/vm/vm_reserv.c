@@ -78,8 +78,6 @@
 
 #if VM_NRESERVLEVEL > 0
 
-// XXX Move to vm_param?
-
 #ifndef VM_LEVEL_0_ORDER_MAX
 #define	VM_LEVEL_0_ORDER_MAX	VM_LEVEL_0_ORDER
 #endif
@@ -93,15 +91,15 @@
  */
 #define	VM_LEVEL_0_NPAGES	(1 << VM_LEVEL_0_ORDER)
 #define	VM_LEVEL_0_NPAGES_MAX	(1 << VM_LEVEL_0_ORDER_MAX)
-#define VM_LEVEL_1_NPAGES 	(1 << VM_LEVEL_1_ORDER)
-#define VM_LEVEL_1_NPAGES_MAX 	(1 << VM_LEVEL_1_ORDER_MAX)
+#define VM_LEVEL_1_NPAGES 	(1 << (VM_LEVEL_1_ORDER + VM_LEVEL_0_ORDER))
+#define VM_LEVEL_1_NPAGES_MAX 	(1 << (VM_LEVEL_1_ORDER_MAX + VM_LEVEL_0_ORDER_MAX))
 
 /*
  * The number of bits by which a physical address is shifted to obtain the
  * reservation number
  */
 #define	VM_LEVEL_0_SHIFT	(VM_LEVEL_0_ORDER + PAGE_SHIFT)
-#define VM_LEVEL_1_SHIFT 	(VM_LEVEL_1_ORDER + PAGE_SHIFT)
+#define VM_LEVEL_1_SHIFT 	(VM_LEVEL_1_ORDER + VM_LEVEL_0_ORDER + PAGE_SHIFT)
 
 /*
  * The size of a reservation in bytes
@@ -111,7 +109,7 @@
 
 #define MAXRESERVSIZES 2 // XXX Replace with VM_NRESERVLEVEL?
 
-static size_t reserv_orders[MAXRESERVSIZES] = {VM_LEVEL_0_ORDER, VM_LEVEL_1_ORDER};
+static size_t reserv_orders[MAXRESERVSIZES] = {VM_LEVEL_0_ORDER, VM_LEVEL_1_ORDER + VM_LEVEL_0_ORDER};
 static size_t reserv_pages[MAXRESERVSIZES] = {VM_LEVEL_0_NPAGES, VM_LEVEL_1_NPAGES};
 static size_t reserv_sizes[MAXRESERVSIZES] = {VM_LEVEL_0_SIZE, VM_LEVEL_1_SIZE};
 
@@ -553,6 +551,27 @@ vm_reserv_insert(vm_reserv_t rv, vm_object_t object, vm_pindex_t pindex, uint8_t
 	LIST_INSERT_HEAD(&object->rvq, rv, objq);
 	vm_reserv_object_unlock(object);
 }
+
+#ifdef VM_SUBLEVEL_0_NPAGES
+static inline bool
+vm_reserv_is_sublevel_full(vm_reserv_t rv, int index)
+{
+	_Static_assert(VM_SUBLEVEL_0_NPAGES == 16 ||
+	    VM_SUBLEVEL_0_NPAGES == 128,
+	    "vm_reserv_is_sublevel_full: unsupported VM_SUBLEVEL_0_NPAGES");
+	/* An equivalent bit_ntest() compiles to more instructions. */
+	switch (VM_SUBLEVEL_0_NPAGES) {
+	case 16:
+		return (((uint16_t *)rv->popmap)[index / 16] == UINT16_MAX);
+	case 128:
+		index = rounddown2(index, 128) / 64;
+		return (((uint64_t *)rv->popmap)[index] == UINT64_MAX &&
+		    ((uint64_t *)rv->popmap)[index + 1] == UINT64_MAX);
+	default:
+		__unreachable();
+	}
+}
+#endif
 
 /*
  * Reduces the given reservation's population count.  If the population count
@@ -1641,6 +1660,10 @@ vm_reserv_size(int level)
 	case 1:
 		return (VM_LEVEL_1_SIZE);
 	case 0:
+#ifdef VM_SUBLEVEL_0_NPAGES
+		return (VM_SUBLEVEL_0_NPAGES * PAGE_SIZE);
+	case 1:
+#endif
 		return (VM_LEVEL_0_SIZE);
 	case -1:
 		return (PAGE_SIZE);
