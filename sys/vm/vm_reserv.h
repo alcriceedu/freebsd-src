@@ -67,7 +67,6 @@ void		vm_reserv_rename(vm_page_t m, vm_object_t new_object,
 int		vm_reserv_size(int level);
 vm_paddr_t	vm_reserv_startup(vm_offset_t *vaddr, vm_paddr_t end);
 vm_page_t	vm_reserv_to_superpage(vm_page_t m);
-bool		vm_reserv_xxx(vm_page_t m);
 void		vm_reserv_count_xxx(vm_object_t object, unsigned int *count,
 		    unsigned int *full, unsigned int *full_psind);
 

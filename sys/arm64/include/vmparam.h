@@ -157,12 +157,6 @@
 #endif
 #endif
 
-#define VM_LEVEL_0_FULL_PSIND	2 // YYY
-
-#define VM_LEVEL_0_PART_PSIND	1
-
-#define VM_LEVEL_0_PART_COUNT	L3C_ENTRIES
-
 /**
  * Address space layout.
  *
@@ -343,8 +337,6 @@ extern vm_offset_t dmap_max_addr;
  * The pmap can create non-transparent large page mappings.
  */
 #define	PMAP_HAS_LARGEPAGES	1
-
-#define PMAP_LARGEPAGE_DEFAULT_PSIND	2
 
 /*
  * Need a page dump array for minidump.

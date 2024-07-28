@@ -3966,7 +3966,7 @@ pmap_remove_l3_range(pmap_t pmap, pd_entry_t l2e, vm_offset_t sva,
 					 * released.  Otherwise, a concurrent
 					 * pmap_remove_all() on a physical page
 					 * could return while a stale TLB entry
-					 * still provides access to that page.
+					 * still provides access to that page. 
 					 */
 					if (va != eva) {
 						pmap_invalidate_range(pmap, va,
@@ -6157,9 +6157,8 @@ pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va, vm_page_t m,
 			l2 = pmap_l2(pmap, va);
 
 		/*
-		 * If promotion succeeds, then the next call to this
-		 * function should not be given the unmapped PTP as
-		 * a hint.
+		 * If promotion succeeds, then the next call to this function
+		 * should not be given the unmapped PTP as a hint.
 		 */
 		if (pmap_promote_l2(pmap, l2, va, mpte, lockp))
 			mpte = NULL;
@@ -9215,7 +9214,6 @@ pmap_align_superpage(vm_object_t object, vm_ooffset_t offset,
 
 	if (size < L3C_SIZE)
 		return;
-
 	if (object != NULL && (object->flags & OBJ_COLORED) != 0)
 		offset += ptoa(object->pg_color);
 
