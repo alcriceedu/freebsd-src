@@ -148,15 +148,15 @@ static size_t reserv_npopmaps[VM_NRESERVLEVEL] = {howmany(VM_LEVEL_0_NPAGES, NBP
  */
 #define	PARTPOPSLOP	1
 
-/*
- * Clear a bit in the population map.
- */
-static __inline void
-popmap_clear(popmap_t popmap[], int i)
-{
 
-	popmap[i / NBPOPMAP] &= ~(1UL << (i % NBPOPMAP));
-}
+
+
+
+
+
+
+
+
 
 /*
  * Set a bit in the population map.
@@ -168,15 +168,15 @@ popmap_set(popmap_t popmap[], int i)
 	popmap[i / NBPOPMAP] |= 1UL << (i % NBPOPMAP);
 }
 
-/*
- * Is a bit in the population map clear?
- */
-static __inline boolean_t
-popmap_is_clear(popmap_t popmap[], int i)
-{
 
-	return ((popmap[i / NBPOPMAP] & (1UL << (i % NBPOPMAP))) == 0);
-}
+
+
+
+
+
+
+
+
 
 /*
  * Is a bit in the population map set?
