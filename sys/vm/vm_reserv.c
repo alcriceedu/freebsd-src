@@ -590,7 +590,7 @@ vm_reserv_depopulate(vm_reserv_t rv, int index)
 	    __FUNCTION__, rv, rv->object, rv->popcnt, rv->inpartpopq);
 	KASSERT(rv->object != NULL,
 	    ("vm_reserv_depopulate: reserv %p is free", rv));
-	KASSERT(popmap_is_set(rv->popmap, index),
+	KASSERT(bit_test(rv->popmap, index),
 	    ("vm_reserv_depopulate: reserv %p's popmap[%d] is clear", rv,
 	    index));
 	KASSERT(rv->popcnt > 0,
@@ -604,7 +604,7 @@ vm_reserv_depopulate(vm_reserv_t rv, int index)
 		    rv));
 		rv->pages->psind = 1; // XXX Fixed at 64 KB for now
 	}
-	popmap_clear(rv->popmap, index);
+	bit_clear(rv->popmap, index);
 	// XXX
         if (((uint16_t *)rv->popmap)[index / 16] != 65535) {
 		rv->pages[16 * (index / 16)].psind = 0;
@@ -721,7 +721,7 @@ vm_reserv_populate(vm_reserv_t rv, int index)
 	    __FUNCTION__, rv, rv->object, rv->popcnt, rv->inpartpopq);
 	KASSERT(rv->object != NULL,
 	    ("vm_reserv_populate: reserv %p is free", rv));
-	KASSERT(popmap_is_clear(rv->popmap, index),
+	KASSERT(!bit_test(rv->popmap, index),
 	    ("vm_reserv_populate: reserv %p's popmap[%d] is set", rv,
 	    index));
 	KASSERT(rv->popcnt < reserv_pages[rv->rsind],
@@ -731,7 +731,7 @@ vm_reserv_populate(vm_reserv_t rv, int index)
 	KASSERT(rv->domain < vm_ndomains,
 	    ("vm_reserv_populate: reserv %p's domain is corrupted %d",
 	    rv, rv->domain));
-	popmap_set(rv->popmap, index);
+	bit_set(rv->popmap, index);
 	// XXX
 	if (((uint16_t *)rv->popmap)[index / 16] == 65535) {
 		rv->pages[16 * (index / 16)].psind = 1;
@@ -1012,7 +1012,7 @@ vm_reserv_alloc_page(vm_object_t object, vm_pindex_t pindex, int domain,
 		/* Handle reclaim race. */
 		if (rv->object != object ||
 		    /* Handle vm_page_rename(m, new_object, ...). */
-		    popmap_is_set(rv->popmap, index)) {
+		    bit_test(rv->popmap, index)) {
 			m = NULL;
 			goto out;
 		}
