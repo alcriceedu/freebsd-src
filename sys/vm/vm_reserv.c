@@ -834,9 +834,8 @@ vm_reserv_alloc_contig(vm_object_t object, vm_pindex_t pindex, int domain,
 		    !vm_addr_ok(pa, size, alignment, boundary))
 			goto out;
 		/* Handle vm_page_rename(m, new_object, ...). */
-		for (i = 0; i < npages; i++)
-			if (popmap_is_set(rv->popmap, index + i))
-				goto out;
+		if (!bit_ntest(rv->popmap, index, index + npages - 1, 0))
+			goto out;
 		if (!vm_domain_allocate(vmd, req, npages))
 			goto out;
 		for (i = 0; i < npages; i++)
