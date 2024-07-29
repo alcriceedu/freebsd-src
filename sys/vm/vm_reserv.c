@@ -98,13 +98,17 @@
  * reservation number
  */
 #define	VM_LEVEL_0_SHIFT	(VM_LEVEL_0_ORDER + PAGE_SHIFT)
-#define VM_LEVEL_1_SHIFT 	(VM_LEVEL_1_ORDER + VM_LEVEL_0_ORDER + PAGE_SHIFT)
+#if VM_NRESERVLEVEL > 1
+#define	VM_LEVEL_1_SHIFT 	(VM_LEVEL_1_ORDER + VM_LEVEL_0_ORDER + PAGE_SHIFT)
+#endif
 
 /*
  * The size of a reservation in bytes
  */
 #define	VM_LEVEL_0_SIZE		(1 << VM_LEVEL_0_SHIFT)
-#define VM_LEVEL_1_SIZE 	(1 << VM_LEVEL_1_SHIFT)
+#if VM_NRESERVLEVEL > 1
+#define	VM_LEVEL_1_SIZE 	(1 << VM_LEVEL_1_SHIFT)
+#endif
 
 static size_t reserv_orders[VM_NRESERVLEVEL] = {VM_LEVEL_0_ORDER, VM_LEVEL_1_ORDER + VM_LEVEL_0_ORDER};
 static size_t reserv_pages[VM_NRESERVLEVEL] = {VM_LEVEL_0_NPAGES, VM_LEVEL_1_NPAGES};
@@ -1654,13 +1658,11 @@ vm_reserv_size(int level)
 {
 
 	switch (level) {
+#if VM_NRESERVLEVEL > 1
 	case 1:
 		return (VM_LEVEL_1_SIZE);
-	case 0:
-#ifdef VM_SUBLEVEL_0_NPAGES
-		return (VM_SUBLEVEL_0_NPAGES * PAGE_SIZE);
-	case 1:
 #endif
+	case 0:
 		return (VM_LEVEL_0_SIZE);
 	case -1:
 		return (PAGE_SIZE);
