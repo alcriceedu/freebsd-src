@@ -148,16 +148,6 @@ static size_t reserv_npopmaps[VM_NRESERVLEVEL] = {howmany(VM_LEVEL_0_NPAGES, NBP
  */
 #define	PARTPOPSLOP	1
 
-
-
-
-
-
-
-
-
-
-
 /*
  * Set a bit in the population map.
  */
@@ -167,26 +157,6 @@ popmap_set(popmap_t popmap[], int i)
 
 	popmap[i / NBPOPMAP] |= 1UL << (i % NBPOPMAP);
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 /*
  * The reservation structure
