@@ -1300,7 +1300,7 @@ vm_reserv_is_page_free(vm_page_t m)
 	rv = vm_reserv_from_page(m);
 	if (rv->object == NULL)
 		return (false);
-	return (popmap_is_clear(rv->popmap, m - rv->pages));
+	return (!bit_test(rv->popmap, m - rv->pages));
 }
 
 /*
