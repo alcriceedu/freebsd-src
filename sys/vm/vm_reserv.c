@@ -106,11 +106,9 @@
 #define	VM_LEVEL_0_SIZE		(1 << VM_LEVEL_0_SHIFT)
 #define VM_LEVEL_1_SIZE 	(1 << VM_LEVEL_1_SHIFT)
 
-#define MAXRESERVSIZES 2 // XXX Replace with VM_NRESERVLEVEL?
-
-static size_t reserv_orders[MAXRESERVSIZES] = {VM_LEVEL_0_ORDER, VM_LEVEL_1_ORDER + VM_LEVEL_0_ORDER};
-static size_t reserv_pages[MAXRESERVSIZES] = {VM_LEVEL_0_NPAGES, VM_LEVEL_1_NPAGES};
-static size_t reserv_sizes[MAXRESERVSIZES] = {VM_LEVEL_0_SIZE, VM_LEVEL_1_SIZE};
+static size_t reserv_orders[VM_NRESERVLEVEL] = {VM_LEVEL_0_ORDER, VM_LEVEL_1_ORDER + VM_LEVEL_0_ORDER};
+static size_t reserv_pages[VM_NRESERVLEVEL] = {VM_LEVEL_0_NPAGES, VM_LEVEL_1_NPAGES};
+static size_t reserv_sizes[VM_NRESERVLEVEL] = {VM_LEVEL_0_SIZE, VM_LEVEL_1_SIZE};
 
 /*
  * Computes the index of the small page underlying the given (object, pindex)
@@ -138,7 +136,7 @@ typedef	u_long		popmap_t;
 /*
  * XXX
  */
-static size_t reserv_npopmaps[MAXRESERVSIZES] = {howmany(VM_LEVEL_0_NPAGES, NBPOPMAP), howmany(VM_LEVEL_1_NPAGES, NBPOPMAP)};
+static size_t reserv_npopmaps[VM_NRESERVLEVEL] = {howmany(VM_LEVEL_0_NPAGES, NBPOPMAP), howmany(VM_LEVEL_1_NPAGES, NBPOPMAP)};
 
 /*
  * Number of elapsed ticks before we update the LRU queue position.  Used
@@ -277,8 +275,8 @@ static popmap_t vm_reserv_popmap_full[NPOPMAP_MAX]; // XXX 2 MB size
  */
 struct vm_reserv_domain {
 	struct mtx 		lock;
-	struct vm_reserv_queue	partpop[MAXRESERVSIZES];	/* (d) */
-	struct vm_reserv	marker[MAXRESERVSIZES];		/* (d, s) scan marker/lock */
+	struct vm_reserv_queue	partpop[VM_NRESERVLEVEL];	/* (d) */
+	struct vm_reserv	marker[VM_NRESERVLEVEL];		/* (d, s) scan marker/lock */
 } __aligned(CACHE_LINE_SIZE);
 
 static struct vm_reserv_domain vm_rvd[MAXMEMDOM];
@@ -1269,7 +1267,7 @@ vm_reserv_init(void)
 	for (i = 0; i < MAXMEMDOM; i++) {
 		rvd = &vm_rvd[i];
 		mtx_init(&rvd->lock, "vm reserv domain", NULL, MTX_DEF);
-		for (j = 0; j < MAXRESERVSIZES; j++) {
+		for (j = 0; j < VM_NRESERVLEVEL; j++) {
 			TAILQ_INIT(&rvd->partpop[j]);
 			mtx_init(&rvd->marker[j].lock, "vm reserv marker", NULL, MTX_DEF);
 			/*
