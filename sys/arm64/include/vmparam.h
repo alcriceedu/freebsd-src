@@ -143,20 +143,6 @@
 #error Unsupported page size
 #endif
 
-/*
- * Level 1 reservations consist of 512 pages when PAGE_SIZE is 4KB, and
- * 2048 pages when PAGE_SIZE is 16KB.
- */
-#ifndef	VM_LEVEL_1_ORDER
-#if PAGE_SIZE == PAGE_SIZE_4K
-#define	VM_LEVEL_1_ORDER	9
-#elif PAGE_SIZE == PAGE_SIZE_16K
-#define	VM_LEVEL_1_ORDER	11
-#else
-#error Unsupported page size
-#endif
-#endif
-
 /**
  * Address space layout.
  *
