@@ -1683,25 +1683,4 @@ vm_reserv_to_superpage(vm_page_t m)
 	return (NULL);
 }
 
-void
-vm_reserv_count_xxx(vm_object_t object, unsigned int *count, unsigned int *full, unsigned int *full_psind)
-{
-	vm_reserv_t rv;
-
-	*count = 0;
-	*full = 0;
-	*full_psind = 0;
-	LIST_FOREACH(rv, &object->rvq, objq) {
-		*count += 1;
-		if (rv->popcnt == reserv_pages[rv->rsind]) {
-			*full += 1;
-			if (rv->pages->psind == 1) {
-				*full_psind += 1;
-			}
-		}
-		CTR4(KTR_PMAP, "vm_reserv_count_xxx: rsind %u, psind %u, %u/%u resident",
-		    rv->rsind, rv->pages->psind, rv->popcnt, reserv_pages[rv->rsind]);
-	}
-}
-
 #endif	/* VM_NRESERVLEVEL > 0 */
