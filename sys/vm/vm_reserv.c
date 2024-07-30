@@ -1080,8 +1080,7 @@ static void
 vm_reserv_break(vm_reserv_t rv)
 {
 	vm_page_t m;
-	u_long changes;
-	int bitpos, hi, i, lo;
+	int hi, lo, pos;
 
 	vm_reserv_assert_locked(rv);
 	CTR5(KTR_VM, "%s: rv %p object %p popcnt %d inpartpop %d",
@@ -1095,39 +1094,24 @@ vm_reserv_break(vm_reserv_t rv)
 		}
 	}
 	hi = lo = -1;
-	for (i = 0; i <= reserv_npopmaps[rv->rsind]; i++) {
-		/*
-		 * "changes" is a bitmask that marks where a new sequence of
-		 * 0s or 1s begins in popmap[i], with last bit in popmap[i-1]
-		 * considered to be 1 if and only if lo == hi.  The bits of
-		 * popmap[-1] and popmap[NPOPMAP] are considered all 1s.
-		 */
-		if (i == reserv_npopmaps[rv->rsind])
-			changes = lo != hi;
-		else {
-			changes = rv->popmap[i];
-			changes ^= (changes << 1) | (lo == hi);
-			rv->popmap[i] = 0;
+	pos = 0;
+	for (;;) {
+		bit_ff_at(rv->popmap, pos, reserv_pages[rv->rsind], lo != hi, &pos);
+		if (lo == hi) {
+			if (pos == -1)
+				break;
+			lo = pos;
+			continue;
 		}
-		while (changes != 0) {
-			/*
-			 * If the next change marked begins a run of 0s, set
-			 * lo to mark that position.  Otherwise set hi and
-			 * free pages from lo up to hi.
-			 */
-			bitpos = ffsl(changes) - 1;
-			changes ^= 1UL << bitpos;
-			if (lo == hi)
-				lo = NBPOPMAP * i + bitpos;
-			else {
-				hi = NBPOPMAP * i + bitpos;
-				vm_domain_free_lock(VM_DOMAIN(rv->domain));
-				vm_phys_enqueue_contig(&rv->pages[lo], hi - lo);
-				vm_domain_free_unlock(VM_DOMAIN(rv->domain));
-				lo = hi;
-			}
-		}
+		if (pos == -1)
+			pos = reserv_pages[rv->rsind];
+		hi = pos;
+		vm_domain_free_lock(VM_DOMAIN(rv->domain));
+		vm_phys_enqueue_contig(&rv->pages[lo], hi - lo);
+		vm_domain_free_unlock(VM_DOMAIN(rv->domain));
+		lo = hi;
 	}
+	bit_nclear(rv->popmap, 0, reserv_pages[rv->rsind] - 1);
 	rv->popcnt = 0;
 	counter_u64_add(vm_reserv_broken, 1);
 }
