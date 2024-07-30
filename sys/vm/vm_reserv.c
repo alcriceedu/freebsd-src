@@ -1392,8 +1392,6 @@ static int
 vm_reserv_find_contig(vm_reserv_t rv, int npages, int lo,
     int hi, int ppn_align, int ppn_bound)
 {
-	u_long changes;
-	int bitpos, bits_left, i, n;
 
 	vm_reserv_assert_locked(rv);
 	KASSERT(npages <= reserv_pages[rv->rsind] - 1,
@@ -1406,56 +1404,18 @@ vm_reserv_find_contig(vm_reserv_t rv, int npages, int lo,
 	    ("ppn_align is not a positive power of 2"));
 	KASSERT(ppn_bound != 0 && powerof2(ppn_bound),
 	    ("ppn_bound is not a positive power of 2"));
-	i = lo / NBPOPMAP;
-	changes = rv->popmap[i] | ((1UL << (lo % NBPOPMAP)) - 1);
-	n = hi / NBPOPMAP;
-	bits_left = hi % NBPOPMAP;
-	hi = lo = -1;
-	for (;;) {
-		/*
-		 * "changes" is a bitmask that marks where a new sequence of
-		 * 0s or 1s begins in popmap[i], with last bit in popmap[i-1]
-		 * considered to be 1 if and only if lo == hi.  The bits of
-		 * popmap[-1] and popmap[NPOPMAP] are considered all 1s.
-		 */
-		changes ^= (changes << 1) | (lo == hi);
-		while (changes != 0) {
-			/*
-			 * If the next change marked begins a run of 0s, set
-			 * lo to mark that position.  Otherwise set hi and
-			 * look for a satisfactory first page from lo up to hi.
-			 */
-			bitpos = ffsl(changes) - 1;
-			changes ^= 1UL << bitpos;
-			if (lo == hi) {
-				lo = NBPOPMAP * i + bitpos;
-				continue;
-			}
-			hi = NBPOPMAP * i + bitpos;
-			if (lo < roundup2(lo, ppn_align)) {
-				/* Skip to next aligned page. */
-				lo = roundup2(lo, ppn_align);
-				if (lo >= reserv_pages[rv->rsind])
-					return (-1);
-			}
-			if (lo + npages > roundup2(lo, ppn_bound)) {
-				/* Skip to next boundary-matching page. */
-				lo = roundup2(lo, ppn_bound);
-				if (lo >= reserv_pages[rv->rsind])
-					return (-1);
-			}
-			if (lo + npages <= hi)
-				return (lo);
-			lo = hi;
+	while (bit_ffc_area_at(rv->popmap, lo, hi, npages, &lo), lo != -1) {
+		if (lo < roundup2(lo, ppn_align)) {
+			/* Skip to next aligned page. */
+			lo = roundup2(lo, ppn_align);
+		} else if (roundup2(lo + 1, ppn_bound) >= lo + npages)
+			return (lo);
+		if (roundup2(lo + 1, ppn_bound) < lo + npages) {
+			/* Skip to next boundary-matching page. */
+			lo = roundup2(lo + 1, ppn_bound);
 		}
-		if (++i < n)
-			changes = rv->popmap[i];
-		else if (i == n)
-			changes = bits_left == 0 ? -1UL :
-			    (rv->popmap[n] | (-1UL << bits_left));
-		else
-			return (-1);
 	}
+	return (-1);
 }
 
 /*
