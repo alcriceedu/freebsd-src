@@ -1507,8 +1507,7 @@ vm_reserv_reclaim_contig(int domain, u_long npages, vm_paddr_t low,
 				vm_reserv_domain_scan_unlock(domain, rsind);
 				/* Allocate requested space */
 				rv->popcnt += npages;
-				while (npages-- > 0)
-					popmap_set(rv->popmap, posn + npages);
+				bit_nset(rv->popmap, posn, posn + npages - 1);
 				vm_reserv_reclaim(rv);
 				vm_reserv_unlock(rv);
 				m_ret = &rv->pages[posn];
