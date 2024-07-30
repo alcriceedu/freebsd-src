@@ -1679,7 +1679,6 @@ vm_reserv_to_superpage(vm_page_t m)
 		else if (((uint16_t *)rv->popmap)[(m - rv->pages) / 16] == 65535) // XXX
 			return (rv->pages + rounddown2(m - rv->pages, 16));
 	}
-
 	return (NULL);
 }
 
