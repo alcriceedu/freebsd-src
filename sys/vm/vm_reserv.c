@@ -496,9 +496,9 @@ vm_reserv_remove(vm_reserv_t rv)
  * Insert a new reservation into the object's objq.
  */
 static void
-vm_reserv_insert(vm_reserv_t rv, vm_object_t object, vm_pindex_t pindex, uint8_t rsind)
+vm_reserv_insert(vm_reserv_t rv, vm_object_t object, vm_pindex_t pindex,
+    uint8_t level)
 {
-	int i;
 
 	vm_reserv_assert_locked(rv);
 	CTR6(KTR_VM,
@@ -511,14 +511,13 @@ vm_reserv_insert(vm_reserv_t rv, vm_object_t object, vm_pindex_t pindex, uint8_t
 	    ("vm_reserv_insert: reserv %p's popcnt is corrupted", rv));
 	KASSERT(!rv->inpartpopq,
 	    ("vm_reserv_insert: reserv %p's inpartpopq is TRUE", rv));
-	for (i = 0; i < reserv_npopmaps[rsind]; i++)
-		KASSERT(rv->popmap[i] == 0,
-		    ("vm_reserv_insert: reserv %p's popmap is corrupted", rv));
+	KASSERT(bit_ntest(rv->popmap, 0, reserv_pages[level] - 1, 0),
+	    ("vm_reserv_insert: reserv %p's popmap is corrupted", rv));
 	vm_reserv_object_lock(object);
 	rv->pindex = pindex;
 	rv->object = object;
 	rv->lasttick = ticks;
-	rv->rsind = rsind;
+	rv->rsind = level;
 	LIST_INSERT_HEAD(&object->rvq, rv, objq);
 	vm_reserv_object_unlock(object);
 }
