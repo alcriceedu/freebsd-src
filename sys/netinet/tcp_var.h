@@ -465,6 +465,11 @@ struct tcpcb {
 	/* TCP Fast Open */
 	uint8_t t_tfo_client_cookie_len; /* TFO client cookie length */
 	uint32_t t_end_info_status;	/* Status flag of end info */
+	sbintime_t t_challenge_ack_end;	/* End of the challenge ack epoch */
+	uint32_t t_challenge_ack_cnt;	/* Number of challenge ACKs sent in
+					 * current epoch
+					 */
+
 	unsigned int *t_tfo_pending;	/* TFO server pending counter */
 	union {
 		uint8_t client[TCP_FASTOPEN_MAX_COOKIE_LEN];
@@ -847,8 +852,8 @@ tcp_packets_this_ack(struct tcpcb *tp, tcp_seq ack)
 #define	TF2_MBUF_QUEUE_READY	0x00020000 /* Inputs can be queued */
 #define	TF2_DONT_SACK_QUEUE	0x00040000 /* Don't wake on sack */
 #define	TF2_CANNOT_DO_ECN	0x00080000 /* The stack does not do ECN */
-#define TF2_PROC_SACK_PROHIBIT	0x00100000 /* Due to small MSS size do not process sack's */
-#define	TF2_IPSEC_TSO		0x00200000	/* IPSEC + TSO supported */
+#define	TF2_PROC_SACK_PROHIBIT	0x00100000 /* Due to small MSS size do not process sack's */
+#define	TF2_IPSEC_TSO		0x00200000 /* IPSEC + TSO supported */
 #define	TF2_NO_ISS_CHECK	0x00200000 /* Don't check SEG.ACK against ISS */
 
 /*
@@ -1263,6 +1268,8 @@ VNET_DECLARE(int, tcp_log_in_vain);
 VNET_DECLARE(int, drop_synfin);
 VNET_DECLARE(int, path_mtu_discovery);
 VNET_DECLARE(int, tcp_abc_l_var);
+VNET_DECLARE(uint32_t, tcp_ack_war_cnt);
+VNET_DECLARE(uint32_t, tcp_ack_war_time_window);
 VNET_DECLARE(int, tcp_autorcvbuf_max);
 VNET_DECLARE(int, tcp_autosndbuf_inc);
 VNET_DECLARE(int, tcp_autosndbuf_max);
@@ -1314,6 +1321,8 @@ VNET_DECLARE(struct inpcbinfo, tcbinfo);
 #define	V_path_mtu_discovery		VNET(path_mtu_discovery)
 #define	V_tcbinfo			VNET(tcbinfo)
 #define	V_tcp_abc_l_var			VNET(tcp_abc_l_var)
+#define	V_tcp_ack_war_cnt		VNET(tcp_ack_war_cnt)
+#define	V_tcp_ack_war_time_window	VNET(tcp_ack_war_time_window)
 #define	V_tcp_autorcvbuf_max		VNET(tcp_autorcvbuf_max)
 #define	V_tcp_autosndbuf_inc		VNET(tcp_autosndbuf_inc)
 #define	V_tcp_autosndbuf_max		VNET(tcp_autosndbuf_max)
@@ -1460,6 +1469,7 @@ int	 tcp_default_output(struct tcpcb *);
 void	 tcp_state_change(struct tcpcb *, int);
 void	 tcp_respond(struct tcpcb *, void *,
 	    struct tcphdr *, struct mbuf *, tcp_seq, tcp_seq, uint16_t);
+void	 tcp_send_challenge_ack(struct tcpcb *, struct tcphdr *, struct mbuf *);
 bool	 tcp_twcheck(struct inpcb *, struct tcpopt *, struct tcphdr *,
 	    struct mbuf *, int);
 void	 tcp_setpersist(struct tcpcb *);
