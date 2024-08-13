@@ -145,6 +145,8 @@ struct vm_reserv {
 	int		lasttick;		/* (r) last pop update tick. */
 	bitstr_t	bit_decl(popmap, VM_LEVEL_0_NPAGES_MAX);
 						/* (r) bit vector, used pages */
+	int		depop_start_tick;	/* (r) depop started @ tick */
+	int		pop_start_tick;		/* (r) pop started @ tick. */
 };
 
 TAILQ_HEAD(vm_reserv_queue, vm_reserv);
@@ -190,10 +192,13 @@ static vm_reserv_t vm_reserv_array;
  * Threads reclaiming free pages from the queue must hold the per-domain scan
  * lock.
  */
+#define RESERV_DIST_BUCKETS 10
 struct vm_reserv_domain {
 	struct mtx 		lock;
 	struct vm_reserv_queue	partpop;	/* (d) */
 	struct vm_reserv	marker;		/* (d, s) scan marker/lock */
+	int			pop_dist[RESERV_DIST_BUCKETS];	/* (d) */
+	int			depop_dist[RESERV_DIST_BUCKETS];/* (d) */
 } __aligned(CACHE_LINE_SIZE);
 
 static struct vm_reserv_domain vm_rvd[MAXMEMDOM];
@@ -236,6 +241,13 @@ SYSCTL_OID(_vm, OID_AUTO, reserv_scan,
     CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE, NULL, 0,
     sysctl_vm_reserv_scan, "A",
     "Scan and report information about vm_reserv_array");
+
+static int sysctl_vm_reserv_dist(SYSCTL_HANDLER_ARGS);
+
+SYSCTL_OID(_vm_reserv, OID_AUTO, dist,
+    CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE, NULL, 0,
+    sysctl_vm_reserv_dist, "A",
+    "Reservation pop and depop completion time distribution");
 
 static COUNTER_U64_DEFINE_EARLY(vm_reserv_reclaimed);
 SYSCTL_COUNTER_U64(_vm_reserv, OID_AUTO, reclaimed, CTLFLAG_RD,
@@ -513,6 +525,41 @@ sysctl_vm_reserv_scan(SYSCTL_HANDLER_ARGS)
 	return (error);
 }
 
+static int
+sysctl_vm_reserv_dist(SYSCTL_HANDLER_ARGS)
+{
+	struct sbuf sbuf;
+	int error, domain, i;
+
+	error = sysctl_wire_old_buffer(req, 0);
+	if (error != 0)
+		return (error);
+	sbuf_new_for_sysctl(&sbuf, NULL, 128, req);
+	sbuf_printf(&sbuf, "\nDOMAIN             TIME  NUMBER\n\n");
+	for (domain = 0; domain < vm_ndomains; domain++) {
+		/* No vm_reserv_domain_lock(), we are just reading. */
+		for (i = RESERV_DIST_BUCKETS - 1; i > 0; i--) {
+			sbuf_printf(&sbuf, "%6d, >=%6ds   pop, %6d\n",
+			    domain, 2 << i,
+			    vm_rvd[domain].pop_dist[i]);
+		}
+		sbuf_printf(&sbuf, "%6d, < %6ds   pop, %6d\n",
+		    domain, 2 << 1,
+		    vm_rvd[domain].pop_dist[i]);
+		for (i = RESERV_DIST_BUCKETS - 1; i > 0; i--) {
+			sbuf_printf(&sbuf, "%6d, >=%6ds depop, %6d\n",
+			    domain, 2 << i,
+			    vm_rvd[domain].depop_dist[i]);
+		}
+		sbuf_printf(&sbuf, "%6d, < %6ds depop, %6d\n",
+		    domain, 2 << 1,
+		    vm_rvd[domain].depop_dist[i]);
+	}
+	error = sbuf_finish(&sbuf);
+	sbuf_delete(&sbuf);
+	return (error);
+}
+
 /*
  * Remove a reservation from the object's objq.
  */
@@ -559,8 +606,38 @@ vm_reserv_insert(vm_reserv_t rv, vm_object_t object, vm_pindex_t pindex)
 	rv->pindex = pindex;
 	rv->object = object;
 	rv->lasttick = ticks;
+	rv->pop_start_tick = ticks;
 	LIST_INSERT_HEAD(&object->rvq, rv, objq);
 	vm_reserv_object_unlock(object);
+}
+
+static void
+vm_reserv_dist_inc_helper(int *dist, int seconds)
+{
+	int i;
+	for (i = RESERV_DIST_BUCKETS - 1; i > 0; i--) {
+		if (seconds >= (2 << i)) {
+			dist[i]++;
+			break;
+		}
+	}
+	if (i == 0) {
+		dist[i]++;
+	}
+}
+
+static void
+vm_reserv_depop_dist_inc(uint8_t domain, int depop_seconds)
+{
+	vm_reserv_domain_assert_locked(domain);
+	vm_reserv_dist_inc_helper(vm_rvd[domain].depop_dist, depop_seconds);
+}
+
+static void
+vm_reserv_pop_dist_inc(uint8_t domain, int pop_seconds)
+{
+	vm_reserv_domain_assert_locked(domain);
+	vm_reserv_dist_inc_helper(vm_rvd[domain].pop_dist, pop_seconds);
 }
 
 /*
@@ -573,6 +650,7 @@ static void
 vm_reserv_depopulate(vm_reserv_t rv, int index)
 {
 	struct vm_domain *vmd;
+	int depop_ticks;
 
 	vm_reserv_assert_locked(rv);
 	CTR5(KTR_VM, "%s: rv %p object %p popcnt %d inpartpop %d",
@@ -592,6 +670,7 @@ vm_reserv_depopulate(vm_reserv_t rv, int index)
 		    ("vm_reserv_depopulate: reserv %p is already demoted",
 		    rv));
 		rv->pages->psind = 0;
+		rv->depop_start_tick = ticks;
 	}
 	bit_clear(rv->popmap, index);
 	rv->popcnt--;
@@ -606,6 +685,10 @@ vm_reserv_depopulate(vm_reserv_t rv, int index)
 			rv->inpartpopq = TRUE;
 			TAILQ_INSERT_TAIL(&vm_rvd[rv->domain].partpop, rv,
 			    partpopq);
+		} else {
+			depop_ticks = ticks - rv->depop_start_tick;
+			depop_ticks /= hz; // to seconds
+			vm_reserv_depop_dist_inc(rv->domain, depop_ticks);
 		}
 		vm_reserv_domain_unlock(rv->domain);
 		rv->lasttick = ticks;
@@ -693,6 +776,7 @@ vm_reserv_has_pindex(vm_reserv_t rv, vm_pindex_t pindex)
 static void
 vm_reserv_populate(vm_reserv_t rv, int index)
 {
+	int pop_ticks;
 
 	vm_reserv_assert_locked(rv);
 	CTR5(KTR_VM, "%s: rv %p object %p popcnt %d inpartpop %d",
@@ -728,6 +812,9 @@ vm_reserv_populate(vm_reserv_t rv, int index)
 		    ("vm_reserv_populate: reserv %p is already promoted",
 		    rv));
 		rv->pages->psind = 1;
+		pop_ticks = ticks - rv->pop_start_tick;
+		pop_ticks /= hz; // to seconds
+		vm_reserv_pop_dist_inc(rv->domain, pop_ticks);
 	}
 	vm_reserv_domain_unlock(rv->domain);
 }
@@ -1339,7 +1426,7 @@ vm_reserv_init(void)
 #ifdef VM_PHYSSEG_SPARSE
 	vm_pindex_t used;
 #endif
-	int i, segind;
+	int i, j, segind;
 
 	/*
 	 * Initialize the reservation array.  Specifically, initialize the
@@ -1382,6 +1469,10 @@ vm_reserv_init(void)
 		 */
 		rvd->marker.popcnt = VM_LEVEL_0_NPAGES;
 		bit_nset(rvd->marker.popmap, 0, VM_LEVEL_0_NPAGES - 1);
+		for (j = 0; j < RESERV_DIST_BUCKETS; j++) {
+			rvd->pop_dist[j] = 0;
+			rvd->depop_dist[j] = 0;
+		}
 	}
 
 	for (i = 0; i < VM_RESERV_OBJ_LOCK_COUNT; i++)
