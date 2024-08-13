@@ -462,10 +462,11 @@ sysctl_vm_page_scan(SYSCTL_HANDLER_ARGS)
 {
 	struct sbuf sbuf;
 	struct vm_phys_seg *seg;
+	vm_object_t obj;
 	vm_page_t m;
 	vm_paddr_t paddr;
 	int error, segind;
-	bool first_seg, first_page;
+	bool first_seg, first_page, locked;
 
 	error = sysctl_wire_old_buffer(req, 0);
 	if (error != 0)
@@ -501,8 +502,17 @@ sysctl_vm_page_scan(SYSCTL_HANDLER_ARGS)
 				vm_domain_free_lock(VM_DOMAIN(seg->domain));
 			}
 			m = PHYS_TO_VM_PAGE(paddr);
-			if (m->object) {
-				VM_OBJECT_RLOCK(m->object);
+			locked = false;
+			/*
+			 * Object memory is never recycled for other purposes.
+			 * So cache a pointer to it, just in case, very rarely,
+			 * that the object pointer in vm_page becomes NULL.
+			 */
+			obj = m->object;
+			if (obj) {
+				if (VM_OBJECT_TRYRLOCK(obj)) {
+					locked = true;
+				}
 			}
 			if (first_page) {
 				sbuf_printf(&sbuf, "\n{");
@@ -511,13 +521,13 @@ sysctl_vm_page_scan(SYSCTL_HANDLER_ARGS)
 			}
 			sbuf_printf(&sbuf, "\"0\":\"%p\",", m);
 			sbuf_printf(&sbuf, "\"1\":\"%#jx\",", (uintmax_t)m->phys_addr);
-			sbuf_printf(&sbuf, "\"2\":\"%p\",", m->object);
-			if (m->object) {
-				sbuf_printf(&sbuf, "\"10\":\"%#jx\",", (uintmax_t)m->object->size);
-				sbuf_printf(&sbuf, "\"11\":%u,", m->object->ref_count);
-				sbuf_printf(&sbuf, "\"12\":%u,", m->object->type);
-				sbuf_printf(&sbuf, "\"13\":\"%#x\",", m->object->flags);
-				sbuf_printf(&sbuf, "\"14\":%d,", m->object->resident_page_count);
+			sbuf_printf(&sbuf, "\"2\":\"%p\",", obj);
+			if (obj) {
+				sbuf_printf(&sbuf, "\"10\":\"%#jx\",", (uintmax_t)obj->size);
+				sbuf_printf(&sbuf, "\"11\":%u,", obj->ref_count);
+				sbuf_printf(&sbuf, "\"12\":%u,", obj->type);
+				sbuf_printf(&sbuf, "\"13\":\"%#x\",", obj->flags);
+				sbuf_printf(&sbuf, "\"14\":%d,", obj->resident_page_count);
 			}
 			sbuf_printf(&sbuf, "\"3\":\"%#jx\",", (uintmax_t)m->pindex);
 			sbuf_printf(&sbuf, "\"4\":\"%#x\",", m->ref_count);
@@ -526,8 +536,9 @@ sysctl_vm_page_scan(SYSCTL_HANDLER_ARGS)
 			sbuf_printf(&sbuf, "\"7\":\"%#x\",", m->oflags);
 			sbuf_printf(&sbuf, "\"8\":%d", m->psind);
 			sbuf_printf(&sbuf, "}");
-			if (m->object) {
-				VM_OBJECT_RUNLOCK(m->object);
+			if (locked) {
+				VM_OBJECT_RUNLOCK(obj);
+				locked = false;
 			}
 			paddr += PAGE_SIZE;
 			first_page = false;
