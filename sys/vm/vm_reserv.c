@@ -686,9 +686,16 @@ vm_reserv_depopulate(vm_reserv_t rv, int index)
 			TAILQ_INSERT_TAIL(&vm_rvd[rv->domain].partpop, rv,
 			    partpopq);
 		} else {
-			depop_ticks = ticks - rv->depop_start_tick;
-			depop_ticks /= hz; // to seconds
-			vm_reserv_depop_dist_inc(rv->domain, depop_ticks);
+			/*
+			 * Not every depopulate to 0 came from a fullpop.
+			 * Filter those out.
+			 */
+			if (rv->depop_start_tick != 0) {
+				depop_ticks = ticks - rv->depop_start_tick;
+				depop_ticks /= hz; // to seconds
+				vm_reserv_depop_dist_inc(rv->domain, depop_ticks);
+				rv->depop_start_tick = 0;
+			}
 		}
 		vm_reserv_domain_unlock(rv->domain);
 		rv->lasttick = ticks;
@@ -812,9 +819,12 @@ vm_reserv_populate(vm_reserv_t rv, int index)
 		    ("vm_reserv_populate: reserv %p is already promoted",
 		    rv));
 		rv->pages->psind = 1;
-		pop_ticks = ticks - rv->pop_start_tick;
-		pop_ticks /= hz; // to seconds
-		vm_reserv_pop_dist_inc(rv->domain, pop_ticks);
+		if (rv->pop_start_tick != 0) {
+			pop_ticks = ticks - rv->pop_start_tick;
+			pop_ticks /= hz; // to seconds
+			vm_reserv_pop_dist_inc(rv->domain, pop_ticks);
+			rv->pop_start_tick = 0;
+		}
 	}
 	vm_reserv_domain_unlock(rv->domain);
 }
@@ -1452,6 +1462,8 @@ vm_reserv_init(void)
 		    VM_LEVEL_0_SIZE <= seg->end) {
 			rv->pages = PHYS_TO_VM_PAGE(paddr);
 			rv->domain = seg->domain;
+			rv->pop_start_tick = 0;
+			rv->depop_start_tick = 0;
 			mtx_init(&rv->lock, "vm reserv", NULL, MTX_DEF);
 			paddr += VM_LEVEL_0_SIZE;
 			rv++;
