@@ -1267,7 +1267,9 @@ vm_reserv_break(vm_reserv_t rv, vm_object_t obj, int opt, int was_inpartpopq)
 	if (rv->pop_start_tick != 0 && was_inpartpopq) {
 		inpartpop_ticks = ticks - rv->pop_start_tick;
 		inpartpop_ticks /= hz; // to seconds
+		vm_reserv_domain_lock(rv->domain);
 		vm_reserv_partpop_dist_inc(rv->domain, inpartpop_ticks);
+		vm_reserv_domain_unlock(rv->domain);
 		rv->pop_start_tick = 0;
 	}
 
