@@ -199,6 +199,7 @@ struct vm_reserv_domain {
 	struct vm_reserv	marker;		/* (d, s) scan marker/lock */
 	int			pop_dist[RESERV_DIST_BUCKETS];	/* (d) */
 	int			depop_dist[RESERV_DIST_BUCKETS];/* (d) */
+	int			partpop_dist[RESERV_DIST_BUCKETS];/* (d) */
 } __aligned(CACHE_LINE_SIZE);
 
 static struct vm_reserv_domain vm_rvd[MAXMEMDOM];
@@ -325,7 +326,7 @@ struct mtx_padalign vm_reserv_object_mtx[VM_RESERV_OBJ_LOCK_COUNT];
 	    mtx_unlock(vm_reserv_object_lock_ptr((object)))
 
 static int		vm_reserv_break(vm_reserv_t rv, vm_object_t obj,
-			    int opt);
+			    int opt, int was_inpartpopq);
 static void		vm_reserv_depopulate(vm_reserv_t rv, int index);
 static vm_reserv_t	vm_reserv_from_page(vm_page_t m);
 static boolean_t	vm_reserv_has_pindex(vm_reserv_t rv,
@@ -525,11 +526,28 @@ sysctl_vm_reserv_scan(SYSCTL_HANDLER_ARGS)
 	return (error);
 }
 
+static void
+vm_reserv_dist_inc_helper(int *dist, int seconds)
+{
+	int i;
+	for (i = RESERV_DIST_BUCKETS - 1; i > 0; i--) {
+		if (seconds >= (2 << i)) {
+			dist[i]++;
+			break;
+		}
+	}
+	if (i == 0) {
+		dist[i]++;
+	}
+}
+
 static int
 sysctl_vm_reserv_dist(SYSCTL_HANDLER_ARGS)
 {
 	struct sbuf sbuf;
-	int error, domain, i;
+	vm_reserv_t rv;
+	int inpartpop_dist[RESERV_DIST_BUCKETS];
+	int error, domain, level, i;
 
 	error = sysctl_wire_old_buffer(req, 0);
 	if (error != 0)
@@ -537,6 +555,21 @@ sysctl_vm_reserv_dist(SYSCTL_HANDLER_ARGS)
 	sbuf_new_for_sysctl(&sbuf, NULL, 128, req);
 	sbuf_printf(&sbuf, "\nDOMAIN             TIME  NUMBER\n\n");
 	for (domain = 0; domain < vm_ndomains; domain++) {
+		/* Reset distribution. */
+		for (i = RESERV_DIST_BUCKETS - 1; i >= 0; i--) {
+			inpartpop_dist[i] = 0;
+		}
+		/* Count stuff currently in partpopq. */
+		for (level = -1; level <= VM_NRESERVLEVEL - 2; level++) {
+			vm_reserv_domain_lock(domain);
+			TAILQ_FOREACH(rv, &vm_rvd[domain].partpop, partpopq) {
+				if (rv == &vm_rvd[domain].marker)
+					continue;
+				vm_reserv_dist_inc_helper(inpartpop_dist, (ticks - rv->pop_start_tick) / hz);
+			}
+			vm_reserv_domain_unlock(domain);
+		}
+		/* Now print. */
 		/* No vm_reserv_domain_lock(), we are just reading. */
 		for (i = RESERV_DIST_BUCKETS - 1; i > 0; i--) {
 			sbuf_printf(&sbuf, "%6d, >=%6ds   pop, %6d\n",
@@ -554,6 +587,22 @@ sysctl_vm_reserv_dist(SYSCTL_HANDLER_ARGS)
 		sbuf_printf(&sbuf, "%6d, < %6ds depop, %6d\n",
 		    domain, 2 << 1,
 		    vm_rvd[domain].depop_dist[i]);
+		for (i = RESERV_DIST_BUCKETS - 1; i > 0; i--) {
+			sbuf_printf(&sbuf, "%6d, >=%6ds  ppop, %6d\n",
+			    domain, 2 << i,
+			    vm_rvd[domain].partpop_dist[i]);
+		}
+		sbuf_printf(&sbuf, "%6d, < %6ds  ppop, %6d\n",
+		    domain, 2 << 1,
+		    vm_rvd[domain].partpop_dist[i]);
+		for (i = RESERV_DIST_BUCKETS - 1; i > 0; i--) {
+			sbuf_printf(&sbuf, "%6d, >=%6ds ippop, %6d\n",
+			    domain, 2 << i,
+			    inpartpop_dist[i]);
+		}
+		sbuf_printf(&sbuf, "%6d, < %6ds ippop, %6d\n",
+		    domain, 2 << 1,
+		    inpartpop_dist[i]);
 	}
 	error = sbuf_finish(&sbuf);
 	sbuf_delete(&sbuf);
@@ -612,21 +661,6 @@ vm_reserv_insert(vm_reserv_t rv, vm_object_t object, vm_pindex_t pindex)
 }
 
 static void
-vm_reserv_dist_inc_helper(int *dist, int seconds)
-{
-	int i;
-	for (i = RESERV_DIST_BUCKETS - 1; i > 0; i--) {
-		if (seconds >= (2 << i)) {
-			dist[i]++;
-			break;
-		}
-	}
-	if (i == 0) {
-		dist[i]++;
-	}
-}
-
-static void
 vm_reserv_depop_dist_inc(uint8_t domain, int depop_seconds)
 {
 	vm_reserv_domain_assert_locked(domain);
@@ -640,6 +674,13 @@ vm_reserv_pop_dist_inc(uint8_t domain, int pop_seconds)
 	vm_reserv_dist_inc_helper(vm_rvd[domain].pop_dist, pop_seconds);
 }
 
+static void
+vm_reserv_partpop_dist_inc(uint8_t domain, int seconds)
+{
+	vm_reserv_domain_assert_locked(domain);
+	vm_reserv_dist_inc_helper(vm_rvd[domain].partpop_dist, seconds);
+}
+
 /*
  * Reduces the given reservation's population count.  If the population count
  * becomes zero, the reservation is destroyed.  Additionally, moves the
@@ -650,7 +691,7 @@ static void
 vm_reserv_depopulate(vm_reserv_t rv, int index)
 {
 	struct vm_domain *vmd;
-	int depop_ticks;
+	int depop_ticks, inpartpop_ticks;
 
 	vm_reserv_assert_locked(rv);
 	CTR5(KTR_VM, "%s: rv %p object %p popcnt %d inpartpop %d",
@@ -695,6 +736,11 @@ vm_reserv_depopulate(vm_reserv_t rv, int index)
 				depop_ticks /= hz; // to seconds
 				vm_reserv_depop_dist_inc(rv->domain, depop_ticks);
 				rv->depop_start_tick = 0;
+			} else if (rv->pop_start_tick != 0) {
+				inpartpop_ticks = ticks - rv->pop_start_tick;
+				inpartpop_ticks /= hz; // to seconds
+				vm_reserv_partpop_dist_inc(rv->domain, inpartpop_ticks);
+				rv->pop_start_tick = 0;
 			}
 		}
 		vm_reserv_domain_unlock(rv->domain);
@@ -783,7 +829,7 @@ vm_reserv_has_pindex(vm_reserv_t rv, vm_pindex_t pindex)
 static void
 vm_reserv_populate(vm_reserv_t rv, int index)
 {
-	int pop_ticks;
+	int pop_ticks, inpartpop_ticks;
 
 	vm_reserv_assert_locked(rv);
 	CTR5(KTR_VM, "%s: rv %p object %p popcnt %d inpartpop %d",
@@ -820,6 +866,10 @@ vm_reserv_populate(vm_reserv_t rv, int index)
 		    rv));
 		rv->pages->psind = 1;
 		if (rv->pop_start_tick != 0) {
+			inpartpop_ticks = ticks - rv->pop_start_tick;
+			inpartpop_ticks /= hz; // to seconds
+			vm_reserv_partpop_dist_inc(rv->domain, inpartpop_ticks);
+
 			pop_ticks = ticks - rv->pop_start_tick;
 			pop_ticks /= hz; // to seconds
 			vm_reserv_pop_dist_inc(rv->domain, pop_ticks);
@@ -1180,13 +1230,14 @@ out:
  * Returns 0 for success.
  */
 static int
-vm_reserv_break(vm_reserv_t rv, vm_object_t obj, int opt)
+vm_reserv_break(vm_reserv_t rv, vm_object_t obj, int opt, int was_inpartpopq)
 {
 	struct spglist free;
 	struct vm_domain *vmd;
 	vm_page_t m;
 	int error, cnt, ret;
 	int hi, lo, pos;
+	int inpartpop_ticks;
 	bool try_reloc, unlocked;
 
 	vm_reserv_assert_locked(rv);
@@ -1212,6 +1263,14 @@ vm_reserv_break(vm_reserv_t rv, vm_object_t obj, int opt)
 		}
 	}
 	vm_reserv_remove(rv);
+
+	if (rv->pop_start_tick != 0 && was_inpartpopq) {
+		inpartpop_ticks = ticks - rv->pop_start_tick;
+		inpartpop_ticks /= hz; // to seconds
+		vm_reserv_partpop_dist_inc(rv->domain, inpartpop_ticks);
+		rv->pop_start_tick = 0;
+	}
+
 	vmd = VM_DOMAIN(rv->domain);
 	unlocked = false;
 	rv->pages->psind = 0;
@@ -1368,6 +1427,7 @@ void
 vm_reserv_break_all(vm_object_t object)
 {
 	vm_reserv_t rv;
+	int was_inpartpopq;
 
 	/*
 	 * This access of object->rvq is unsynchronized so that the
@@ -1387,10 +1447,13 @@ vm_reserv_break_all(vm_object_t object)
 		if (rv->inpartpopq) {
 			TAILQ_REMOVE(&vm_rvd[rv->domain].partpop, rv, partpopq);
 			rv->inpartpopq = FALSE;
+			was_inpartpopq = 1;
+		} else {
+			was_inpartpopq = 0;
 		}
 		vm_reserv_domain_unlock(rv->domain);
 		//vm_reserv_break(rv, object, vm_reserv_break_style);
-		vm_reserv_break(rv, object, 0);
+		vm_reserv_break(rv, object, 0, was_inpartpopq);
 		vm_reserv_unlock(rv);
 	}
 }
@@ -1558,6 +1621,7 @@ vm_reserv_dequeue(vm_reserv_t rv)
 static void
 vm_reserv_reclaim(vm_reserv_t rv)
 {
+	int was_inpartpopq;
 
 	vm_reserv_assert_locked(rv);
 	CTR5(KTR_VM, "%s: rv %p object %p popcnt %d inpartpop %d",
@@ -1566,9 +1630,12 @@ vm_reserv_reclaim(vm_reserv_t rv)
 		vm_reserv_domain_lock(rv->domain);
 		vm_reserv_dequeue(rv);
 		vm_reserv_domain_unlock(rv->domain);
+		was_inpartpopq = 1;
+	} else {
+		was_inpartpopq = 0;
 	}
 	//vm_reserv_break(rv, NULL, vm_reserv_break_style);
-	vm_reserv_break(rv, NULL, 0);
+	vm_reserv_break(rv, NULL, 0, was_inpartpopq);
 	counter_u64_add(vm_reserv_reclaimed, 1);
 }
 
@@ -1818,7 +1885,7 @@ vm_reserv_partpop_reclaim(int domain, int shortage, int popcnt_thld, int opt)
 				/* Evacuate the victim. */
 				MPASS(rv->domain == dom);
 				//status = vm_reserv_migrate_locked(rv);
-				status = vm_reserv_break(rv, NULL, 1);
+				status = vm_reserv_break(rv, NULL, 1, 1);
 				vm_reserv_unlock(rv);
 				if (!status) {
 					reclaimed++;
