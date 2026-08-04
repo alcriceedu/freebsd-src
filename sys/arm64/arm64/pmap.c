@@ -461,10 +461,10 @@ void (*pmap_stage2_invalidate_all)(uint64_t);
  *  |   ASID   |  TG   | SCALE  |  NUM   |  TTL   |    BaseADDR     |
  *  +----------+-------+--------+--------+--------+-----------------+
  *
- * A single instruction invalidates the TLB entries for the mappings in the
- * address range
+ * A single range-based TLBI instruction invalidates the TLB entries for the
+ * mappings within the address range
  *
- *	[BaseADDR, BaseADDR + (NUM + 1) * 2^(5 * SCALE + 1) pages)
+ *	[BaseADDR, BaseADDR + (NUM + 1) * 2^(5 * SCALE + 1) * PAGE_SIZE)
  *
  * BaseADDR is VA[48:PAGE_SHIFT], unless 52-bit addressing is enabled, i.e.,
  * pmap_lpa_enabled is true, in which case BaseADDR is VA[52:16] regardless
@@ -474,7 +474,10 @@ void (*pmap_stage2_invalidate_all)(uint64_t);
  *
  * TTL optionally specifies the translation table level at which every
  * mapping within the address range is found; we set TTL to 0, meaning that
- * no hint is being provided.
+ * we are not providing a hint.
+ *
+ * A single instruction invalidates some number of units, where a unit is
+ * 2^(5 * SCALE + 1) pages.  NUM is that number minus 1.
  *
  * TG specifies the translation granule size, i.e., PAGE_SIZE.
  */
@@ -482,6 +485,21 @@ void (*pmap_stage2_invalidate_all)(uint64_t);
 #define	TLBI_RANGE_NUM_SHIFT		39
 #define	TLBI_RANGE_SCALE_SHIFT		44
 #define	TLBI_RANGE_TG_SHIFT		46
+
+#define	TLBI_RANGE_VA_SHIFT		(pmap_lpa_enabled ? 16 : PAGE_SHIFT)
+
+#define	TLBI_RANGE_MAX_UNITS		32
+#define	TLBI_RANGE_MAX_SCALE		3
+#define	TLBI_RANGE_UNIT_SHIFT(scale)	(5 * (scale) + 1)
+#define	TLBI_RANGE_UNIT(scale)		(1ul << TLBI_RANGE_UNIT_SHIFT(scale))
+
+/*
+ * The largest scale such that a unit fits within the given number of pages,
+ * i.e., the largest scale such that TLBI_RANGE_UNIT(scale) <= pages.  The
+ * given number of pages must be at least TLBI_RANGE_UNIT(0).
+ */
+#define	TLBI_RANGE_SCALE(pages)						\
+	imin((flsl(pages) - 2) / 5, TLBI_RANGE_MAX_SCALE)
 
 #if PAGE_SIZE == PAGE_SIZE_4K
 #define	TLBI_RANGE_TG			(1ul << TLBI_RANGE_TG_SHIFT)
@@ -491,22 +509,10 @@ void (*pmap_stage2_invalidate_all)(uint64_t);
 #error Unsupported page size
 #endif
 
-/*
- * A single instruction invalidates some number of units, where a unit is
- * 2^(5 * SCALE + 1) pages.  NUM is a 5-bit field holding that number minus
- * one, and SCALE is a 2-bit field.
- */
-#define	TLBI_RANGE_MAX_UNITS		32
-#define	TLBI_RANGE_MAX_SCALE		3
-#define	TLBI_RANGE_UNIT(scale)		(1ul << (5 * (scale) + 1))
-
-#define	TLBI_RANGE_ADDR_SHIFT		(pmap_lpa_enabled ? 16 : PAGE_SHIFT)
-#define	TLBI_RANGE_ADDR_MASK		((1ul << TLBI_RANGE_ADDR_SHIFT) - 1)
-
-#define	TLBI_RANGE_FIELDS(addr, shift, num, scale)			\
+#define	TLBI_RANGE_FIELDS(va, va_shift, num, scale)			\
 	(TLBI_RANGE_TG | ((u_long)(scale) << TLBI_RANGE_SCALE_SHIFT) |	\
 	((u_long)(num) << TLBI_RANGE_NUM_SHIFT) |			\
-	(((addr) >> (shift)) & TLBI_RANGE_BADDR_MASK))
+	(((va) >> (va_shift)) & TLBI_RANGE_BADDR_MASK))
 
 static bool __read_frequently pmap_tlbi_range_support = false;
 
@@ -2157,78 +2163,71 @@ pmap_invalidate_page(pmap_t pmap, vm_offset_t va, bool final_only)
 }
 
 /*
- * Invalidates the cached final- and optionally intermediate-level TLB entries
- * for the specified virtual address range using range-based invalidation.
- */
-static void
-pmap_s1_invalidate_range_tlbi(pmap_t pmap, vm_offset_t sva, vm_offset_t eva,
-    bool final_only)
-{
-	uint64_t asid, r, units;
-	vm_size_t pages, unit;
-	int scale, shift;
-
-	PMAP_ASSERT_STAGE1(pmap);
-	MPASS(pmap_tlbi_range_support);
-	asid = pmap == kernel_pmap ? 0 :
-	    ASID_TO_OPERAND(COOKIE_TO_ASID(pmap->pm_cookie));
-	pages = atop(eva - sva);
-	scale = TLBI_RANGE_MAX_SCALE;
-	shift = TLBI_RANGE_ADDR_SHIFT;
-	while (pages > 0) {
-		unit = TLBI_RANGE_UNIT(scale);
-		if ((scale == 0 && pages < unit) ||
-		    (pmap_lpa_enabled && (sva & 65535) != 0)) {
-			r = asid | TLBI_VA(sva);
-			if (pmap == kernel_pmap)
-				pmap_s1_invalidate_kernel(r, final_only);
-			else
-				pmap_s1_invalidate_user(r, final_only);
-			sva += PAGE_SIZE;
-			pages--;
-			continue;
-		}
-		if (pages < unit) {
-			scale--;
-			continue;
-		}
-		units = ulmin(pages / unit, TLBI_RANGE_MAX_UNITS);
-		r = asid | TLBI_RANGE_FIELDS(sva, shift, units - 1, scale);
-		if (pmap == kernel_pmap)
-			pmap_s1_invalidate_range_kernel(r, final_only);
-		else
-			pmap_s1_invalidate_range_user(r, final_only);
-		sva += ptoa(units * unit);
-		pages -= units * unit;
-	}
-}
-
-/*
  * Use stride L{1,2}_SIZE when invalidating the TLB entries for L{1,2}_BLOCK
  * mappings.  Otherwise, use stride L3_SIZE.
+ *
+ * When range-based invalidation is supported, the address range is covered by
+ * as few instructions as possible: the largest scale whose unit fits within
+ * the remaining address range is selected, and up to TLBI_RANGE_MAX_UNITS
+ * units are invalidated per instruction.  An address that cannot be encoded as
+ * a BaseADDR -- which, when 52-bit addressing is enabled, means any address
+ * that is not 64KB aligned -- is invalidated a stride at a time.
  */
 static __inline void
 pmap_s1_invalidate_strided(pmap_t pmap, vm_offset_t sva, vm_offset_t eva,
     vm_offset_t stride, bool final_only)
 {
-	uint64_t end, r, start;
+	uint64_t asid, units;
+	vm_offset_t va, va_mask;
+	vm_size_t pages;
+	int scale, unit_shift, va_shift;
 
 	PMAP_ASSERT_STAGE1(pmap);
-
+	va_shift = TLBI_RANGE_VA_SHIFT;
+	va_mask = (1ul << va_shift) - 1;
+	va = sva;
 	dsb(ishst);
-	if (pmap_tlbi_range_support && eva - sva > PAGE_SIZE) {
-		pmap_s1_invalidate_range_tlbi(pmap, sva, eva, final_only);
-	} else if (pmap == kernel_pmap) {
-		start = TLBI_VA(sva);
-		end = TLBI_VA(eva);
-		for (r = start; r < end; r += TLBI_VA(stride))
-			pmap_s1_invalidate_kernel(r, final_only);
+	if (pmap == kernel_pmap) {
+		while (va < eva) {
+			if (pmap_tlbi_range_support && (va & va_mask) == 0) {
+				pages = atop(eva - va);
+				if (pages >= TLBI_RANGE_UNIT(0)) {
+					scale = TLBI_RANGE_SCALE(pages);
+					unit_shift =
+					    TLBI_RANGE_UNIT_SHIFT(scale);
+					units = ulmin(pages >> unit_shift,
+					    TLBI_RANGE_MAX_UNITS);
+					pmap_s1_invalidate_range_kernel(
+					    TLBI_RANGE_FIELDS(va, va_shift,
+					    units - 1, scale), final_only);
+					va += ptoa(units << unit_shift);
+					continue;
+				}
+			}
+			pmap_s1_invalidate_kernel(TLBI_VA(va), final_only);
+			va += stride;
+		}
 	} else {
-		start = end = ASID_TO_OPERAND(COOKIE_TO_ASID(pmap->pm_cookie));
-		start |= TLBI_VA(sva);
-		end |= TLBI_VA(eva);
-		for (r = start; r < end; r += TLBI_VA(stride))
-			pmap_s1_invalidate_user(r, final_only);
+		asid = ASID_TO_OPERAND(COOKIE_TO_ASID(pmap->pm_cookie));
+		while (va < eva) {
+			if (pmap_tlbi_range_support && (va & va_mask) == 0) {
+				pages = atop(eva - va);
+				if (pages >= TLBI_RANGE_UNIT(0)) {
+					scale = TLBI_RANGE_SCALE(pages);
+					unit_shift =
+					    TLBI_RANGE_UNIT_SHIFT(scale);
+					units = ulmin(pages >> unit_shift,
+					    TLBI_RANGE_MAX_UNITS);
+					pmap_s1_invalidate_range_user(asid |
+					    TLBI_RANGE_FIELDS(va, va_shift,
+					    units - 1, scale), final_only);
+					va += ptoa(units << unit_shift);
+					continue;
+				}
+			}
+			pmap_s1_invalidate_user(asid | TLBI_VA(va), final_only);
+			va += stride;
+		}
 	}
 	if (pmap_multiple_tlbi) {
 		dsb(ish);
