@@ -2185,10 +2185,9 @@ pmap_s1_invalidate_strided(pmap_t pmap, vm_offset_t sva, vm_offset_t eva,
 	PMAP_ASSERT_STAGE1(pmap);
 	va_shift = TLBI_RANGE_VA_SHIFT;
 	va_mask = (1ul << va_shift) - 1;
-	va = sva;
 	dsb(ishst);
 	if (pmap == kernel_pmap) {
-		while (va < eva) {
+		for (va = sva; va < eva;) {
 			if (pmap_tlbi_range_support && (va & va_mask) == 0) {
 				pages = atop(eva - va);
 				if (pages >= TLBI_RANGE_UNIT(0)) {
@@ -2209,7 +2208,7 @@ pmap_s1_invalidate_strided(pmap_t pmap, vm_offset_t sva, vm_offset_t eva,
 		}
 	} else {
 		asid = ASID_TO_OPERAND(COOKIE_TO_ASID(pmap->pm_cookie));
-		while (va < eva) {
+		for (va = sva; va < eva;) {
 			if (pmap_tlbi_range_support && (va & va_mask) == 0) {
 				pages = atop(eva - va);
 				if (pages >= TLBI_RANGE_UNIT(0)) {
