@@ -2163,70 +2163,75 @@ pmap_invalidate_page(pmap_t pmap, vm_offset_t va, bool final_only)
 }
 
 /*
+ * Invalidate the TLB entries for the mappings in the address range [sva,
+ * eva), using range-based instructions where possible and single-page
+ * instructions otherwise.  When range-based invalidation is supported, the
+ * address range is covered by as few TLBI instructions as possible: the
+ * largest scale whose unit fits within the remaining address range is
+ * selected, and up to TLBI_RANGE_MAX_UNITS units are invalidated per
+ * instruction.  An address that cannot be encoded as a BaseADDR, because
+ * pmap_lpa_enabled is true and the address that is not 64KB aligned, is
+ * invalidated a stride at a time.
+ */
+#define	PMAP_S1_INVALIDATE_LOOP(sva, eva, stride, va_shift, va_mask,	\
+    asid, range_op, single_op, final_only)	do {			\
+	uint64_t _asid = (asid);					\
+	uint64_t _units;						\
+	vm_offset_t _eva = (eva);					\
+	vm_offset_t _stride = (stride);					\
+	vm_offset_t _va;						\
+	vm_offset_t _va_mask = (va_mask);				\
+	vm_size_t _pages;						\
+	int _va_shift = (va_shift);					\
+	int _scale, _unit_shift;					\
+	bool _final_only = (final_only);				\
+									\
+	for (_va = (sva); _va < _eva;) {				\
+		if (pmap_tlbi_range_support && (_va & _va_mask) == 0) {	\
+			_pages = atop(_eva - _va);			\
+			if (_pages >= TLBI_RANGE_UNIT(0)) {		\
+				_scale = TLBI_RANGE_SCALE(_pages);	\
+				_unit_shift =				\
+				    TLBI_RANGE_UNIT_SHIFT(_scale);	\
+				_units = ulmin(_pages >> _unit_shift,	\
+				    TLBI_RANGE_MAX_UNITS);		\
+				range_op(_asid |			\
+				    TLBI_RANGE_FIELDS(_va, _va_shift,	\
+				    _units - 1, _scale), _final_only);	\
+				_va += ptoa(_units << _unit_shift);	\
+				continue;				\
+			}						\
+		}							\
+		single_op(_asid | TLBI_VA(_va), _final_only);		\
+		_va += _stride;						\
+	}								\
+} while (0)
+
+/*
  * Use stride L{1,2}_SIZE when invalidating the TLB entries for L{1,2}_BLOCK
  * mappings.  Otherwise, use stride L3_SIZE.
- *
- * When range-based invalidation is supported, the address range is covered by
- * as few instructions as possible: the largest scale whose unit fits within
- * the remaining address range is selected, and up to TLBI_RANGE_MAX_UNITS
- * units are invalidated per instruction.  An address that cannot be encoded as
- * a BaseADDR -- which, when 52-bit addressing is enabled, means any address
- * that is not 64KB aligned -- is invalidated a stride at a time.
  */
 static __inline void
 pmap_s1_invalidate_strided(pmap_t pmap, vm_offset_t sva, vm_offset_t eva,
     vm_offset_t stride, bool final_only)
 {
-	uint64_t asid, units;
-	vm_offset_t va, va_mask;
-	vm_size_t pages;
-	int scale, unit_shift, va_shift;
+	uint64_t asid;
+	vm_offset_t va_mask;
+	int va_shift;
 
 	PMAP_ASSERT_STAGE1(pmap);
 	va_shift = TLBI_RANGE_VA_SHIFT;
 	va_mask = (1ul << va_shift) - 1;
 	dsb(ishst);
 	if (pmap == kernel_pmap) {
-		for (va = sva; va < eva;) {
-			if (pmap_tlbi_range_support && (va & va_mask) == 0) {
-				pages = atop(eva - va);
-				if (pages >= TLBI_RANGE_UNIT(0)) {
-					scale = TLBI_RANGE_SCALE(pages);
-					unit_shift =
-					    TLBI_RANGE_UNIT_SHIFT(scale);
-					units = ulmin(pages >> unit_shift,
-					    TLBI_RANGE_MAX_UNITS);
-					pmap_s1_invalidate_range_kernel(
-					    TLBI_RANGE_FIELDS(va, va_shift,
-					    units - 1, scale), final_only);
-					va += ptoa(units << unit_shift);
-					continue;
-				}
-			}
-			pmap_s1_invalidate_kernel(TLBI_VA(va), final_only);
-			va += stride;
-		}
+		PMAP_S1_INVALIDATE_LOOP(sva, eva, stride, va_shift, va_mask, 0,
+		    pmap_s1_invalidate_range_kernel, pmap_s1_invalidate_kernel,
+		    final_only);
 	} else {
 		asid = ASID_TO_OPERAND(COOKIE_TO_ASID(pmap->pm_cookie));
-		for (va = sva; va < eva;) {
-			if (pmap_tlbi_range_support && (va & va_mask) == 0) {
-				pages = atop(eva - va);
-				if (pages >= TLBI_RANGE_UNIT(0)) {
-					scale = TLBI_RANGE_SCALE(pages);
-					unit_shift =
-					    TLBI_RANGE_UNIT_SHIFT(scale);
-					units = ulmin(pages >> unit_shift,
-					    TLBI_RANGE_MAX_UNITS);
-					pmap_s1_invalidate_range_user(asid |
-					    TLBI_RANGE_FIELDS(va, va_shift,
-					    units - 1, scale), final_only);
-					va += ptoa(units << unit_shift);
-					continue;
-				}
-			}
-			pmap_s1_invalidate_user(asid | TLBI_VA(va), final_only);
-			va += stride;
-		}
+		PMAP_S1_INVALIDATE_LOOP(sva, eva, stride, va_shift, va_mask,
+		    asid, pmap_s1_invalidate_range_user,
+		    pmap_s1_invalidate_user, final_only);
 	}
 	if (pmap_multiple_tlbi) {
 		dsb(ish);
