@@ -481,15 +481,16 @@ void (*pmap_stage2_invalidate_all)(uint64_t);
  *
  * TG specifies the translation granule size, i.e., PAGE_SIZE.
  */
+#define	TLBI_RANGE_VA_SHIFT		(pmap_lpa_enabled ? 16 : PAGE_SHIFT)
+
 #define	TLBI_RANGE_BADDR_MASK		((1ul << 37) - 1)
 #define	TLBI_RANGE_NUM_SHIFT		39
 #define	TLBI_RANGE_SCALE_SHIFT		44
 #define	TLBI_RANGE_TG_SHIFT		46
 
-#define	TLBI_RANGE_VA_SHIFT		(pmap_lpa_enabled ? 16 : PAGE_SHIFT)
-
 #define	TLBI_RANGE_MAX_UNITS		32
 #define	TLBI_RANGE_MAX_SCALE		3
+
 #define	TLBI_RANGE_UNIT_SHIFT(scale)	(5 * (scale) + 1)
 #define	TLBI_RANGE_UNIT(scale)		(1ul << TLBI_RANGE_UNIT_SHIFT(scale))
 
