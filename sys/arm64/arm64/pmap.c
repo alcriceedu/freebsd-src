@@ -2163,18 +2163,18 @@ pmap_invalidate_page(pmap_t pmap, vm_offset_t va, bool final_only)
 }
 
 /*
- * Invalidate the TLB entries for the mappings in the address range [sva,
+ * Invalidates the TLB entries for the mappings in the address range [sva,
  * eva), using range-based instructions where possible and single-page
  * instructions otherwise.  When range-based invalidation is supported, the
  * address range is covered by as few TLBI instructions as possible: the
  * largest scale whose unit fits within the remaining address range is
  * selected, and up to TLBI_RANGE_MAX_UNITS units are invalidated per
  * instruction.  An address that cannot be encoded as a BaseADDR, because
- * pmap_lpa_enabled is true and the address that is not 64KB aligned, is
- * invalidated a stride at a time.
+ * pmap_lpa_enabled is true and the address is not 64KB aligned, is detected
+ * using va_mask and invalidated one stride at a time.
  */
 #define	PMAP_S1_INVALIDATE_LOOP(sva, eva, stride, va_shift, va_mask,	\
-    asid, range_op, single_op, final_only)	do {			\
+    asid, kvsu, final_only)	do {					\
 	uint64_t _asid = (asid);					\
 	uint64_t _units;						\
 	vm_offset_t _eva = (eva);					\
@@ -2195,14 +2195,15 @@ pmap_invalidate_page(pmap_t pmap, vm_offset_t va, bool final_only)
 				    TLBI_RANGE_UNIT_SHIFT(_scale);	\
 				_units = ulmin(_pages >> _unit_shift,	\
 				    TLBI_RANGE_MAX_UNITS);		\
-				range_op(_asid |			\
+				pmap_s1_invalidate_range_##kvsu(_asid |	\
 				    TLBI_RANGE_FIELDS(_va, _va_shift,	\
 				    _units - 1, _scale), _final_only);	\
 				_va += ptoa(_units << _unit_shift);	\
 				continue;				\
 			}						\
 		}							\
-		single_op(_asid | TLBI_VA(_va), _final_only);		\
+		pmap_s1_invalidate_##kvsu(_asid | TLBI_VA(_va),		\
+		    _final_only);					\
 		_va += _stride;						\
 	}								\
 } while (0)
@@ -2221,17 +2222,16 @@ pmap_s1_invalidate_strided(pmap_t pmap, vm_offset_t sva, vm_offset_t eva,
 
 	PMAP_ASSERT_STAGE1(pmap);
 	va_shift = TLBI_RANGE_VA_SHIFT;
-	va_mask = (1ul << va_shift) - 1;
+	/* va_mask will be 0 unless pmap_lpa_enabled is true. */
+	va_mask = (1ul << va_shift) - PAGE_SIZE;
 	dsb(ishst);
 	if (pmap == kernel_pmap) {
-		PMAP_S1_INVALIDATE_LOOP(sva, eva, stride, va_shift, va_mask, 0,
-		    pmap_s1_invalidate_range_kernel, pmap_s1_invalidate_kernel,
-		    final_only);
+		PMAP_S1_INVALIDATE_LOOP(sva, eva, stride, va_shift, va_mask,
+		    0, kernel, final_only);
 	} else {
 		asid = ASID_TO_OPERAND(COOKIE_TO_ASID(pmap->pm_cookie));
 		PMAP_S1_INVALIDATE_LOOP(sva, eva, stride, va_shift, va_mask,
-		    asid, pmap_s1_invalidate_range_user,
-		    pmap_s1_invalidate_user, final_only);
+		    asid, user, final_only);
 	}
 	if (pmap_multiple_tlbi) {
 		dsb(ish);
